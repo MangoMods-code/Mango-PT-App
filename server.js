@@ -4,6 +4,7 @@ const { FINNHUB_KEY, APP_PASS, DATABASE_URL, PORT = 3000 } = process.env;
 const APP_USER = process.env.APP_USER || 'mango', SECRET = process.env.SESSION_SECRET || APP_PASS;
 if (!APP_PASS || !DATABASE_URL) { console.error('Missing APP_PASS or DATABASE_URL'); process.exit(1); }
 
+let cb = null, fh = null;
 const pool = new Pool({ connectionString: DATABASE_URL, ssl: DATABASE_URL.includes('railway.internal') ? false : { rejectUnauthorized: false } });
 const STOCKS = ['AAPL', 'MSFT', 'GOOGL', 'META', 'NVDA', 'TSLA', 'AMZN', 'LMT', 'NOC', 'WMT'];
 const CRYPTO = ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'ADA'];
@@ -24,7 +25,8 @@ async function init() {
     create table if not exists pos(sym text primary key, qty numeric not null, avg numeric not null);
     create table if not exists ord(id serial primary key, sym text, kind text, price numeric);
     create table if not exists trd(id serial primary key, ts timestamptz default now(), sym text, side text, qty numeric, price numeric, why text, pnl numeric);
-    create table if not exists snap(ts timestamptz default now(), eq numeric);`);
+    create table if not exists snap(ts timestamptz default now(), eq numeric);
+    create table if not exists extra(sym text primary key, kind text);`);
 }
 async function loadOrders() {
   open = {};
@@ -97,7 +99,7 @@ function tick(s, p, prev, fromWs) {
   }
 }
 function coinbase() {
-  const ws = new WebSocket('wss://ws-feed.exchange.coinbase.com');
+  const ws = cb = new WebSocket('wss://ws-feed.exchange.coinbase.com');
   ws.on('open', () => ws.send(JSON.stringify({ type: 'subscribe', product_ids: CRYPTO.map(s => s + '-USD'), channels: ['ticker'] })));
   ws.on('message', m => { try { const d = JSON.parse(m); if (d.type === 'ticker' && d.price) tick(d.product_id.split('-')[0], +d.price, +d.open_24h, true); } catch (e) {} });
   ws.on('close', () => setTimeout(coinbase, 3000));
@@ -105,7 +107,7 @@ function coinbase() {
 }
 function finnhub() {
   if (!FINNHUB_KEY) return;
-  const ws = new WebSocket('wss://ws.finnhub.io?token=' + FINNHUB_KEY);
+  const ws = fh = new WebSocket('wss://ws.finnhub.io?token=' + FINNHUB_KEY);
   ws.on('open', () => STOCKS.forEach(s => ws.send(JSON.stringify({ type: 'subscribe', symbol: s }))));
   ws.on('message', m => { try { const d = JSON.parse(m); if (d.type === 'trade') for (const t of d.data) tick(t.s, t.p, null, true); } catch (e) {} });
   ws.on('close', () => setTimeout(finnhub, 3000));
@@ -114,7 +116,8 @@ function finnhub() {
 // REST quotes: previous close for % change, and last price when the market is closed
 async function pollStocks() {
   if (!FINNHUB_KEY) return;
-  for (const s of STOCKS) {
+  for (const s of [...STOCKS]) {
+    if (prices[s]?.wsT > Date.now() - 60000 && prices[s].prev) continue;
     try {
       const q = await (await fetch(`https://finnhub.io/api/v1/quote?symbol=${s}&token=${FINNHUB_KEY}`)).json();
       if (!q.c) continue;
@@ -134,10 +137,10 @@ app.post('/api/login', (q, r) => {
 
 app.get('/api/state', auth, W(async (q, r) => {
   const Q = s => pool.query(s).then(x => x.rows);
-  const [a, ps, os, ts, sn] = await Promise.all([
+  const [a, ps, os, ts, sn, ex] = await Promise.all([
     Q('select cash from acct'), Q('select * from pos order by sym'), Q('select * from ord'),
     Q('select * from trd order by id desc limit 30'),
-    Q("select eq from snap where ts>now()-interval '24 hours' order by ts")]);
+    Q("select eq from snap where ts>now()-interval '24 hours' order by ts"), Q('select * from extra')]);
   r.json({
     cash: +a[0].cash,
     pos: ps.map(x => ({ sym: x.sym, qty: +x.qty, avg: +x.avg })),
@@ -145,6 +148,7 @@ app.get('/api/state', auth, W(async (q, r) => {
     trd: ts.map(x => ({ ts: x.ts, sym: x.sym, side: x.side, qty: +x.qty, price: +x.price, why: x.why, pnl: x.pnl == null ? null : +x.pnl })),
     snap: sn.map(x => +x.eq),
     prices: Object.fromEntries(Object.entries(prices).map(([k, v]) => [k, { p: v.p, prev: v.prev }])),
+    extra: ex.map(x => ({ sym: x.sym, kind: x.kind })),
     live: !!FINNHUB_KEY
   });
 }));
@@ -189,6 +193,77 @@ app.post('/api/reset', auth, W(async (q, r) => {
   r.json({ ok: 1 });
 }));
 
+// ---------- Stage 2: search, stats, history ----------
+const cache = {};
+const cached = async (k, ttl, f) => { const c = cache[k]; if (c && Date.now() - c.t < ttl) return c.v; const v = await f(); cache[k] = { t: Date.now(), v }; return v; };
+const getJ = async u => { const r = await fetch(u, { headers: { 'User-Agent': 'Mozilla/5.0' } }); if (!r.ok) throw Error('Data source error ' + r.status); return r.json(); };
+const FH = p => `https://finnhub.io/api/v1/${p}${p.includes('?') ? '&' : '?'}token=${FINNHUB_KEY}`;
+const CBX = 'https://api.exchange.coinbase.com';
+
+app.get('/api/search', auth, W(async (q, r) => {
+  const t = String(q.query.q || '').trim().toUpperCase();
+  if (!t) return r.json([]);
+  const prods = await cached('prods', 6e5, async () => (await getJ(CBX + '/products')).filter(p => p.quote_currency === 'USD' && p.status === 'online').map(p => p.base_currency));
+  const out = prods.filter(b => b.startsWith(t)).slice(0, 6).map(b => ({ sym: b, name: b + ' (crypto)', kind: 'crypto' }));
+  if (FINNHUB_KEY) {
+    const d = await getJ(FH('search?q=' + encodeURIComponent(t)));
+    for (const x of d.result || []) if (x.type === 'Common Stock' && !x.symbol.includes('.') && out.length < 14) out.push({ sym: x.symbol, name: x.description, kind: 'stock' });
+  }
+  r.json(out);
+}));
+
+async function seed(sym, kind) {
+  if (kind === 'crypto') {
+    const [t, s] = await Promise.all([getJ(`${CBX}/products/${sym}-USD/ticker`), getJ(`${CBX}/products/${sym}-USD/stats`)]);
+    tick(sym, +t.price, +s.open, false);
+  } else {
+    const d = await getJ(FH('quote?symbol=' + sym));
+    if (!d.c) throw Error('No price found for ' + sym);
+    tick(sym, d.c, d.pc, false);
+  }
+}
+app.post('/api/track', auth, W(async (q, r) => {
+  const { sym, kind } = q.body;
+  if (!/^[A-Z0-9]{1,10}$/.test(sym)) throw Error('Bad symbol');
+  const list = kind === 'crypto' ? CRYPTO : STOCKS;
+  if (!list.includes(sym)) {
+    if (kind !== 'crypto' && STOCKS.length >= 30) throw Error('Live stock limit reached (30 on the free plan)');
+    await seed(sym, kind);
+    list.push(sym);
+    await pool.query('insert into extra values($1,$2) on conflict do nothing', [sym, kind]);
+    if (kind === 'crypto') { if (cb?.readyState === 1) cb.send(JSON.stringify({ type: 'subscribe', product_ids: [sym + '-USD'], channels: ['ticker'] })); }
+    else if (fh?.readyState === 1) fh.send(JSON.stringify({ type: 'subscribe', symbol: sym }));
+  }
+  r.json({ ok: 1 });
+}));
+
+app.get('/api/stats/:sym', auth, W(async (q, r) => {
+  const s = q.params.sym;
+  r.json(await cached('st' + s, 6e4, async () => {
+    if (CRYPTO.includes(s)) {
+      const d = await getJ(`${CBX}/products/${s}-USD/stats`);
+      return { name: s, rows: [['Open (24h)', +d.open], ['High (24h)', +d.high], ['Low (24h)', +d.low], ['Volume (24h)', +d.volume, 'n'], ['Volume (30d)', +d.volume_30day, 'n']] };
+    }
+    const [qt, pr, me] = await Promise.all([getJ(FH('quote?symbol=' + s)), getJ(FH('stock/profile2?symbol=' + s)), getJ(FH('stock/metric?symbol=' + s + '&metric=all'))]);
+    const m = me.metric || {};
+    return { name: pr.name || s, rows: [['Open', qt.o], ['High', qt.h], ['Low', qt.l], ['Previous close', qt.pc], ['52-week high', m['52WeekHigh']], ['52-week low', m['52WeekLow']], ['Market cap', pr.marketCapitalization ? pr.marketCapitalization * 1e6 : null, 'c'], ['P/E (TTM)', m.peTTM, 'n'], ['Beta', m.beta, 'n'], ['Dividend yield', m.dividendYieldIndicatedAnnual, 'p']] };
+  }));
+}));
+
+const RG = { '1D': { cb: [300, 86400], y: ['1d', '5m'] }, '1W': { cb: [3600, 604800], y: ['5d', '15m'] }, '1M': { cb: [21600, 2592000], y: ['1mo', '1h'] }, '3M': { cb: [86400, 7776000], y: ['3mo', '1d'] } };
+app.get('/api/candles/:sym', auth, W(async (q, r) => {
+  const s = q.params.sym, rg = RG[q.query.r] ? q.query.r : '1D', g = RG[rg];
+  r.json(await cached('cd' + s + rg, 3e4, async () => {
+    if (CRYPTO.includes(s)) {
+      const end = new Date(), start = new Date(end - g.cb[1] * 1000);
+      const d = await getJ(`${CBX}/products/${s}-USD/candles?granularity=${g.cb[0]}&start=${start.toISOString()}&end=${end.toISOString()}`);
+      return d.map(x => ({ t: x[0], l: x[1], h: x[2], o: x[3], c: x[4] })).sort((a, b) => a.t - b.t);
+    }
+    const d = (await getJ(`https://query1.finance.yahoo.com/v8/finance/chart/${s}?range=${g.y[0]}&interval=${g.y[1]}`)).chart.result[0], z = d.indicators.quote[0];
+    return d.timestamp.map((t, i) => ({ t, o: z.open[i], h: z.high[i], l: z.low[i], c: z.close[i] })).filter(x => x.c != null && x.o != null);
+  }));
+}));
+
 // equity snapshots for the portfolio chart
 setInterval(async () => {
   try {
@@ -200,6 +275,7 @@ setInterval(async () => {
 
 (async () => {
   await init(); await loadOrders();
-  coinbase(); finnhub(); pollStocks(); setInterval(pollStocks, 20000);
+  for (const x of (await pool.query('select * from extra')).rows) { const l = x.kind === 'crypto' ? CRYPTO : STOCKS; if (!l.includes(x.sym)) l.push(x.sym); }
+  coinbase(); finnhub(); pollStocks(); setInterval(pollStocks, 60000);
   server.listen(PORT, () => console.log('Mango running on ' + PORT));
 })();
