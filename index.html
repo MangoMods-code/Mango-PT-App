@@ -3,7 +3,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Mango"><meta name="theme-color" content="#16111f">
+<meta name="apple-mobile-web-app-title" content="Mango"><meta name="theme-color" content="#16111f"><link rel="manifest" href="/manifest.json">
 <title>Mango</title>
 <style>
 :root{--bg:#16111f;--card:#221a33;--line:#33294a;--tx:#f7f2ff;--mu:#9d92b8;--up:#38d9a9;--dn:#ff6b7a;--ac:#ffb02e}
@@ -43,7 +43,7 @@ nav button{flex:1;background:none;color:var(--mu);border-radius:0;padding:14px}n
 <input id="u" placeholder="Username" autocomplete="username" autocapitalize="off"><input id="pw" type="password" placeholder="Password" autocomplete="current-password">
 <button>Log in</button><p id="err" class="dn" style="text-align:center"></p></form>
 <main id="app" class="hide"><div id="v"></div>
-<nav><button id="t-p" onclick="setTab('p')">Portfolio</button><button id="t-m" onclick="setTab('m')">Market</button></nav></main>
+<nav><button id="t-p" onclick="setTab('p')">Portfolio</button><button id="t-m" onclick="setTab('m')">Market</button><button id="t-s" onclick="setTab('s')">Settings</button></nav></main>
 <div id="sheet" class="hide"></div><div id="toast"></div>
 <script>
 const $=s=>document.querySelector(s);
@@ -64,7 +64,7 @@ async function api(path,method='GET',body){
 function connect(){
   if(ws&&ws.readyState<2)return;
   ws=new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/stream?t='+T);
-  ws.onmessage=e=>{const d=JSON.parse(e.data);P[d.s]={p:d.p,prev:d.v??P[d.s]?.prev};(H[d.s]??=[]).push(d.p);if(H[d.s].length>300)H[d.s].shift();queue()};
+  ws.onmessage=e=>{const d=JSON.parse(e.data);if(d.alert){toast(`🔔 ${d.alert.sym} ${d.alert.dir==='above'?'rose to':'fell to'} ${fmt(d.alert.price)}`);load().catch(()=>{});return}P[d.s]={p:d.p,prev:d.v??P[d.s]?.prev};(H[d.s]??=[]).push(d.p);if(H[d.s].length>300)H[d.s].shift();queue()};
   ws.onclose=()=>{if(T)setTimeout(connect,2000)}}
 function queue(){if(!timer)timer=setTimeout(()=>{timer=0;paint()},700)}
 async function load(){S=await api('state');P=S.prices;S.extra.forEach(x=>NAME[x.sym]??=x.kind==='crypto'?'Crypto':'Stock');connect();render()}
@@ -80,14 +80,14 @@ const mkt=s=>`<div class="row" onclick="openSheet('${s}')"><div><b>${s}</b><smal
 const posRow=p=>`<div class="row" onclick="openSheet('${p.sym}')"><div><b>${p.sym}</b><small>${+p.qty.toFixed(6)} @ ${fmt(p.avg)}</small></div><div class="r"><b data-val="${p.sym}"></b><span data-pnl="${p.sym}"></span></div></div>`;
 function render(){
   if(!S)return;
-  $('#t-p').className=tab==='p'?'on':'';$('#t-m').className=tab==='m'?'on':'';
-  $('#v').innerHTML=tab==='p'?`<h2>Portfolio</h2><div class="big" id="eq"></div><div id="pl"></div><div class="chart" id="ch"></div>
+  $('#t-p').className=tab==='p'?'on':'';$('#t-m').className=tab==='m'?'on':'';$('#t-s').className=tab==='s'?'on':'';
+  $('#v').innerHTML=tab==='s'?viewS():tab==='p'?`<h2>Portfolio</h2><div class="big" id="eq"></div><div id="pl"></div><div class="chart" id="ch"></div>
   <div class="stats"><div><small>Cash</small><b>${fmt(S.cash)}</b></div><div><small>Positions</small><b>${S.pos.length}</b></div><div><small>Open orders</small><b>${S.ord.length}</b></div></div>
-  <h3>Positions</h3>${S.pos.map(posRow).join('')||'<p class="mu">No positions yet. Open the Market tab to place your first trade.</p>'}
-  <h3>Recent trades</h3>${S.trd.slice(0,10).map(t=>`<div class="row"><div><b>${t.side==='buy'?'Bought':'Sold'} ${t.sym}</b><small>${t.why} · ${new Date(t.ts).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</small></div><div class="r"><b>${fmt(t.qty*t.price)}</b>${t.pnl==null?'':`<span class="${cls(t.pnl)}">${t.pnl>=0?'+':''}${fmt(t.pnl)}</span>`}</div></div>`).join('')||'<p class="mu">Your trades will show up here.</p>'}
+  ${on('analytics')?'<div class="box" id="an">Loading performance…</div>':''}<h3>Positions</h3>${S.pos.map(posRow).join('')||'<p class="mu">No positions yet. Open the Market tab to place your first trade.</p>'}
+  ${on('alerts')&&S.alerts.length?'<h3>Price alerts</h3>'+S.alerts.map(a=>`<div class="row"><div><b>${a.sym}</b><small>${a.dir==='above'?'Rises to':'Falls to'} ${fmt(a.price)}</small></div><div class="r"><span class="${a.fired?'up':'mu'}">${a.fired?'Triggered':'Waiting'}</span><button class="g chip" onclick="delAlert(${a.id})">Remove</button></div></div>`).join(''):''}<h3>Recent trades</h3>${S.trd.slice(0,10).map(t=>`<div class="row" ${on('journal')?`onclick="note(${t.id})"`:''}><div><b>${{buy:'Bought',sell:'Sold',div:'Dividend'}[t.side]} ${t.sym}</b><small>${t.why} · ${new Date(t.ts).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</small>${on('journal')&&t.note?`<br><small>📝 ${esc(t.note)}</small>`:''}</div><div class="r"><b>${fmt(t.qty*t.price)}</b>${t.pnl==null?'':`<span class="${cls(t.pnl)}">${t.pnl>=0?'+':''}${fmt(t.pnl)}</span>`}</div></div>`).join('')||'<p class="mu">Your trades will show up here.</p>'}
   <p style="margin-top:30px"><button class="g" onclick="resetAcct()">Reset account to $10,000</button></p>`
-  :`<h2>Market</h2><input id="q" placeholder="Search any stock or coin" oninput="search()"><div id="res"></div>${S.live?'':'<p class="mu">Stock prices are off. Add FINNHUB_KEY in Railway to turn them on.</p>'}<h3>Stocks</h3>${STK.map(mkt).join('')}<h3>Crypto</h3>${CR.map(mkt).join('')}${S.extra.length?'<h3>Added by you</h3>'+S.extra.map(x=>mkt(x.sym)).join(''):''}`;
-  paint()}
+  :`<h2>Market</h2><input id="q" placeholder="Search any stock or coin" oninput="search()"><div id="res"></div>${on('watch')&&S.watch.length?'<h3>Watchlist</h3>'+S.watch.map(mkt).join(''):''}${S.live?'':'<p class="mu">Stock prices are off. Add FINNHUB_KEY in Railway to turn them on.</p>'}<h3>Stocks</h3>${STK.map(mkt).join('')}<h3>Crypto</h3>${CR.map(mkt).join('')}${S.extra.length?'<h3>Added by you</h3>'+S.extra.map(x=>mkt(x.sym)).join(''):''}`;
+  if(tab==='p'&&on('analytics'))loadAn();if(tab==='s')pushUI();paint()}
 function paint(){
   if(!S)return;
   const e=eq(),el=$('#eq');
@@ -104,10 +104,10 @@ const orderBox=(kind,title,chips)=>{
   <div>${chips.map(c=>`<button class="g chip" onclick="fill('${kind}',${c})">${c>0?'+':''}${c}%</button>`).join('')} <button class="chip" onclick="setOrder('${kind}')">Set ${kind==='stop'?'stop loss':'take profit'}</button></div></div>`};
 function openSheet(s){
   cur=s;const p=S.pos.find(x=>x.sym===s);
-  $('#sheet').innerHTML=`<div class="hd"><div><b style="font-size:24px">${s}</b><br><small>${NAME[s]}</small></div><button class="x" onclick="closeSheet()">Close</button></div>
+  $('#sheet').innerHTML=`<div class="hd"><div><b style="font-size:24px">${s}</b><br><small>${NAME[s]}</small></div>${on('watch')?`<button class="x" onclick="toggleWatch()">${S.watch.includes(s)?'★ Watching':'☆ Watch'}</button>`:''}<button class="x" onclick="closeSheet()">Close</button></div>
   <div class="big" data-px="${s}"></div><span data-ch="${s}"></span> <small>today</small><div class="tabs" id="rg">${['1D','1W','1M','3M'].map(r=>`<button class="g" data-r="${r}" onclick="loadC('${r}')">${r}</button>`).join('')}<button class="g" id="tt" onclick="togType()">Line</button></div><div class="chart" id="sch" style="height:200px"></div><div class="box"><h4>Stats</h4><div class="grid" id="stats"><small>Loading…</small></div></div>
   ${p?`<div class="box"><h4>Your position</h4><div class="two"><span>Amount</span><b>${+p.qty.toFixed(6)}</b></div><div class="two"><span>Average price</span><b>${fmt(p.avg)}</b></div><div class="two"><span>Value</span><b data-val="${s}"></b></div><div class="two"><span>Profit / loss</span><b data-pnl="${s}"></b></div></div>`:''}
-  <div class="box"><h4>Buy</h4><small>You have ${fmt(S.cash)} to spend</small><input id="usd" type="number" inputmode="decimal" placeholder="Amount in dollars">
+  ${on('alerts')?alertBox(s):''}<div class="box"><h4>Buy</h4><small>You have ${fmt(S.cash)} to spend</small><input id="usd" type="number" inputmode="decimal" placeholder="Amount in dollars">
   <div>${[25,50,100].map(n=>`<button class="g chip" onclick="setUsd(${n})">${n===100?'Max':n+'%'}</button>`).join('')} <button class="b chip" onclick="buy()">Buy ${s}</button></div></div>
   ${p?`<div class="box"><h4>Sell</h4><div>${[25,50,75,100].map(n=>`<button class="s chip" onclick="sell(${n})">${n===100?'Sell all':n+'%'}</button>`).join('')}</div></div>${orderBox('stop','Stop loss (sell if price falls to)',[-3,-5,-10])}${orderBox('take','Take profit (sell if price rises to)',[3,5,10])}`
   :'<div class="box"><h4>Stop loss and take profit</h4><small>Buy first, then set them here. They run on the server, so they trigger even when the app is closed.</small></div>'}`;
@@ -137,10 +137,36 @@ function drawC(){
   if(ty==='l'){chart(c.map(x=>x.c),el);return}
   const w=340,h=200,mn=Math.min(...c.map(x=>x.l)),r=(Math.max(...c.map(x=>x.h))-mn)||1,bw=w/c.length,y=v=>+(h-6-(v-mn)/r*(h-12)).toFixed(1);
   el.innerHTML=`<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${c.map((x,i)=>{const k=x.c>=x.o?'#38d9a9':'#ff6b7a',cx=(i+.5)*bw;return `<line x1="${cx}" x2="${cx}" y1="${y(x.h)}" y2="${y(x.l)}" stroke="${k}" vector-effect="non-scaling-stroke"/><rect x="${cx-bw*.35}" width="${bw*.7}" y="${y(Math.max(x.o,x.c))}" height="${Math.max(1,Math.abs(y(x.o)-y(x.c)))}" fill="${k}"/>`}).join('')}</svg>`}
+const FEAT={watch:'Watchlist',alerts:'Price alerts',analytics:'Performance stats',journal:'Trade notes'};
+let FS=JSON.parse(localStorage.mangoF||'{}');const on=k=>FS[k]!==false;
+const esc=s=>String(s).replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+function tog(k){FS[k]=!on(k);localStorage.mangoF=JSON.stringify(FS);render()}
+const viewS=()=>`<h2>Settings</h2><p class="mu">Turn features on or off. These switches are saved on this device.</p>${Object.entries(FEAT).map(([k,n])=>`<div class="row"><b>${n}</b><button class="${on(k)?'':'g'}" onclick="tog('${k}')">${on(k)?'On':'Off'}</button></div>`).join('')}<div class="row"><div><b>Dividend income</b><br><small>Saved on the server</small></div><button class="${S.divOn?'':'g'}" onclick="act(()=>api('divs','POST',{on:!S.divOn}),'Dividends '+(S.divOn?'off':'on'))">${S.divOn?'On':'Off'}</button></div><h3>Notifications</h3><div class="box" id="pushbox"><small>Checking…</small></div>`;
+const alertBox=s=>`<div class="box"><h4>Price alert</h4>${S.alerts.filter(a=>a.sym===s&&!a.fired).map(a=>`<div class="two"><span>${a.dir==='above'?'Rises to':'Falls to'} <b>${fmt(a.price)}</b></span><button class="g chip" onclick="delAlert(${a.id})">Remove</button></div>`).join('')}<input id="al" type="number" inputmode="decimal" placeholder="Alert me at this price"><button class="chip" onclick="setAlert()">Set alert</button><br><small>Alerts show up as a banner while the app is open, and stay listed in Portfolio.</small></div>`;
+const toggleWatch=()=>act(()=>api('watch','POST',{sym:cur,on:!S.watch.includes(cur)}),S.watch.includes(cur)?'Removed from watchlist':'Added to watchlist');
+const setAlert=()=>{const v=+$('#al').value;if(!(v>0))return toast('Enter a price',1);act(()=>api('alert','POST',{sym:cur,price:v}),'Alert set')};
+const delAlert=id=>act(()=>api('alert/'+id,'DELETE'),'Alert removed');
+function note(id){const t=S.trd.find(x=>x.id===id),v=prompt('Note for this trade',t.note||'');if(v!==null)act(()=>api('note','POST',{id,note:v}),'Note saved')}
+async function loadAn(){try{const a=await api('analytics'),el=$('#an');if(!el)return;
+  const m=v=>v==null?'–':(v>=0?'+':'')+fmt(v),p=v=>v==null?'–':v.toFixed(1)+'%',c=(l,v,k='')=>`<div><small>${l}</small><b class="${k}">${v}</b></div>`;
+  el.innerHTML=`<h4>Performance</h4><div class="grid">${c('Win rate',p(a.win))}${c('Closed trades',a.closed)}${c('Average win',m(a.avgWin),'up')}${c('Average loss',m(a.avgLoss),'dn')}${c('Best trade',m(a.best))}${c('Worst trade',m(a.worst))}${c('Realized P/L',m(a.realized))}${c('Max drawdown',p(a.maxDD))}${c('Profit factor',a.pf==null?'–':a.pf.toFixed(2))}${c('Dividends',fmt(a.dividends))}${c('You vs S&P 500',pc(eq()/100-100)+' vs '+(a.spy==null?'–':pc(a.spy)))}</div>`}catch(e){}}
+const b64=s=>{const r=atob((s+'='.repeat((4-s.length%4)%4)).replace(/-/g,'+').replace(/_/g,'/'));return Uint8Array.from(r,c=>c.charCodeAt(0))};
+async function pushUI(){
+  const el=$('#pushbox');if(!el)return;
+  if(!('serviceWorker' in navigator)||!('PushManager' in window)){el.innerHTML='<small>Not available here. On iPhone, add Mango to your Home Screen (Share, then Add to Home Screen) and open it from the icon. Needs iOS 16.4 or newer.</small>';return}
+  try{const reg=await navigator.serviceWorker.ready,sub=await reg.pushManager.getSubscription();
+  el.innerHTML=sub?`<b>On for this device</b><br><button class="g chip" onclick="pushTest()">Send test</button><button class="g chip" onclick="pushOff()">Turn off</button>`:`<small>Get a notification on this device when a price alert, stop loss, or take profit triggers, even when the app is closed.</small><br><button class="chip" onclick="pushEnable()">Turn on notifications</button>`}catch(e){el.innerHTML='<small>Notifications could not start on this device.</small>'}}
+async function pushEnable(){try{
+  if(await Notification.requestPermission()!=='granted')return toast('Notifications are blocked. Allow them in iOS Settings, then Notifications, then Mango.',1);
+  const {key}=await api('push/key'),reg=await navigator.serviceWorker.ready;
+  const sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64(key)});
+  await api('push/sub','POST',{sub:sub.toJSON()});toast('Notifications on');pushUI()}catch(e){if(e.message!=='auth')toast(e.message,1)}}
+async function pushOff(){try{const reg=await navigator.serviceWorker.ready,sub=await reg.pushManager.getSubscription();if(sub){await api('push/unsub','POST',{endpoint:sub.endpoint});await sub.unsubscribe()}pushUI()}catch(e){}}
+const pushTest=()=>api('push/test','POST').then(()=>toast('Test sent')).catch(e=>toast(e.message,1));
+if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
 $('#login').onsubmit=async e=>{e.preventDefault();$('#err').textContent='';
   try{const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:$('#u').value,p:$('#pw').value})});
   const j=await r.json();if(!r.ok)throw Error(j.error);T=j.token;localStorage.mango=T;await start()}catch(x){$('#err').textContent=x.message}};
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&T&&S)load().catch(()=>{})});
 setTimeout(async()=>{if(!T)return show('login');try{await start()}catch(e){if(e.message!=='auth'){show('login');$('#err').textContent='Could not reach the server. Check your connection.'}}},1300);
 </script></body></html>
-

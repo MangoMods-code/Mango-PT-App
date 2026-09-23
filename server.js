@@ -1,5 +1,5 @@
 const express = require('express'), http = require('http'), crypto = require('crypto');
-const WebSocket = require('ws'), { Pool } = require('pg');
+const WebSocket = require('ws'), { Pool } = require('pg'), webpush = require('web-push');
 const { FINNHUB_KEY, APP_PASS, DATABASE_URL, PORT = 3000 } = process.env;
 const APP_USER = process.env.APP_USER || 'mango', SECRET = process.env.SESSION_SECRET || APP_PASS;
 if (!APP_PASS || !DATABASE_URL) { console.error('Missing APP_PASS or DATABASE_URL'); process.exit(1); }
@@ -9,7 +9,7 @@ const pool = new Pool({ connectionString: DATABASE_URL, ssl: DATABASE_URL.includ
 const STOCKS = ['AAPL', 'MSFT', 'GOOGL', 'META', 'NVDA', 'TSLA', 'AMZN', 'LMT', 'NOC', 'WMT'];
 const CRYPTO = ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'ADA'];
 const prices = {}, lastSent = {}, firing = new Set();
-let open = {};
+let open = {}, alerts = {}, divOn = true;
 
 // ---------- auth ----------
 const sign = e => e + '.' + crypto.createHmac('sha256', SECRET).update(String(e)).digest('hex');
@@ -26,7 +26,14 @@ async function init() {
     create table if not exists ord(id serial primary key, sym text, kind text, price numeric);
     create table if not exists trd(id serial primary key, ts timestamptz default now(), sym text, side text, qty numeric, price numeric, why text, pnl numeric);
     create table if not exists snap(ts timestamptz default now(), eq numeric);
-    create table if not exists extra(sym text primary key, kind text);`);
+    create table if not exists extra(sym text primary key, kind text);
+    create table if not exists watch(sym text primary key);
+    create table if not exists alert(id serial primary key, sym text, dir text, price numeric, fired boolean default false, ts timestamptz default now());
+    create table if not exists divpaid(sym text, ex text, primary key(sym, ex));
+    create table if not exists kv(k text primary key, v text);
+    create table if not exists push(endpoint text primary key, sub text);
+    alter table trd add column if not exists note text;
+    alter table pos add column if not exists since timestamptz default now();`);
 }
 async function loadOrders() {
   open = {};
@@ -77,6 +84,7 @@ async function check(s, p) {
   try {
     const r = (await pool.query('select qty from pos where sym=$1', [s])).rows[0];
     if (r) await trade(s, 'sell', +r.qty, hit.kind === 'stop' ? 'stop loss' : 'take profit');
+    if (r) sendPush(hit.kind === 'stop' ? 'Stop loss hit' : 'Take profit hit', `Sold all ${s} at $${prices[s].p.toFixed(prices[s].p < 1 ? 5 : 2)}`);
     await pool.query('delete from ord where sym=$1', [s]);
     await loadOrders();
   } catch (e) { console.error('order error', e.message); } finally { firing.delete(s); }
@@ -90,7 +98,7 @@ wss.on('connection', (c, q) => { if (!valid(new URL(q.url, 'http://x').searchPar
 function tick(s, p, prev, fromWs) {
   const o = prices[s] || {};
   prices[s] = { p, prev: prev || o.prev, t: Date.now(), wsT: fromWs ? Date.now() : o.wsT };
-  check(s, p);
+  check(s, p); alertCheck(s, p);
   const n = Date.now();
   if (n - (lastSent[s] || 0) > 250) {
     lastSent[s] = n;
@@ -137,17 +145,18 @@ app.post('/api/login', (q, r) => {
 
 app.get('/api/state', auth, W(async (q, r) => {
   const Q = s => pool.query(s).then(x => x.rows);
-  const [a, ps, os, ts, sn, ex] = await Promise.all([
+  const [a, ps, os, ts, sn, ex, wl, al] = await Promise.all([
     Q('select cash from acct'), Q('select * from pos order by sym'), Q('select * from ord'),
     Q('select * from trd order by id desc limit 30'),
-    Q("select eq from snap where ts>now()-interval '24 hours' order by ts"), Q('select * from extra')]);
+    Q("select eq from snap where ts>now()-interval '24 hours' order by ts"), Q('select * from extra'), Q('select * from watch'), Q('select * from alert order by id desc limit 40')]);
   r.json({
     cash: +a[0].cash,
     pos: ps.map(x => ({ sym: x.sym, qty: +x.qty, avg: +x.avg })),
     ord: os.map(x => ({ id: x.id, sym: x.sym, kind: x.kind, price: +x.price })),
-    trd: ts.map(x => ({ ts: x.ts, sym: x.sym, side: x.side, qty: +x.qty, price: +x.price, why: x.why, pnl: x.pnl == null ? null : +x.pnl })),
+    trd: ts.map(x => ({ id: x.id, note: x.note, ts: x.ts, sym: x.sym, side: x.side, qty: +x.qty, price: +x.price, why: x.why, pnl: x.pnl == null ? null : +x.pnl })),
     snap: sn.map(x => +x.eq),
     prices: Object.fromEntries(Object.entries(prices).map(([k, v]) => [k, { p: v.p, prev: v.prev }])),
+    watch: wl.map(x => x.sym), alerts: al.map(x => ({ id: x.id, sym: x.sym, dir: x.dir, price: +x.price, fired: x.fired })), divOn,
     extra: ex.map(x => ({ sym: x.sym, kind: x.kind })),
     live: !!FINNHUB_KEY
   });
@@ -264,6 +273,114 @@ app.get('/api/candles/:sym', auth, W(async (q, r) => {
   }));
 }));
 
+// ---------- Stage 3: watchlist, alerts, journal, analytics, dividends ----------
+function alertCheck(s, p) {
+  for (const a of alerts[s] || []) {
+    if (a.fired || !((a.dir === 'above' && p >= +a.price) || (a.dir === 'below' && p <= +a.price))) continue;
+    a.fired = true;
+    pool.query('update alert set fired=true where id=$1', [a.id]).catch(() => {});
+    const m = JSON.stringify({ alert: { sym: s, dir: a.dir, price: +a.price } });
+    sendPush('Price alert', `${s} ${a.dir === 'above' ? 'rose to' : 'fell to'} $${+a.price}`);
+    wss.clients.forEach(c => c.readyState === 1 && c.send(m));
+  }
+}
+async function loadAlerts() {
+  alerts = {};
+  for (const a of (await pool.query('select * from alert where not fired')).rows) (alerts[a.sym] ??= []).push(a);
+}
+app.post('/api/watch', auth, W(async (q, r) => {
+  const { sym, on } = q.body;
+  if (on) await pool.query('insert into watch values($1) on conflict do nothing', [sym]); else await pool.query('delete from watch where sym=$1', [sym]);
+  r.json({ ok: 1 });
+}));
+app.post('/api/alert', auth, W(async (q, r) => {
+  const { sym, price } = q.body, p = prices[sym]?.p;
+  if (!p || !(price > 0) || price === p) throw Error('Pick a price different from the current one');
+  await pool.query('insert into alert(sym,dir,price) values($1,$2,$3)', [sym, price > p ? 'above' : 'below', price]);
+  await loadAlerts(); r.json({ ok: 1 });
+}));
+app.delete('/api/alert/:id', auth, W(async (q, r) => { await pool.query('delete from alert where id=$1', [q.params.id]); await loadAlerts(); r.json({ ok: 1 }); }));
+app.post('/api/note', auth, W(async (q, r) => { await pool.query('update trd set note=$1 where id=$2', [String(q.body.note || '').slice(0, 500), q.body.id]); r.json({ ok: 1 }); }));
+app.post('/api/divs', auth, W(async (q, r) => {
+  divOn = !!q.body.on;
+  await pool.query("insert into kv values('div',$1) on conflict(k) do update set v=$1", [divOn ? 'on' : 'off']);
+  r.json({ ok: 1 });
+}));
+app.get('/api/analytics', auth, W(async (q, r) => {
+  const sum = a => a.reduce((x, y) => x + y, 0);
+  const t = (await pool.query("select pnl from trd where side='sell'")).rows.map(x => +x.pnl), w = t.filter(x => x > 0), l = t.filter(x => x < 0);
+  const dv = +(await pool.query("select coalesce(sum(qty*price),0) s from trd where side='div'")).rows[0].s;
+  const eqs = (await pool.query('select ts, eq from snap order by ts')).rows;
+  let peak = 0, dd = 0;
+  for (const e of eqs) { peak = Math.max(peak, +e.eq); dd = Math.min(dd, (+e.eq - peak) / peak); }
+  let spy = null;
+  if (eqs.length) try {
+    const t0 = new Date(eqs[0].ts), res = (await cached('spy' + t0.getTime(), 36e5, () => getJ(`https://query1.finance.yahoo.com/v8/finance/chart/SPY?period1=${Math.floor(t0 / 1000) - 864000}&period2=${Math.floor(Date.now() / 1000) + 86400}&interval=1d`))).chart.result[0];
+    const cl = res.indicators.quote[0].close; let i0 = 0;
+    res.timestamp.forEach((x, i) => { if (x * 1000 <= t0 && cl[i] != null) i0 = i; });
+    spy = (cl.filter(x => x != null).pop() / cl[i0] - 1) * 100;
+  } catch (e) {}
+  r.json({ closed: t.length, win: t.length ? w.length / t.length * 100 : null, avgWin: w.length ? sum(w) / w.length : null, avgLoss: l.length ? sum(l) / l.length : null, best: t.length ? Math.max(...t) : null, worst: t.length ? Math.min(...t) : null, realized: sum(t), dividends: dv, maxDD: dd * 100, pf: l.length ? sum(w) / -sum(l) : null, spy });
+}));
+// dividends: credited when a held stock's ex-dividend date passes (checked every 6 hours)
+async function divJob() {
+  if (!divOn) return;
+  try {
+    for (const p of (await pool.query('select * from pos')).rows) {
+      if (CRYPTO.includes(p.sym)) continue;
+      const d = (await getJ(`https://query1.finance.yahoo.com/v8/finance/chart/${p.sym}?range=3mo&interval=1d&events=div`)).chart.result[0].events?.dividends || {};
+      for (const v of Object.values(d)) {
+        if (v.date * 1000 < new Date(p.since) || (await pool.query('select 1 from divpaid where sym=$1 and ex=$2', [p.sym, String(v.date)])).rows[0]) continue;
+        await pool.query('insert into divpaid values($1,$2)', [p.sym, String(v.date)]);
+        await pool.query('update acct set cash=cash+$1 where id=1', [p.qty * v.amount]);
+        await pool.query("insert into trd(sym,side,qty,price,why) values($1,'div',$2,$3,'dividend')", [p.sym, p.qty, v.amount]);
+      }
+    }
+  } catch (e) { console.error('dividends', e.message); }
+}
+
+// ---------- Stage 3b: push notifications (work when the app is closed) ----------
+let pushOn = false, VAPID_PUB = '';
+async function initPush() {
+  try {
+    const g = async k => (await pool.query('select v from kv where k=$1', [k])).rows[0]?.v;
+    let pub = await g('vapid_pub'), priv = await g('vapid_priv');
+    if (!pub || !priv) {
+      ({ publicKey: pub, privateKey: priv } = webpush.generateVAPIDKeys());
+      await pool.query("insert into kv values('vapid_pub',$1),('vapid_priv',$2) on conflict(k) do update set v=excluded.v", [pub, priv]);
+    }
+    webpush.setVapidDetails(process.env.VAPID_EMAIL || 'mailto:mango-app@example.com', pub, priv);
+    VAPID_PUB = pub; pushOn = true;
+  } catch (e) { console.error('push setup', e.message); }
+}
+async function sendPush(title, body) {
+  if (!pushOn) return;
+  try {
+    for (const row of (await pool.query('select * from push')).rows) {
+      try { await webpush.sendNotification(JSON.parse(row.sub), JSON.stringify({ title, body })); }
+      catch (e) {
+        if (e.statusCode === 404 || e.statusCode === 410) await pool.query('delete from push where endpoint=$1', [row.endpoint]);
+        else console.error('push error', e.statusCode || e.message);
+      }
+    }
+  } catch (e) { console.error('push', e.message); }
+}
+const SW = `self.addEventListener('install',()=>self.skipWaiting());
+self.addEventListener('activate',e=>e.waitUntil(clients.claim()));
+self.addEventListener('push',e=>{const d=e.data?e.data.json():{};e.waitUntil(self.registration.showNotification(d.title||'Mango',{body:d.body||''}))});
+self.addEventListener('notificationclick',e=>{e.notification.close();e.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(l=>l.length?l[0].focus():clients.openWindow('/')))});`;
+app.get('/sw.js', (q, r) => r.type('js').send(SW));
+app.get('/manifest.json', (q, r) => r.type('application/manifest+json').send(JSON.stringify({ name: 'Mango Paper Trading', short_name: 'Mango', start_url: '/', display: 'standalone', background_color: '#16111f', theme_color: '#16111f' })));
+app.get('/api/push/key', auth, (q, r) => r.json({ key: VAPID_PUB, on: pushOn }));
+app.post('/api/push/sub', auth, W(async (q, r) => {
+  const sub = q.body.sub;
+  if (!sub?.endpoint) throw Error('Bad subscription');
+  await pool.query('insert into push values($1,$2) on conflict(endpoint) do update set sub=$2', [sub.endpoint, JSON.stringify(sub)]);
+  r.json({ ok: 1 });
+}));
+app.post('/api/push/unsub', auth, W(async (q, r) => { await pool.query('delete from push where endpoint=$1', [q.body.endpoint]); r.json({ ok: 1 }); }));
+app.post('/api/push/test', auth, W(async (q, r) => { await sendPush('Mango test', 'Notifications are working 🥭'); r.json({ ok: 1 }); }));
+
 // equity snapshots for the portfolio chart
 setInterval(async () => {
   try {
@@ -274,7 +391,8 @@ setInterval(async () => {
 }, 30000);
 
 (async () => {
-  await init(); await loadOrders();
+  await init(); await loadOrders(); await loadAlerts(); await initPush();
+  divOn = (await pool.query("select v from kv where k='div'")).rows[0]?.v !== 'off'; divJob(); setInterval(divJob, 6 * 36e5);
   for (const x of (await pool.query('select * from extra')).rows) { const l = x.kind === 'crypto' ? CRYPTO : STOCKS; if (!l.includes(x.sym)) l.push(x.sym); }
   coinbase(); finnhub(); pollStocks(); setInterval(pollStocks, 60000);
   server.listen(PORT, () => console.log('Mango running on ' + PORT));
