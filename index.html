@@ -35,6 +35,8 @@ nav button{flex:1;background:none;color:var(--mu);border-radius:0;padding:14px}n
 .two{display:flex;justify-content:space-between;margin:4px 0}
 #toast{position:fixed;left:50%;bottom:calc(90px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#fff;color:#111;padding:11px 18px;border-radius:24px;z-index:20;font-weight:600;max-width:90%;opacity:0;transition:opacity .2s;pointer-events:none}
 #toast.on{opacity:1}#toast.e{background:var(--dn);color:#fff}
+.tabs{display:flex;gap:6px;margin:6px 0}.tabs button{flex:1;padding:8px 4px;font-size:14px}.tabs .on{background:var(--ac);color:#2a1a00}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.grid div{background:var(--bg);border-radius:10px;padding:10px}.grid small{display:block}
 </style></head><body>
 <div id="splash" class="full"><div class="logo">🥭</div><h1>Mango</h1><p class="mu">Paper trading, real markets</p></div>
 <form id="login" class="full hide"><div class="logo" style="font-size:56px;text-align:center">🥭</div><h1 style="text-align:center">Welcome back</h1>
@@ -65,7 +67,7 @@ function connect(){
   ws.onmessage=e=>{const d=JSON.parse(e.data);P[d.s]={p:d.p,prev:d.v??P[d.s]?.prev};(H[d.s]??=[]).push(d.p);if(H[d.s].length>300)H[d.s].shift();queue()};
   ws.onclose=()=>{if(T)setTimeout(connect,2000)}}
 function queue(){if(!timer)timer=setTimeout(()=>{timer=0;paint()},700)}
-async function load(){S=await api('state');P=S.prices;connect();render()}
+async function load(){S=await api('state');P=S.prices;S.extra.forEach(x=>NAME[x.sym]??=x.kind==='crypto'?'Crypto':'Stock');connect();render()}
 async function start(){await load();show('app')}
 function setTab(t){tab=t;render()}
 function chart(pts,el){
@@ -84,7 +86,7 @@ function render(){
   <h3>Positions</h3>${S.pos.map(posRow).join('')||'<p class="mu">No positions yet. Open the Market tab to place your first trade.</p>'}
   <h3>Recent trades</h3>${S.trd.slice(0,10).map(t=>`<div class="row"><div><b>${t.side==='buy'?'Bought':'Sold'} ${t.sym}</b><small>${t.why} · ${new Date(t.ts).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</small></div><div class="r"><b>${fmt(t.qty*t.price)}</b>${t.pnl==null?'':`<span class="${cls(t.pnl)}">${t.pnl>=0?'+':''}${fmt(t.pnl)}</span>`}</div></div>`).join('')||'<p class="mu">Your trades will show up here.</p>'}
   <p style="margin-top:30px"><button class="g" onclick="resetAcct()">Reset account to $10,000</button></p>`
-  :`<h2>Market</h2>${S.live?'':'<p class="mu">Stock prices are off. Add FINNHUB_KEY in Railway to turn them on.</p>'}<h3>Stocks</h3>${STK.map(mkt).join('')}<h3>Crypto</h3>${CR.map(mkt).join('')}`;
+  :`<h2>Market</h2><input id="q" placeholder="Search any stock or coin" oninput="search()"><div id="res"></div>${S.live?'':'<p class="mu">Stock prices are off. Add FINNHUB_KEY in Railway to turn them on.</p>'}<h3>Stocks</h3>${STK.map(mkt).join('')}<h3>Crypto</h3>${CR.map(mkt).join('')}${S.extra.length?'<h3>Added by you</h3>'+S.extra.map(x=>mkt(x.sym)).join(''):''}`;
   paint()}
 function paint(){
   if(!S)return;
@@ -94,7 +96,7 @@ function paint(){
   document.querySelectorAll('[data-ch]').forEach(n=>{const c=chg(n.dataset.ch);n.textContent=pc(c);n.className=cls(c)});
   document.querySelectorAll('[data-val]').forEach(n=>{const p=S.pos.find(x=>x.sym===n.dataset.val);if(p)n.textContent=fmt(p.qty*px(p.sym))});
   document.querySelectorAll('[data-pnl]').forEach(n=>{const p=S.pos.find(x=>x.sym===n.dataset.pnl);if(p&&px(p.sym)){const c=(px(p.sym)/p.avg-1)*100;n.textContent=pc(c);n.className=cls(c)}});
-  if(cur)chart(H[cur]||[],$('#sch'))}
+  if(cur)drawC()}
 const orderBox=(kind,title,chips)=>{
   const o=S.ord.find(x=>x.sym===cur&&x.kind===kind);
   return `<div class="box"><h4>${title}</h4>${o?`<div class="two"><span>Active at <b>${fmt(o.price)}</b></span><button class="g chip" onclick="cancelOrder(${o.id})">Cancel</button></div>`:'<small>Not set</small>'}
@@ -103,13 +105,13 @@ const orderBox=(kind,title,chips)=>{
 function openSheet(s){
   cur=s;const p=S.pos.find(x=>x.sym===s);
   $('#sheet').innerHTML=`<div class="hd"><div><b style="font-size:24px">${s}</b><br><small>${NAME[s]}</small></div><button class="x" onclick="closeSheet()">Close</button></div>
-  <div class="big" data-px="${s}"></div><span data-ch="${s}"></span> <small>today</small><div class="chart" id="sch"></div>
+  <div class="big" data-px="${s}"></div><span data-ch="${s}"></span> <small>today</small><div class="tabs" id="rg">${['1D','1W','1M','3M'].map(r=>`<button class="g" data-r="${r}" onclick="loadC('${r}')">${r}</button>`).join('')}<button class="g" id="tt" onclick="togType()">Line</button></div><div class="chart" id="sch" style="height:200px"></div><div class="box"><h4>Stats</h4><div class="grid" id="stats"><small>Loading…</small></div></div>
   ${p?`<div class="box"><h4>Your position</h4><div class="two"><span>Amount</span><b>${+p.qty.toFixed(6)}</b></div><div class="two"><span>Average price</span><b>${fmt(p.avg)}</b></div><div class="two"><span>Value</span><b data-val="${s}"></b></div><div class="two"><span>Profit / loss</span><b data-pnl="${s}"></b></div></div>`:''}
   <div class="box"><h4>Buy</h4><small>You have ${fmt(S.cash)} to spend</small><input id="usd" type="number" inputmode="decimal" placeholder="Amount in dollars">
   <div>${[25,50,100].map(n=>`<button class="g chip" onclick="setUsd(${n})">${n===100?'Max':n+'%'}</button>`).join('')} <button class="b chip" onclick="buy()">Buy ${s}</button></div></div>
   ${p?`<div class="box"><h4>Sell</h4><div>${[25,50,75,100].map(n=>`<button class="s chip" onclick="sell(${n})">${n===100?'Sell all':n+'%'}</button>`).join('')}</div></div>${orderBox('stop','Stop loss (sell if price falls to)',[-3,-5,-10])}${orderBox('take','Take profit (sell if price rises to)',[3,5,10])}`
   :'<div class="box"><h4>Stop loss and take profit</h4><small>Buy first, then set them here. They run on the server, so they trigger even when the app is closed.</small></div>'}`;
-  $('#sheet').classList.remove('hide');paint()}
+  $('#sheet').classList.remove('hide');cd=[];paint();loadStats();loadC(rg)}
 function closeSheet(){cur=null;$('#sheet').classList.add('hide')}
 async function act(fn,msg){try{await fn();await load();if(cur)openSheet(cur);toast(msg)}catch(e){if(e.message!=='auth')toast(e.message,1)}}
 const setUsd=n=>{$('#usd').value=(Math.floor(S.cash*n)/100).toFixed(2)};
@@ -119,9 +121,26 @@ const fill=(k,n)=>{$('#o_'+k).value=(px(cur)*(1+n/100)).toFixed(px(cur)<1?5:2)};
 const setOrder=k=>{const v=+$('#o_'+k).value;if(!(v>0))return toast('Enter a trigger price',1);act(()=>api('order','POST',{sym:cur,kind:k,price:v}),(k==='stop'?'Stop loss':'Take profit')+' set')};
 const cancelOrder=id=>act(()=>api('order/'+id,'DELETE'),'Order cancelled');
 const resetAcct=()=>{if(confirm('Reset to $10,000 and erase all trades?'))act(()=>api('reset','POST'),'Account reset')};
+let cd=[],rg='1D',ty='c',sdeb=0;
+function search(){clearTimeout(sdeb);sdeb=setTimeout(async()=>{const v=$('#q').value.trim();if(!v){$('#res').innerHTML='';return}
+  try{const r=await api('search?q='+encodeURIComponent(v));$('#res').innerHTML=r.map(x=>`<div class="row" onclick="pick('${x.sym}','${x.kind}')"><div><b>${x.sym}</b><small>${x.name}</small></div><small>${x.kind}</small></div>`).join('')||'<p class="mu">No matches.</p>'}catch(e){if(e.message!=='auth')toast(e.message,1)}},350)}
+async function pick(sym,kind){try{await api('track','POST',{sym,kind});await load();openSheet(sym)}catch(e){if(e.message!=='auth')toast(e.message,1)}}
+const cmp=(v,t)=>v==null?'–':t==='n'?(+v).toLocaleString('en-US',{maximumFractionDigits:2}):t==='c'?'$'+(v>=1e12?(v/1e12).toFixed(2)+'T':v>=1e9?(v/1e9).toFixed(2)+'B':(v/1e6).toFixed(1)+'M'):t==='p'?(+v).toFixed(2)+'%':fmt(+v);
+async function loadStats(){const s=cur;try{const d=await api('stats/'+s);if(cur!==s)return;NAME[s]=d.name;$('#stats').innerHTML=d.rows.map(r=>`<div><small>${r[0]}</small><b>${cmp(r[1],r[2])}</b></div>`).join('')}catch(e){if(cur===s&&$('#stats'))$('#stats').innerHTML='<small>Stats are unavailable right now.</small>'}}
+async function loadC(r){rg=r;const s=cur;document.querySelectorAll('#rg [data-r]').forEach(b=>b.classList.toggle('on',b.dataset.r===rg));
+  try{const d=await api(`candles/${s}?r=${r}`);if(cur!==s||rg!==r)return;cd=d}catch(e){cd=[]}drawC()}
+function togType(){ty=ty==='c'?'l':'c';$('#tt').textContent=ty==='c'?'Line':'Candles';drawC()}
+function drawC(){
+  const el=$('#sch');if(!el)return;
+  if(cd.length<2){chart(H[cur]||[],el);return}
+  const c=cd.map(x=>({...x})),L=c[c.length-1],p=px(cur);if(p){L.c=p;L.h=Math.max(L.h,p);L.l=Math.min(L.l,p)}
+  if(ty==='l'){chart(c.map(x=>x.c),el);return}
+  const w=340,h=200,mn=Math.min(...c.map(x=>x.l)),r=(Math.max(...c.map(x=>x.h))-mn)||1,bw=w/c.length,y=v=>+(h-6-(v-mn)/r*(h-12)).toFixed(1);
+  el.innerHTML=`<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${c.map((x,i)=>{const k=x.c>=x.o?'#38d9a9':'#ff6b7a',cx=(i+.5)*bw;return `<line x1="${cx}" x2="${cx}" y1="${y(x.h)}" y2="${y(x.l)}" stroke="${k}" vector-effect="non-scaling-stroke"/><rect x="${cx-bw*.35}" width="${bw*.7}" y="${y(Math.max(x.o,x.c))}" height="${Math.max(1,Math.abs(y(x.o)-y(x.c)))}" fill="${k}"/>`}).join('')}</svg>`}
 $('#login').onsubmit=async e=>{e.preventDefault();$('#err').textContent='';
   try{const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:$('#u').value,p:$('#pw').value})});
   const j=await r.json();if(!r.ok)throw Error(j.error);T=j.token;localStorage.mango=T;await start()}catch(x){$('#err').textContent=x.message}};
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&T&&S)load().catch(()=>{})});
 setTimeout(async()=>{if(!T)return show('login');try{await start()}catch(e){if(e.message!=='auth'){show('login');$('#err').textContent='Could not reach the server. Check your connection.'}}},1300);
 </script></body></html>
+
