@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Mango"><meta name="theme-color" content="#16111f">
+<title>Mango</title>
+<style>
+:root{--bg:#16111f;--card:#221a33;--line:#33294a;--tx:#f7f2ff;--mu:#9d92b8;--up:#38d9a9;--dn:#ff6b7a;--ac:#ffb02e}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.4 -apple-system,system-ui,sans-serif;padding-top:env(safe-area-inset-top)}
+.n,.big,b{font-family:ui-rounded,"SF Pro Rounded",-apple-system,system-ui,sans-serif}
+.hide{display:none!important}.up{color:var(--up)}.dn{color:var(--dn)}.mu,small{color:var(--mu)}
+.full{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--bg);z-index:9;padding:24px}
+.logo{font-size:84px;animation:pop .9s ease-out}@keyframes pop{0%{transform:scale(.4) rotate(-20deg);opacity:0}70%{transform:scale(1.12) rotate(4deg)}100%{transform:none;opacity:1}}
+h1{margin:8px 0 0;font-size:34px}h2{margin:12px 0 0;font-size:22px}h3{margin:26px 0 6px;font-size:17px}
+form.full{align-items:stretch;justify-content:center}form.full>*{max-width:420px;width:100%;margin-left:auto;margin-right:auto}
+input{width:100%;padding:14px;margin:6px 0;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--tx);font-size:17px}
+button{font:inherit;border:0;border-radius:12px;padding:13px 16px;background:var(--ac);color:#2a1a00;font-weight:700}
+button.b{background:var(--up);color:#032a1f}button.s{background:var(--dn);color:#330008}
+button.g{background:var(--card);color:var(--tx);border:1px solid var(--line);font-weight:600}
+.chip{padding:8px 12px;font-size:14px;margin:4px 4px 0 0}
+#app{padding:0 18px calc(96px + env(safe-area-inset-bottom));max-width:640px;margin:auto}
+.big{font-size:42px;font-weight:800;letter-spacing:-1px;margin-top:6px}
+.chart{height:130px;margin:14px 0}.chart svg{width:100%;height:100%;display:block}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stats>div,.box{background:var(--card);border-radius:14px;padding:12px}.stats b{display:block;font-size:18px}
+.row{display:flex;justify-content:space-between;align-items:center;padding:14px 0;border-bottom:1px solid var(--line)}
+.row .r{text-align:right}.row b{display:block}
+nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:#1d1529;border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;background:none;color:var(--mu);border-radius:0;padding:14px}nav button.on{color:var(--ac)}
+#sheet{position:fixed;inset:0;background:var(--bg);overflow:auto;z-index:5;padding:calc(12px + env(safe-area-inset-top)) 18px 60px}
+.hd{display:flex;justify-content:space-between;align-items:center}.x{background:var(--card);color:var(--tx);padding:8px 13px}
+.box{margin:14px 0}.box h4{margin:0 0 6px;font-size:16px}
+.two{display:flex;justify-content:space-between;margin:4px 0}
+#toast{position:fixed;left:50%;bottom:calc(90px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#fff;color:#111;padding:11px 18px;border-radius:24px;z-index:20;font-weight:600;max-width:90%;opacity:0;transition:opacity .2s;pointer-events:none}
+#toast.on{opacity:1}#toast.e{background:var(--dn);color:#fff}
+</style></head><body>
+<div id="splash" class="full"><div class="logo">🥭</div><h1>Mango</h1><p class="mu">Paper trading, real markets</p></div>
+<form id="login" class="full hide"><div class="logo" style="font-size:56px;text-align:center">🥭</div><h1 style="text-align:center">Welcome back</h1>
+<input id="u" placeholder="Username" autocomplete="username" autocapitalize="off"><input id="pw" type="password" placeholder="Password" autocomplete="current-password">
+<button>Log in</button><p id="err" class="dn" style="text-align:center"></p></form>
+<main id="app" class="hide"><div id="v"></div>
+<nav><button id="t-p" onclick="setTab('p')">Portfolio</button><button id="t-m" onclick="setTab('m')">Market</button></nav></main>
+<div id="sheet" class="hide"></div><div id="toast"></div>
+<script>
+const $=s=>document.querySelector(s);
+const NAME={AAPL:'Apple',MSFT:'Microsoft',GOOGL:'Alphabet',META:'Meta',NVDA:'NVIDIA',TSLA:'Tesla',AMZN:'Amazon',LMT:'Lockheed Martin',NOC:'Northrop Grumman',WMT:'Walmart',BTC:'Bitcoin',ETH:'Ethereum',SOL:'Solana',XRP:'XRP',DOGE:'Dogecoin',ADA:'Cardano'};
+const STK=['AAPL','MSFT','GOOGL','META','NVDA','TSLA','AMZN','LMT','NOC','WMT'],CR=['BTC','ETH','SOL','XRP','DOGE','ADA'];
+let T=localStorage.mango,S=null,P={},H={},cur=null,tab='p',ws=null,timer=0;
+const fmt=n=>n.toLocaleString('en-US',{style:'currency',currency:'USD',maximumFractionDigits:n<1?5:2});
+const pc=n=>(n>=0?'+':'')+n.toFixed(2)+'%',cls=n=>n>=0?'up':'dn',px=s=>P[s]?.p??0;
+const chg=s=>{const q=P[s];return q&&q.prev?(q.p/q.prev-1)*100:0};
+const eq=()=>S.cash+S.pos.reduce((a,x)=>a+x.qty*(px(x.sym)||x.avg),0);
+const show=id=>['splash','login','app'].forEach(x=>$('#'+x).classList.toggle('hide',x!==id));
+function toast(m,e){const t=$('#toast');t.textContent=m;t.className='on'+(e?' e':'');clearTimeout(t.h);t.h=setTimeout(()=>t.className='',2400)}
+async function api(path,method='GET',body){
+  const r=await fetch('/api/'+path,{method,headers:{'Content-Type':'application/json',Authorization:'Bearer '+T},body:body&&JSON.stringify(body)});
+  const j=await r.json().catch(()=>({}));
+  if(r.status===401){localStorage.removeItem('mango');T=null;show('login');throw Error('auth')}
+  if(!r.ok)throw Error(j.error||'Something went wrong');return j}
+function connect(){
+  if(ws&&ws.readyState<2)return;
+  ws=new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/stream?t='+T);
+  ws.onmessage=e=>{const d=JSON.parse(e.data);P[d.s]={p:d.p,prev:d.v??P[d.s]?.prev};(H[d.s]??=[]).push(d.p);if(H[d.s].length>300)H[d.s].shift();queue()};
+  ws.onclose=()=>{if(T)setTimeout(connect,2000)}}
+function queue(){if(!timer)timer=setTimeout(()=>{timer=0;paint()},700)}
+async function load(){S=await api('state');P=S.prices;connect();render()}
+async function start(){await load();show('app')}
+function setTab(t){tab=t;render()}
+function chart(pts,el){
+  if(!el||pts.length<2){if(el)el.innerHTML='';return}
+  const w=340,h=130,mn=Math.min(...pts),r=(Math.max(...pts)-mn)||1;
+  const d=pts.map((v,i)=>(i/(pts.length-1)*w).toFixed(1)+','+(h-6-(v-mn)/r*(h-12)).toFixed(1)).join(' ');
+  const c=pts[pts.length-1]>=pts[0]?'#38d9a9':'#ff6b7a';
+  el.innerHTML=`<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline points="${d}" fill="none" stroke="${c}" stroke-width="2.2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`}
+const mkt=s=>`<div class="row" onclick="openSheet('${s}')"><div><b>${s}</b><small>${NAME[s]}</small></div><div class="r"><b data-px="${s}"></b><span data-ch="${s}"></span></div></div>`;
+const posRow=p=>`<div class="row" onclick="openSheet('${p.sym}')"><div><b>${p.sym}</b><small>${+p.qty.toFixed(6)} @ ${fmt(p.avg)}</small></div><div class="r"><b data-val="${p.sym}"></b><span data-pnl="${p.sym}"></span></div></div>`;
+function render(){
+  if(!S)return;
+  $('#t-p').className=tab==='p'?'on':'';$('#t-m').className=tab==='m'?'on':'';
+  $('#v').innerHTML=tab==='p'?`<h2>Portfolio</h2><div class="big" id="eq"></div><div id="pl"></div><div class="chart" id="ch"></div>
+  <div class="stats"><div><small>Cash</small><b>${fmt(S.cash)}</b></div><div><small>Positions</small><b>${S.pos.length}</b></div><div><small>Open orders</small><b>${S.ord.length}</b></div></div>
+  <h3>Positions</h3>${S.pos.map(posRow).join('')||'<p class="mu">No positions yet. Open the Market tab to place your first trade.</p>'}
+  <h3>Recent trades</h3>${S.trd.slice(0,10).map(t=>`<div class="row"><div><b>${t.side==='buy'?'Bought':'Sold'} ${t.sym}</b><small>${t.why} · ${new Date(t.ts).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</small></div><div class="r"><b>${fmt(t.qty*t.price)}</b>${t.pnl==null?'':`<span class="${cls(t.pnl)}">${t.pnl>=0?'+':''}${fmt(t.pnl)}</span>`}</div></div>`).join('')||'<p class="mu">Your trades will show up here.</p>'}
+  <p style="margin-top:30px"><button class="g" onclick="resetAcct()">Reset account to $10,000</button></p>`
+  :`<h2>Market</h2>${S.live?'':'<p class="mu">Stock prices are off. Add FINNHUB_KEY in Railway to turn them on.</p>'}<h3>Stocks</h3>${STK.map(mkt).join('')}<h3>Crypto</h3>${CR.map(mkt).join('')}`;
+  paint()}
+function paint(){
+  if(!S)return;
+  const e=eq(),el=$('#eq');
+  if(el){el.textContent=fmt(e);const d=e-10000;$('#pl').innerHTML=`<span class="${cls(d)}">${d>=0?'+':''}${fmt(d)} (${pc(d/100)})</span> <small>all time</small>`;chart(S.snap.concat(e),$('#ch'))}
+  document.querySelectorAll('[data-px]').forEach(n=>n.textContent=px(n.dataset.px)?fmt(px(n.dataset.px)):'…');
+  document.querySelectorAll('[data-ch]').forEach(n=>{const c=chg(n.dataset.ch);n.textContent=pc(c);n.className=cls(c)});
+  document.querySelectorAll('[data-val]').forEach(n=>{const p=S.pos.find(x=>x.sym===n.dataset.val);if(p)n.textContent=fmt(p.qty*px(p.sym))});
+  document.querySelectorAll('[data-pnl]').forEach(n=>{const p=S.pos.find(x=>x.sym===n.dataset.pnl);if(p&&px(p.sym)){const c=(px(p.sym)/p.avg-1)*100;n.textContent=pc(c);n.className=cls(c)}});
+  if(cur)chart(H[cur]||[],$('#sch'))}
+const orderBox=(kind,title,chips)=>{
+  const o=S.ord.find(x=>x.sym===cur&&x.kind===kind);
+  return `<div class="box"><h4>${title}</h4>${o?`<div class="two"><span>Active at <b>${fmt(o.price)}</b></span><button class="g chip" onclick="cancelOrder(${o.id})">Cancel</button></div>`:'<small>Not set</small>'}
+  <input id="o_${kind}" type="number" inputmode="decimal" placeholder="Trigger price">
+  <div>${chips.map(c=>`<button class="g chip" onclick="fill('${kind}',${c})">${c>0?'+':''}${c}%</button>`).join('')} <button class="chip" onclick="setOrder('${kind}')">Set ${kind==='stop'?'stop loss':'take profit'}</button></div></div>`};
+function openSheet(s){
+  cur=s;const p=S.pos.find(x=>x.sym===s);
+  $('#sheet').innerHTML=`<div class="hd"><div><b style="font-size:24px">${s}</b><br><small>${NAME[s]}</small></div><button class="x" onclick="closeSheet()">Close</button></div>
+  <div class="big" data-px="${s}"></div><span data-ch="${s}"></span> <small>today</small><div class="chart" id="sch"></div>
+  ${p?`<div class="box"><h4>Your position</h4><div class="two"><span>Amount</span><b>${+p.qty.toFixed(6)}</b></div><div class="two"><span>Average price</span><b>${fmt(p.avg)}</b></div><div class="two"><span>Value</span><b data-val="${s}"></b></div><div class="two"><span>Profit / loss</span><b data-pnl="${s}"></b></div></div>`:''}
+  <div class="box"><h4>Buy</h4><small>You have ${fmt(S.cash)} to spend</small><input id="usd" type="number" inputmode="decimal" placeholder="Amount in dollars">
+  <div>${[25,50,100].map(n=>`<button class="g chip" onclick="setUsd(${n})">${n===100?'Max':n+'%'}</button>`).join('')} <button class="b chip" onclick="buy()">Buy ${s}</button></div></div>
+  ${p?`<div class="box"><h4>Sell</h4><div>${[25,50,75,100].map(n=>`<button class="s chip" onclick="sell(${n})">${n===100?'Sell all':n+'%'}</button>`).join('')}</div></div>${orderBox('stop','Stop loss (sell if price falls to)',[-3,-5,-10])}${orderBox('take','Take profit (sell if price rises to)',[3,5,10])}`
+  :'<div class="box"><h4>Stop loss and take profit</h4><small>Buy first, then set them here. They run on the server, so they trigger even when the app is closed.</small></div>'}`;
+  $('#sheet').classList.remove('hide');paint()}
+function closeSheet(){cur=null;$('#sheet').classList.add('hide')}
+async function act(fn,msg){try{await fn();await load();if(cur)openSheet(cur);toast(msg)}catch(e){if(e.message!=='auth')toast(e.message,1)}}
+const setUsd=n=>{$('#usd').value=(Math.floor(S.cash*n)/100).toFixed(2)};
+const buy=()=>{const v=+$('#usd').value;if(!(v>0))return toast('Enter an amount to buy',1);act(()=>api('trade','POST',{sym:cur,side:'buy',usd:v}),'Bought '+cur)};
+const sell=n=>{if(confirm(`Sell ${n===100?'all':n+'%'} of ${cur} at market price?`))act(()=>api('trade','POST',{sym:cur,side:'sell',pct:n}),'Sold '+cur)};
+const fill=(k,n)=>{$('#o_'+k).value=(px(cur)*(1+n/100)).toFixed(px(cur)<1?5:2)};
+const setOrder=k=>{const v=+$('#o_'+k).value;if(!(v>0))return toast('Enter a trigger price',1);act(()=>api('order','POST',{sym:cur,kind:k,price:v}),(k==='stop'?'Stop loss':'Take profit')+' set')};
+const cancelOrder=id=>act(()=>api('order/'+id,'DELETE'),'Order cancelled');
+const resetAcct=()=>{if(confirm('Reset to $10,000 and erase all trades?'))act(()=>api('reset','POST'),'Account reset')};
+$('#login').onsubmit=async e=>{e.preventDefault();$('#err').textContent='';
+  try{const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:$('#u').value,p:$('#pw').value})});
+  const j=await r.json();if(!r.ok)throw Error(j.error);T=j.token;localStorage.mango=T;await start()}catch(x){$('#err').textContent=x.message}};
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&T&&S)load().catch(()=>{})});
+setTimeout(async()=>{if(!T)return show('login');try{await start()}catch(e){if(e.message!=='auth'){show('login');$('#err').textContent='Could not reach the server. Check your connection.'}}},1300);
+</script></body></html>
