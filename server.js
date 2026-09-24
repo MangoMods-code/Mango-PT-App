@@ -9,7 +9,7 @@ const pool = new Pool({ connectionString: DATABASE_URL, ssl: DATABASE_URL.includ
 const STOCKS = ['AAPL', 'MSFT', 'GOOGL', 'META', 'NVDA', 'TSLA', 'AMZN', 'LMT', 'NOC', 'WMT'];
 const CRYPTO = ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'ADA'];
 const prices = {}, lastSent = {}, firing = new Set();
-const DEF = { autoSL: 0, autoTP: 0, defaultBuy: 0, startBalance: 10000, confirmBuy: false, confirmSell: true, pushAlerts: true, pushOrders: true, hideBalances: false, defaultRange: '1D', defaultChart: 'Candles' };
+const DEF = { autoSL: 0, autoTP: 0, defaultBuy: 0, startBalance: 10000, confirmBuy: false, confirmSell: true, pushAlerts: true, pushOrders: true, hideBalances: false, defaultRange: '1D', defaultChart: 'Candles', maxPos: 0, reservePct: 0, wholeShares: false, feeFlat: 0, feePct: 0, cashAPY: 0, showCents: true, compactNums: false };
 let settings = { ...DEF };
 let open = {}, alerts = {}, divOn = true;
 
@@ -57,17 +57,21 @@ async function trade(sym, side, qty, why) {
     const pos = (await c.query('select * from pos where sym=$1 for update', [sym])).rows[0];
     let pnl = null;
     if (side === 'buy') {
-      const cost = qty * px;
-      if (cost > cash + 0.01) throw Error('Not enough cash');
+      const cost = qty * px, fee = settings.feeFlat + cost * settings.feePct / 100;
+      if (cost + fee > cash + 0.01) throw Error('Not enough cash' + (fee ? ' (including the $' + fee.toFixed(2) + ' fee)' : ''));
+      const all = (await c.query('select sym, qty from pos')).rows, eqv = cash + all.reduce((t, x) => t + x.qty * (prices[x.sym]?.p || px), 0);
+      if (settings.maxPos > 0 && ((pos ? +pos.qty : 0) + qty) * px > eqv * settings.maxPos / 100 + 0.01) throw Error(`Max size for one position is ${settings.maxPos}% of your portfolio`);
+      if (settings.reservePct > 0 && cash - cost - fee < eqv * settings.reservePct / 100 - 0.01) throw Error(`That would leave less than your ${settings.reservePct}% cash reserve`);
       const spend = Math.min(cost, cash), nq = (pos ? +pos.qty : 0) + qty;
       const avg = pos ? (pos.qty * pos.avg + spend) / nq : spend / qty;
-      await c.query('update acct set cash=cash-$1 where id=1', [spend]);
+      await c.query('update acct set cash=cash-$1 where id=1', [Math.min(spend + fee, cash)]);
       await c.query('insert into pos values($1,$2,$3) on conflict(sym) do update set qty=$2, avg=$3', [sym, nq, avg]);
     } else {
       if (!pos || qty > +pos.qty + 1e-9) throw Error('Not enough to sell');
       qty = Math.min(qty, +pos.qty);
-      pnl = (px - pos.avg) * qty;
-      await c.query('update acct set cash=cash+$1 where id=1', [qty * px]);
+      const fee = settings.feeFlat + qty * px * settings.feePct / 100;
+      pnl = (px - pos.avg) * qty - fee;
+      await c.query('update acct set cash=cash+$1 where id=1', [Math.max(0, qty * px - fee)]);
       const left = pos.qty - qty;
       if (left < 1e-9) {
         await c.query('delete from pos where sym=$1', [sym]);
@@ -174,7 +178,7 @@ app.post('/api/trade', auth, W(async (q, r) => {
   const { sym, side, usd, pct } = q.body;
   if (!prices[sym]) throw Error('No live price yet for ' + sym);
   let qty;
-  if (side === 'buy') qty = +(usd / prices[sym].p).toFixed(8);
+  if (side === 'buy') { qty = +(usd / prices[sym].p).toFixed(8); if (settings.wholeShares && !CRYPTO.includes(sym)) qty = Math.floor(qty); }
   else {
     const p = (await pool.query('select qty from pos where sym=$1', [sym])).rows[0];
     if (!p) throw Error('No position in ' + sym);
@@ -399,11 +403,23 @@ app.post('/api/push/sub', auth, W(async (q, r) => {
 app.post('/api/push/unsub', auth, W(async (q, r) => { await pool.query('delete from push where endpoint=$1', [q.body.endpoint]); r.json({ ok: 1 }); }));
 app.post('/api/push/test', auth, W(async (q, r) => { await sendPush('Mango test', 'Notifications are working 🥭'); r.json({ ok: 1 }); }));
 
+app.post('/api/cash', auth, W(async (q, r) => {
+  const a = +q.body.amount, now = +(await pool.query('select cash from acct')).rows[0].cash;
+  if (!(a >= 0) || a > 1e9) throw Error('Enter a valid amount');
+  const next = q.body.action === 'add' ? now + a : q.body.action === 'withdraw' ? now - a : a;
+  if (next < 0) throw Error('You cannot withdraw more than your cash');
+  await pool.query('update acct set cash=$1 where id=1', [next]);
+  await pool.query("insert into trd(sym,side,qty,price,why) values('','cash',1,$1,$2)", [next - now, q.body.action === 'add' ? 'deposit' : q.body.action === 'withdraw' ? 'withdrawal' : 'balance set']);
+  settings.startBalance = Math.max(100, settings.startBalance + (next - now));
+  await pool.query("insert into kv values('settings',$1) on conflict(k) do update set v=$1", [JSON.stringify(settings)]);
+  r.json({ ok: 1 });
+}));
+setInterval(() => { if (settings.cashAPY > 0) pool.query('update acct set cash=cash*(1+$1/100/8760) where id=1', [settings.cashAPY]).catch(() => {}); }, 36e5);
 app.post('/api/settings', auth, W(async (q, r) => {
   for (const k of Object.keys(DEF)) {
     if (!(k in q.body) || typeof q.body[k] !== typeof DEF[k]) continue;
     let v = q.body[k];
-    if (typeof v === 'number') v = Math.max(k === 'startBalance' ? 100 : 0, Math.min(k.startsWith('auto') ? 90 : 1e9, v || 0));
+    if (typeof v === 'number') v = Math.max(k === 'startBalance' ? 100 : 0, Math.min(k.startsWith('auto') ? 90 : ['maxPos', 'reservePct', 'feePct', 'cashAPY'].includes(k) ? 100 : 1e9, v || 0));
     settings[k] = v;
   }
   await pool.query("insert into kv values('settings',$1) on conflict(k) do update set v=$1", [JSON.stringify(settings)]);

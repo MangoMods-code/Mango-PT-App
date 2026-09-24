@@ -38,6 +38,17 @@ nav button{flex:1;background:none;color:var(--mu);border-radius:0;padding:14px}n
 .tabs{display:flex;gap:6px;margin:6px 0}.tabs button{flex:1;padding:8px 4px;font-size:14px}.tabs .on{background:var(--ac);color:#2a1a00}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.grid div{background:var(--bg);border-radius:10px;padding:10px}.grid small{display:block}
 .chip.on{background:var(--ac);color:#2a1a00}.hb .priv{filter:blur(9px)}.row input{margin:0}
+@keyframes in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+@keyframes shake{20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}
+@keyframes fu{from{color:var(--up)}}@keyframes fd{from{color:var(--dn)}}
+.pg,.fadein{animation:in .3s cubic-bezier(.2,.8,.2,1)}.shake{animation:shake .4s}.fu{animation:fu .9s ease-out}.fd{animation:fd .9s ease-out}
+button{transition:transform .12s ease,filter .15s,background .2s,color .2s,opacity .2s}button:active{transform:scale(.95);filter:brightness(1.12)}
+.row{transition:background .2s}.row:active{background:#ffffff0f}
+#sheet{transform:translateY(100%);opacity:0;visibility:hidden;transition:transform .38s cubic-bezier(.2,.8,.2,1),opacity .25s,visibility 0s .38s}
+#sheet.show{transform:none;opacity:1;visibility:visible;transition:transform .38s cubic-bezier(.2,.8,.2,1),opacity .25s,visibility 0s}
+#toast{transform:translateX(-50%) translateY(14px);transition:opacity .25s,transform .3s cubic-bezier(.2,.8,.2,1)}#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+input{transition:border-color .2s,box-shadow .2s}input:focus{outline:0;border-color:var(--ac);box-shadow:0 0 0 3px #ffb02e33}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 </style></head><body>
 <div id="splash" class="full"><div class="logo">🥭</div><h1>Mango</h1><p class="mu">Paper trading, real markets</p></div>
 <form id="login" class="full hide"><div class="logo" style="font-size:56px;text-align:center">🥭</div><h1 style="text-align:center">Welcome back</h1>
@@ -45,17 +56,17 @@ nav button{flex:1;background:none;color:var(--mu);border-radius:0;padding:14px}n
 <button>Log in</button><p id="err" class="dn" style="text-align:center"></p></form>
 <main id="app" class="hide"><div id="v"></div>
 <nav><button id="t-p" onclick="setTab('p')">Portfolio</button><button id="t-m" onclick="setTab('m')">Market</button><button id="t-s" onclick="setTab('s')">Settings</button></nav></main>
-<div id="sheet" class="hide"></div><div id="toast"></div>
+<div id="sheet"></div><div id="toast"></div>
 <script>
 const $=s=>document.querySelector(s);
 const NAME={AAPL:'Apple',MSFT:'Microsoft',GOOGL:'Alphabet',META:'Meta',NVDA:'NVIDIA',TSLA:'Tesla',AMZN:'Amazon',LMT:'Lockheed Martin',NOC:'Northrop Grumman',WMT:'Walmart',BTC:'Bitcoin',ETH:'Ethereum',SOL:'Solana',XRP:'XRP',DOGE:'Dogecoin',ADA:'Cardano'};
 const STK=['AAPL','MSFT','GOOGL','META','NVDA','TSLA','AMZN','LMT','NOC','WMT'],CR=['BTC','ETH','SOL','XRP','DOGE','ADA'];
 let T=localStorage.mango,S=null,P={},H={},cur=null,tab='p',ws=null,timer=0;
-const fmt=n=>n.toLocaleString('en-US',{style:'currency',currency:'USD',maximumFractionDigits:n<1?5:2});
+const fmt=n=>{const o=(S&&S.settings)||{},a=Math.abs(n),mx=a<1?5:(o.showCents===false&&a>=100?0:2);return n.toLocaleString('en-US',o.compactNums&&a>=1e4?{style:'currency',currency:'USD',notation:'compact',maximumFractionDigits:2}:{style:'currency',currency:'USD',minimumFractionDigits:Math.min(2,mx),maximumFractionDigits:mx})};
 const pc=n=>(n>=0?'+':'')+n.toFixed(2)+'%',cls=n=>n>=0?'up':'dn',px=s=>P[s]?.p??0;
 const chg=s=>{const q=P[s];return q&&q.prev?(q.p/q.prev-1)*100:0};
 const eq=()=>S.cash+S.pos.reduce((a,x)=>a+x.qty*(px(x.sym)||x.avg),0);
-const show=id=>['splash','login','app'].forEach(x=>$('#'+x).classList.toggle('hide',x!==id));
+const show=id=>['splash','login','app'].forEach(x=>{const e=$('#'+x),h=x!==id;if(!h&&e.classList.contains('hide')){e.classList.remove('hide','fadein');void e.offsetWidth;e.classList.add('fadein')}else e.classList.toggle('hide',h)});
 function toast(m,e){const t=$('#toast');t.textContent=m;t.className='on'+(e?' e':'');clearTimeout(t.h);t.h=setTimeout(()=>t.className='',2400)}
 async function api(path,method='GET',body){
   const r=await fetch('/api/'+path,{method,headers:{'Content-Type':'application/json',Authorization:'Bearer '+T},body:body&&JSON.stringify(body)});
@@ -70,7 +81,7 @@ function connect(){
 function queue(){if(!timer)timer=setTimeout(()=>{timer=0;paint()},700)}
 async function load(){S=await api('state');P=S.prices;if(!load.d){load.d=1;rg=S.settings.defaultRange||'1D';ty=S.settings.defaultChart==='Line'?'l':'c'}S.extra.forEach(x=>NAME[x.sym]??=x.kind==='crypto'?'Crypto':'Stock');connect();render()}
 async function start(){await load();show('app')}
-function setTab(t){tab=t;render()}
+function setTab(t){tab=t;render();const v=$('#v');v.classList.remove('pg');void v.offsetWidth;v.classList.add('pg')}
 function chart(pts,el){
   if(!el||pts.length<2){if(el)el.innerHTML='';return}
   const w=340,h=130,mn=Math.min(...pts),r=(Math.max(...pts)-mn)||1;
@@ -85,7 +96,7 @@ function render(){
   $('#v').innerHTML=tab==='s'?viewS():tab==='p'?`<h2>Portfolio</h2><div class="big priv" id="eq"></div><div id="pl" class="priv"></div><div class="chart" id="ch"></div>
   <div class="stats"><div><small>Cash</small><b class="priv">${fmt(S.cash)}</b></div><div><small>Positions</small><b>${S.pos.length}</b></div><div><small>Open orders</small><b>${S.ord.length}</b></div></div>
   ${on('analytics')?'<div class="box" id="an">Loading performance…</div>':''}<h3>Positions</h3>${S.pos.map(posRow).join('')||'<p class="mu">No positions yet. Open the Market tab to place your first trade.</p>'}
-  ${on('alerts')&&S.alerts.length?'<h3>Price alerts</h3>'+S.alerts.map(a=>`<div class="row"><div><b>${a.sym}</b><small>Price ${a.dir==='above'?'rises to':'falls to'} ${fmt(a.price)}${a.label?' ('+esc(a.label)+')':''}</small></div><div class="r"><span class="${a.fired?'up':'mu'}">${a.fired?'Triggered':'Waiting'}</span><button class="g chip" onclick="delAlert(${a.id})">Remove</button></div></div>`).join(''):''}<h3>Recent trades</h3>${S.trd.slice(0,10).map(t=>`<div class="row" ${on('journal')?`onclick="note(${t.id})"`:''}><div><b>${{buy:'Bought',sell:'Sold',div:'Dividend'}[t.side]} ${t.sym}</b><small>${t.why} · ${new Date(t.ts).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</small>${on('journal')&&t.note?`<br><small>📝 ${esc(t.note)}</small>`:''}</div><div class="r"><b>${fmt(t.qty*t.price)}</b>${t.pnl==null?'':`<span class="${cls(t.pnl)}">${t.pnl>=0?'+':''}${fmt(t.pnl)}</span>`}</div></div>`).join('')||'<p class="mu">Your trades will show up here.</p>'}
+  ${on('alerts')&&S.alerts.length?'<h3>Price alerts</h3>'+S.alerts.map(a=>`<div class="row"><div><b>${a.sym}</b><small>Price ${a.dir==='above'?'rises to':'falls to'} ${fmt(a.price)}${a.label?' ('+esc(a.label)+')':''}</small></div><div class="r"><span class="${a.fired?'up':'mu'}">${a.fired?'Triggered':'Waiting'}</span><button class="g chip" onclick="delAlert(${a.id})">Remove</button></div></div>`).join(''):''}<h3>Recent trades</h3>${S.trd.slice(0,10).map(t=>`<div class="row" ${on('journal')?`onclick="note(${t.id})"`:''}><div><b>${{buy:'Bought',sell:'Sold',div:'Dividend',cash:'Balance change'}[t.side]} ${t.sym}</b><small>${t.why} · ${new Date(t.ts).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</small>${on('journal')&&t.note?`<br><small>📝 ${esc(t.note)}</small>`:''}</div><div class="r"><b>${fmt(t.qty*t.price)}</b>${t.pnl==null?'':`<span class="${cls(t.pnl)}">${t.pnl>=0?'+':''}${fmt(t.pnl)}</span>`}</div></div>`).join('')||'<p class="mu">Your trades will show up here.</p>'}
   <p style="margin-top:30px"><button class="g" onclick="resetAcct()">Reset account to ${fmt(SB())}</button></p>`
   :`<h2>Market</h2><input id="q" placeholder="Search any stock or coin" oninput="search()"><div id="res"></div>${on('watch')&&S.watch.length?'<h3>Watchlist</h3>'+S.watch.map(mkt).join(''):''}${S.live?'':'<p class="mu">Stock prices are off. Add FINNHUB_KEY in Railway to turn them on.</p>'}<h3>Stocks</h3>${STK.map(mkt).join('')}<h3>Crypto</h3>${CR.map(mkt).join('')}${S.extra.length?'<h3>Added by you</h3>'+S.extra.map(x=>mkt(x.sym)).join(''):''}`;
   if(tab==='p'&&on('analytics'))loadAn();if(tab==='s')pushUI();paint()}
@@ -93,7 +104,7 @@ function paint(){
   if(!S)return;
   const e=eq(),el=$('#eq');
   if(el){el.textContent=fmt(e);const d=e-SB();$('#pl').innerHTML=`<span class="${cls(d)}">${d>=0?'+':''}${fmt(d)} (${pc(d/SB()*100)})</span> <small>all time</small>`;chart(S.snap.concat(e),$('#ch'))}
-  document.querySelectorAll('[data-px]').forEach(n=>n.textContent=px(n.dataset.px)?fmt(px(n.dataset.px)):'…');
+  document.querySelectorAll('[data-px]').forEach(n=>{const v=px(n.dataset.px);n.textContent=v?fmt(v):'…';if(n._p!=null&&v!==n._p){n.classList.remove('fu','fd');void n.offsetWidth;n.classList.add(v>n._p?'fu':'fd')}n._p=v});
   document.querySelectorAll('[data-ch]').forEach(n=>{const c=chg(n.dataset.ch);n.textContent=pc(c);n.className=cls(c)});
   document.querySelectorAll('[data-val]').forEach(n=>{const p=S.pos.find(x=>x.sym===n.dataset.val);if(p)n.textContent=fmt(p.qty*px(p.sym))});
   document.querySelectorAll('[data-pnl]').forEach(n=>{const p=S.pos.find(x=>x.sym===n.dataset.pnl);if(p&&px(p.sym)){const c=(px(p.sym)/p.avg-1)*100;n.textContent=pc(c);n.className=cls(c)}});
@@ -112,8 +123,8 @@ function openSheet(s){
   <div>${[25,50,100].map(n=>`<button class="g chip" onclick="setUsd(${n})">${n===100?'Max':n+'%'}</button>`).join('')} <button class="b chip" onclick="buy()">Buy ${s}</button></div></div>
   ${p?`<div class="box"><h4>Sell</h4><div>${[25,50,75,100].map(n=>`<button class="s chip" onclick="sell(${n})">${n===100?'Sell all':n+'%'}</button>`).join('')}</div></div>${ordBox('stop')}${ordBox('take')}`
   :'<div class="box"><h4>Stop loss and take profit</h4><small>Buy first, then set them here. They run on the server, so they trigger even when the app is closed.</small></div>'}`;
-  $('#sheet').classList.remove('hide');cd=[];paint();loadStats();loadC(rg)}
-function closeSheet(){cur=null;$('#sheet').classList.add('hide')}
+  $('#sheet').classList.add('show');cd=[];paint();loadStats();loadC(rg)}
+function closeSheet(){cur=null;$('#sheet').classList.remove('show')}
 async function act(fn,msg){try{await fn();await load();if(cur)openSheet(cur);toast(msg)}catch(e){if(e.message!=='auth')toast(e.message,1)}}
 const setUsd=n=>{$('#usd').value=(Math.floor(S.cash*n)/100).toFixed(2)};
 const buy=()=>{const v=+$('#usd').value;if(!(v>0))return toast('Enter an amount to buy',1);if(S.settings.confirmBuy&&!confirm(`Buy ${fmt(v)} of ${cur} at market price?`))return;act(()=>api('trade','POST',{sym:cur,side:'buy',usd:v}),'Bought '+cur)};
@@ -142,7 +153,7 @@ const FEAT={watch:'Watchlist',alerts:'Price alerts',analytics:'Performance stats
 let FS=JSON.parse(localStorage.mangoF||'{}');const on=k=>FS[k]!==false;
 const esc=s=>String(s).replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
 function tog(k){FS[k]=!on(k);localStorage.mangoF=JSON.stringify(FS);render()}
-const viewS=()=>`<h2>Settings</h2><p class="mu">Only you can change these, and they sync across your devices.</p>${setSections()}<h3>Features</h3><p class="mu">These switches are saved on this device only.</p>${Object.entries(FEAT).map(([k,n])=>`<div class="row"><b>${n}</b><button class="${on(k)?'':'g'}" onclick="tog('${k}')">${on(k)?'On':'Off'}</button></div>`).join('')}<div class="row"><div><b>Dividend income</b><br><small>Saved on the server</small></div><button class="${S.divOn?'':'g'}" onclick="act(()=>api('divs','POST',{on:!S.divOn}),'Dividends '+(S.divOn?'off':'on'))">${S.divOn?'On':'Off'}</button></div><h3>Notifications</h3><div class="box" id="pushbox"><small>Checking…</small></div><h3>Account</h3><button class="g" onclick="logout()">Log out of this device</button>`;
+const viewS=()=>`<h2>Settings</h2><p class="mu">Only you can change these, and they sync across your devices.</p>${balTools()}${setSections()}<h3>Features</h3><p class="mu">These switches are saved on this device only.</p>${Object.entries(FEAT).map(([k,n])=>`<div class="row"><b>${n}</b><button class="${on(k)?'':'g'}" onclick="tog('${k}')">${on(k)?'On':'Off'}</button></div>`).join('')}<div class="row"><div><b>Dividend income</b><br><small>Saved on the server</small></div><button class="${S.divOn?'':'g'}" onclick="act(()=>api('divs','POST',{on:!S.divOn}),'Dividends '+(S.divOn?'off':'on'))">${S.divOn?'On':'Off'}</button></div><h3>Notifications</h3><div class="box" id="pushbox"><small>Checking…</small></div><h3>Account</h3><button class="g" onclick="logout()">Log out of this device</button>`;
 let am='p';
 const isCr=s=>CR.includes(s)||S.extra.some(x=>x.sym===s&&x.kind==='crypto');
 const alertBox=s=>{const p=S.pos.find(x=>x.sym===s),u=isCr(s)?'coin':'share';
@@ -183,9 +194,9 @@ function redrawO(k){const v=$('#ov_'+k).value;$('#ob_'+k).outerHTML=ordBox(k);$(
 const setOM=(k,m)=>{om[k]=m;redrawO(k)},setOS=(k,n)=>{os[k]=n;redrawO(k)};
 function saveOrd(k){const t=ordTarget(k);if(!t)return toast('Enter a value first',1);const tr=om[k]==='trail';
   act(()=>api('order','POST',{sym:cur,kind:tr?'trail':k,price:t.price,pct:os[k],trail:t.trail}),(k==='stop'?'Stop loss':'Take profit')+' set')}
-const SET=[['Trading',[['autoSL','Auto stop loss on every buy','num','Percent below your buy price. 0 turns it off.'],['autoTP','Auto take profit on every buy','num','Percent above your buy price. 0 turns it off.'],['defaultBuy','Default buy amount','num','Dollars prefilled in the buy box. 0 leaves it empty.'],['confirmBuy','Confirm before buying','bool'],['confirmSell','Confirm before selling','bool'],['startBalance','Starting balance for resets','num','Dollars you get when you reset the account.']]],
+const SET=[['Balance rules',[['maxPos','Max size of one position','num','Percent of your portfolio. 0 turns it off.'],['reservePct','Cash reserve','num','Percent of your portfolio always kept as cash. 0 turns it off.'],['wholeShares','Whole shares only for stocks','bool'],['feeFlat','Fee per trade','num','Flat dollars, like a real broker. 0 means free.'],['feePct','Fee percent','num','Percent of each trade. 0 means free.'],['cashAPY','Interest on cash','num','Yearly percent, paid hourly. 0 turns it off.']]],['Trading',[['autoSL','Auto stop loss on every buy','num','Percent below your buy price. 0 turns it off.'],['autoTP','Auto take profit on every buy','num','Percent above your buy price. 0 turns it off.'],['defaultBuy','Default buy amount','num','Dollars prefilled in the buy box. 0 leaves it empty.'],['confirmBuy','Confirm before buying','bool'],['confirmSell','Confirm before selling','bool'],['startBalance','Starting balance for resets','num','Dollars you get when you reset the account.']]],
  ['Notifications',[['pushAlerts','Notify for price alerts','bool'],['pushOrders','Notify for stop loss and take profit','bool']]],
- ['Display',[['hideBalances','Hide balances (blur amounts)','bool'],['defaultRange','Default chart range','sel',['1D','1W','1M']],['defaultChart','Default chart style','sel',['Candles','Line']]]]];
+ ['Display',[['hideBalances','Hide balances (blur amounts)','bool'],['showCents','Show cents on large amounts','bool'],['compactNums','Short numbers (12.5K)','bool'],['defaultRange','Default chart range','sel',['1D','1W','1M']],['defaultChart','Default chart style','sel',['Candles','Line']]]]];
 const setSections=()=>SET.map(([h,it])=>`<h3>${h}</h3>`+it.map(([k,n,t,x])=>`<div class="row"><div><b>${n}</b>${t==='num'?`<br><small>${x}</small>`:''}</div>${t==='bool'?`<button class="${S.settings[k]?'':'g'}" onclick="setSet('${k}',${!S.settings[k]})">${S.settings[k]?'On':'Off'}</button>`:t==='num'?`<input type="number" inputmode="decimal" value="${S.settings[k]}" style="width:100px" onchange="setSet('${k}',+this.value)">`:`<div>${x.map(o=>`<button class="g chip ${S.settings[k]===o?'on':''}" onclick="setSet('${k}','${o}')">${o}</button>`).join('')}</div>`}</div>`).join('')).join('');
 const setSet=(k,v)=>act(()=>api('settings','POST',{[k]:v}),'Saved');
 function logout(){localStorage.removeItem('mango');T=null;S=null;if(ws)ws.close();show('login')}
@@ -208,9 +219,13 @@ async function pushEnable(){try{
 async function pushOff(){try{const reg=await navigator.serviceWorker.ready,sub=await reg.pushManager.getSubscription();if(sub){await api('push/unsub','POST',{endpoint:sub.endpoint});await sub.unsubscribe()}pushUI()}catch(e){}}
 const pushTest=()=>api('push/test','POST').then(()=>toast('Test sent')).catch(e=>toast(e.message,1));
 if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
+const balTools=()=>`<h3>Your balance</h3><div class="box"><small>Cash now</small><b class="big priv" style="display:block;font-size:30px">${fmt(S.cash)}</b><input id="cashamt" type="number" inputmode="decimal" placeholder="Amount in dollars"><div><button class="b chip" onclick="cash('add')">Add cash</button><button class="s chip" onclick="cash('withdraw')">Withdraw</button><button class="g chip" onclick="cash('set')">Set exact balance</button></div><small>Adding or withdrawing cash doesn't count as profit or loss.</small></div>`;
+function cash(a){const v=$('#cashamt').value;if(v===''||!(+v>=0))return toast('Enter an amount',1);
+  if(a==='set'&&!confirm('Set your cash to '+fmt(+v)+'?'))return;
+  act(()=>api('cash','POST',{action:a,amount:+v}),a==='add'?'Cash added':a==='withdraw'?'Cash withdrawn':'Balance set')}
 $('#login').onsubmit=async e=>{e.preventDefault();$('#err').textContent='';
   try{const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:$('#u').value,p:$('#pw').value})});
-  const j=await r.json();if(!r.ok)throw Error(j.error);T=j.token;localStorage.mango=T;await start()}catch(x){$('#err').textContent=x.message}};
+  const j=await r.json();if(!r.ok)throw Error(j.error);T=j.token;localStorage.mango=T;await start()}catch(x){$('#err').textContent=x.message;const f=$('#login');f.classList.remove('shake');void f.offsetWidth;f.classList.add('shake')}};
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&T&&S)load().catch(()=>{})});
 setTimeout(async()=>{if(!T)return show('login');try{await start()}catch(e){if(e.message!=='auth'){show('login');$('#err').textContent='Could not reach the server. Check your connection.'}}},1300);
 </script></body></html>
