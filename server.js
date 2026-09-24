@@ -38,6 +38,7 @@ async function init() {
     alter table ord add column if not exists trail numeric;
     alter table ord add column if not exists peak numeric;
     alter table alert add column if not exists label text;
+    create table if not exists lim(id serial primary key, sym text, side text, price numeric, amt numeric, ts timestamptz default now());
     alter table trd add column if not exists note text;
     alter table pos add column if not exists since timestamptz default now();`);
 }
@@ -96,7 +97,10 @@ async function check(s, p) {
     const r = (await pool.query('select qty from pos where sym=$1', [s])).rows[0];
     const label = hit.kind === 'take' ? 'Take profit' : hit.kind === 'trail' ? 'Trailing stop' : 'Stop loss', pct = hit.pct;
     if (r) await trade(s, 'sell', pct >= 100 ? +r.qty : +(r.qty * pct / 100).toFixed(8), label.toLowerCase());
-    if (r) sendPush(label + ' hit', `Sold ${pct >= 100 ? 'all' : pct + '% of'} ${s} at $${prices[s].p.toFixed(prices[s].p < 1 ? 5 : 2)}`, 'order');
+    if (r) {
+      const t = (await pool.query('select pnl from trd order by id desc limit 1')).rows[0], pl = t?.pnl == null ? '' : ` · P/L ${+t.pnl >= 0 ? '+' : '-'}$${Math.abs(+t.pnl).toFixed(2)}`;
+      sendPush(label + ' hit', `Sold ${pct >= 100 ? 'all' : pct + '% of'} ${s} at $${prices[s].p.toFixed(prices[s].p < 1 ? 5 : 2)}${pl}`, 'order');
+    }
     if (pct >= 100) await pool.query('delete from ord where sym=$1', [s]); else await pool.query('delete from ord where id=$1', [hit.id]);
     await loadOrders();
   } catch (e) { console.error('order error', e.message); } finally { firing.delete(s); }
@@ -110,7 +114,7 @@ wss.on('connection', (c, q) => { if (!valid(new URL(q.url, 'http://x').searchPar
 function tick(s, p, prev, fromWs) {
   const o = prices[s] || {};
   prices[s] = { p, prev: prev || o.prev, t: Date.now(), wsT: fromWs ? Date.now() : o.wsT };
-  check(s, p); alertCheck(s, p);
+  check(s, p); alertCheck(s, p); limCheck(s, p);
   const n = Date.now();
   if (n - (lastSent[s] || 0) > 250) {
     lastSent[s] = n;
@@ -157,10 +161,10 @@ app.post('/api/login', (q, r) => {
 
 app.get('/api/state', auth, W(async (q, r) => {
   const Q = s => pool.query(s).then(x => x.rows);
-  const [a, ps, os, ts, sn, ex, wl, al] = await Promise.all([
+  const [a, ps, os, ts, sn, ex, wl, al, lm] = await Promise.all([
     Q('select cash from acct'), Q('select * from pos order by sym'), Q('select * from ord'),
     Q('select * from trd order by id desc limit 30'),
-    Q("select eq from snap where ts>now()-interval '24 hours' order by ts"), Q('select * from extra'), Q('select * from watch'), Q('select * from alert order by id desc limit 40')]);
+    Q("select eq from snap where ts>now()-interval '24 hours' order by ts"), Q('select * from extra'), Q('select * from watch'), Q('select * from alert order by id desc limit 40'), Q('select * from lim order by id')]);
   r.json({
     cash: +a[0].cash,
     pos: ps.map(x => ({ sym: x.sym, qty: +x.qty, avg: +x.avg })),
@@ -168,7 +172,7 @@ app.get('/api/state', auth, W(async (q, r) => {
     trd: ts.map(x => ({ id: x.id, note: x.note, ts: x.ts, sym: x.sym, side: x.side, qty: +x.qty, price: +x.price, why: x.why, pnl: x.pnl == null ? null : +x.pnl })),
     snap: sn.map(x => +x.eq),
     prices: Object.fromEntries(Object.entries(prices).map(([k, v]) => [k, { p: v.p, prev: v.prev }])),
-    watch: wl.map(x => x.sym), alerts: al.map(x => ({ id: x.id, sym: x.sym, dir: x.dir, price: +x.price, fired: x.fired, label: x.label })), divOn, settings,
+    watch: wl.map(x => x.sym), alerts: al.map(x => ({ id: x.id, sym: x.sym, dir: x.dir, price: +x.price, fired: x.fired, label: x.label })), divOn, settings, lims: lm.map(x => ({ id: x.id, sym: x.sym, side: x.side, price: +x.price, amt: +x.amt })),
     extra: ex.map(x => ({ sym: x.sym, kind: x.kind })),
     live: !!FINNHUB_KEY
   });
@@ -187,8 +191,8 @@ app.post('/api/trade', auth, W(async (q, r) => {
   if (!(qty > 0)) throw Error('Enter a valid amount');
   await trade(sym, side, qty);
   if (side === 'buy') {
-    const px = prices[sym].p;
-    for (const [k, v, m] of [['stop', settings.autoSL, 1 - settings.autoSL / 100], ['take', settings.autoTP, 1 + settings.autoTP / 100]]) if (v > 0) {
+    const px = prices[sym].p, sl = Math.min(90, +q.body.sl > 0 ? +q.body.sl : settings.autoSL), tp = Math.min(900, +q.body.tp > 0 ? +q.body.tp : settings.autoTP);
+    for (const [k, v, m] of [['stop', sl, 1 - sl / 100], ['take', tp, 1 + tp / 100]]) if (v > 0) {
       await pool.query('delete from ord where sym=$1 and kind=$2', [sym, k]);
       await pool.query('insert into ord(sym,kind,price,pct) values($1,$2,$3,100)', [sym, k, px * m]);
     }
@@ -219,7 +223,7 @@ app.delete('/api/order/:id', auth, W(async (q, r) => {
 }));
 
 app.post('/api/reset', auth, W(async (q, r) => {
-  await pool.query(`delete from pos; delete from ord; delete from trd; delete from snap; update acct set cash=${+settings.startBalance || 10000};`);
+  await pool.query(`delete from pos; delete from ord; delete from lim; delete from trd; delete from snap; update acct set cash=${+settings.startBalance || 10000};`); lims = {};
   await loadOrders();
   r.json({ ok: 1 });
 }));
@@ -392,7 +396,7 @@ self.addEventListener('activate',e=>e.waitUntil(clients.claim()));
 self.addEventListener('push',e=>{const d=e.data?e.data.json():{};e.waitUntil(self.registration.showNotification(d.title||'Mango',{body:d.body||''}))});
 self.addEventListener('notificationclick',e=>{e.notification.close();e.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(l=>l.length?l[0].focus():clients.openWindow('/')))});`;
 app.get('/sw.js', (q, r) => r.type('js').send(SW));
-app.get('/manifest.json', (q, r) => r.type('application/manifest+json').send(JSON.stringify({ name: 'Mango Paper Trading', short_name: 'Mango', start_url: '/', display: 'standalone', background_color: '#16111f', theme_color: '#16111f' })));
+app.get('/manifest.json', (q, r) => r.type('application/manifest+json').send(JSON.stringify({ name: 'Mango Paper Trading', short_name: 'Mango', start_url: '/', display: 'standalone', icons: [{ src: '/icon.png', sizes: '180x180', type: 'image/png', purpose: 'any' }], background_color: '#16111f', theme_color: '#16111f' })));
 app.get('/api/push/key', auth, (q, r) => r.json({ key: VAPID_PUB, on: pushOn }));
 app.post('/api/push/sub', auth, W(async (q, r) => {
   const sub = q.body.sub;
@@ -402,6 +406,61 @@ app.post('/api/push/sub', auth, W(async (q, r) => {
 }));
 app.post('/api/push/unsub', auth, W(async (q, r) => { await pool.query('delete from push where endpoint=$1', [q.body.endpoint]); r.json({ ok: 1 }); }));
 app.post('/api/push/test', auth, W(async (q, r) => { await sendPush('Mango test', 'Notifications are working 🥭'); r.json({ ok: 1 }); }));
+
+// ---------- limit orders ----------
+let lims = {};
+async function loadLims() {
+  lims = {};
+  for (const l of (await pool.query('select * from lim')).rows) (lims[l.sym] ??= []).push({ ...l, price: +l.price, amt: +l.amt });
+}
+async function limCheck(s, p) {
+  const list = lims[s];
+  if (!list || firing.has('L' + s)) return;
+  const hit = list.find(l => l.side === 'buy' ? p <= l.price : p >= l.price);
+  if (!hit) return;
+  firing.add('L' + s);
+  try {
+    await pool.query('delete from lim where id=$1', [hit.id]); await loadLims();
+    let qty;
+    if (hit.side === 'buy') { qty = +(hit.amt / p).toFixed(8); if (settings.wholeShares && !CRYPTO.includes(s)) qty = Math.floor(qty); }
+    else { const r = (await pool.query('select qty from pos where sym=$1', [s])).rows[0]; qty = r ? (hit.amt >= 100 ? +r.qty : +(r.qty * hit.amt / 100).toFixed(8)) : 0; }
+    if (!(qty > 0)) throw Error('nothing to trade');
+    await trade(s, hit.side, qty, 'limit order');
+    sendPush('Limit order filled', `${hit.side === 'buy' ? 'Bought' : 'Sold'} ${s} at $${p.toFixed(p < 1 ? 5 : 2)}`, 'order');
+  } catch (e) { sendPush('Limit order not filled', `${s}: ${e.message}`, 'order'); }
+  finally { firing.delete('L' + s); }
+}
+app.post('/api/limit', auth, W(async (q, r) => {
+  const { sym, side, price, amt } = q.body, p = prices[sym]?.p;
+  if (!p || !['buy', 'sell'].includes(side) || !(price > 0) || !(amt > 0)) throw Error('Fill in the price and amount');
+  if (side === 'buy' && price >= p) throw Error('A buy limit must be below the current price');
+  if (side === 'sell') {
+    if (!(await pool.query('select 1 from pos where sym=$1', [sym])).rows[0]) throw Error('You do not own ' + sym);
+    if (price <= p) throw Error('A sell limit must be above the current price');
+  }
+  await pool.query('insert into lim(sym,side,price,amt) values($1,$2,$3,$4)', [sym, side, price, side === 'sell' ? Math.min(100, amt) : amt]);
+  await loadLims(); r.json({ ok: 1 });
+}));
+app.delete('/api/limit/:id', auth, W(async (q, r) => { await pool.query('delete from lim where id=$1', [q.params.id]); await loadLims(); r.json({ ok: 1 }); }));
+
+// ---------- app icon (drawn in code, no image file needed) ----------
+function makePng(w, h, fn) {
+  const zlib = require('zlib'), raw = Buffer.alloc((w * 4 + 1) * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const o = y * (w * 4 + 1) + 1 + x * 4, c = fn(x, y); raw[o] = c[0]; raw[o + 1] = c[1]; raw[o + 2] = c[2]; raw[o + 3] = 255; }
+  const T = []; for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; T[n] = c >>> 0; }
+  const crc = b => { let c = -1; for (const x of b) c = T[(c ^ x) & 255] ^ (c >>> 8); return (c ^ -1) >>> 0; };
+  const chunk = (t, d) => { const b = Buffer.concat([Buffer.from(t), d]), l = Buffer.alloc(4), k = Buffer.alloc(4); l.writeUInt32BE(d.length); k.writeUInt32BE(crc(b)); return Buffer.concat([l, b, k]); };
+  const ih = Buffer.alloc(13); ih.writeUInt32BE(w, 0); ih.writeUInt32BE(h, 4); ih[8] = 8; ih[9] = 6;
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ih), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+const ICON = makePng(180, 180, (x, y) => {
+  const dx = x - 88, dy = y - 100, u = (dx * 0.88 + dy * 0.48) / 56, v = (-dx * 0.48 + dy * 0.88) / 68;
+  const lx = x - 122, ly = y - 42, lu = (lx * 0.85 + ly * 0.5) / 27, lv = (-lx * 0.5 + ly * 0.85) / 10;
+  if (lu * lu + lv * lv < 1) return [56, 217, 169];
+  if (u * u + v * v < 1) { const t = Math.min(1, Math.max(0, (dx * 0.5 - dy * 0.6) / 90 + 0.5)); return [255, Math.round(150 + 60 * t), Math.round(30 + 30 * t)]; }
+  return [30 - Math.round(y / 12), 22, 44 - Math.round(y / 9)];
+});
+app.get('/icon.png', (q, r) => r.type('png').send(ICON));
 
 app.post('/api/cash', auth, W(async (q, r) => {
   const a = +q.body.amount, now = +(await pool.query('select cash from acct')).rows[0].cash;
@@ -437,7 +496,7 @@ setInterval(async () => {
 }, 30000);
 
 (async () => {
-  await init(); await loadOrders(); await loadAlerts(); await initPush();
+  await init(); await loadOrders(); await loadAlerts(); await initPush(); await loadLims();
   try { settings = { ...DEF, ...JSON.parse((await pool.query("select v from kv where k='settings'")).rows[0]?.v || '{}') }; } catch (e) {}
   divOn = (await pool.query("select v from kv where k='div'")).rows[0]?.v !== 'off'; divJob(); setInterval(divJob, 6 * 36e5);
   for (const x of (await pool.query('select * from extra')).rows) { const l = x.kind === 'crypto' ? CRYPTO : STOCKS; if (!l.includes(x.sym)) l.push(x.sym); }
