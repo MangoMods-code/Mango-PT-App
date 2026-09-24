@@ -37,6 +37,7 @@ nav button{flex:1;background:none;color:var(--mu);border-radius:0;padding:14px}n
 #toast.on{opacity:1}#toast.e{background:var(--dn);color:#fff}
 .tabs{display:flex;gap:6px;margin:6px 0}.tabs button{flex:1;padding:8px 4px;font-size:14px}.tabs .on{background:var(--ac);color:#2a1a00}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.grid div{background:var(--bg);border-radius:10px;padding:10px}.grid small{display:block}
+.chip.on{background:var(--ac);color:#2a1a00}.hb .priv{filter:blur(9px)}.row input{margin:0}
 </style></head><body>
 <div id="splash" class="full"><div class="logo">🥭</div><h1>Mango</h1><p class="mu">Paper trading, real markets</p></div>
 <form id="login" class="full hide"><div class="logo" style="font-size:56px;text-align:center">🥭</div><h1 style="text-align:center">Welcome back</h1>
@@ -64,10 +65,10 @@ async function api(path,method='GET',body){
 function connect(){
   if(ws&&ws.readyState<2)return;
   ws=new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/stream?t='+T);
-  ws.onmessage=e=>{const d=JSON.parse(e.data);if(d.alert){toast(`🔔 ${d.alert.sym} ${d.alert.dir==='above'?'rose to':'fell to'} ${fmt(d.alert.price)}`);load().catch(()=>{});return}P[d.s]={p:d.p,prev:d.v??P[d.s]?.prev};(H[d.s]??=[]).push(d.p);if(H[d.s].length>300)H[d.s].shift();queue()};
+  ws.onmessage=e=>{const d=JSON.parse(e.data);if(d.alert){toast(`🔔 ${d.alert.sym} price ${d.alert.dir==='above'?'rose to':'fell to'} ${fmt(d.alert.price)}`);load().catch(()=>{});return}P[d.s]={p:d.p,prev:d.v??P[d.s]?.prev};(H[d.s]??=[]).push(d.p);if(H[d.s].length>300)H[d.s].shift();queue()};
   ws.onclose=()=>{if(T)setTimeout(connect,2000)}}
 function queue(){if(!timer)timer=setTimeout(()=>{timer=0;paint()},700)}
-async function load(){S=await api('state');P=S.prices;S.extra.forEach(x=>NAME[x.sym]??=x.kind==='crypto'?'Crypto':'Stock');connect();render()}
+async function load(){S=await api('state');P=S.prices;if(!load.d){load.d=1;rg=S.settings.defaultRange||'1D';ty=S.settings.defaultChart==='Line'?'l':'c'}S.extra.forEach(x=>NAME[x.sym]??=x.kind==='crypto'?'Crypto':'Stock');connect();render()}
 async function start(){await load();show('app')}
 function setTab(t){tab=t;render()}
 function chart(pts,el){
@@ -77,21 +78,21 @@ function chart(pts,el){
   const c=pts[pts.length-1]>=pts[0]?'#38d9a9':'#ff6b7a';
   el.innerHTML=`<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline points="${d}" fill="none" stroke="${c}" stroke-width="2.2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`}
 const mkt=s=>`<div class="row" onclick="openSheet('${s}')"><div><b>${s}</b><small>${NAME[s]}</small></div><div class="r"><b data-px="${s}"></b><span data-ch="${s}"></span></div></div>`;
-const posRow=p=>`<div class="row" onclick="openSheet('${p.sym}')"><div><b>${p.sym}</b><small>${+p.qty.toFixed(6)} @ ${fmt(p.avg)}</small></div><div class="r"><b data-val="${p.sym}"></b><span data-pnl="${p.sym}"></span></div></div>`;
+const posRow=p=>`<div class="row" onclick="openSheet('${p.sym}')"><div><b>${p.sym}</b><small>${+p.qty.toFixed(6)} @ ${fmt(p.avg)}</small></div><div class="r"><b class="priv" data-val="${p.sym}"></b><span data-pnl="${p.sym}"></span></div></div>`;
 function render(){
   if(!S)return;
-  $('#t-p').className=tab==='p'?'on':'';$('#t-m').className=tab==='m'?'on':'';$('#t-s').className=tab==='s'?'on':'';
-  $('#v').innerHTML=tab==='s'?viewS():tab==='p'?`<h2>Portfolio</h2><div class="big" id="eq"></div><div id="pl"></div><div class="chart" id="ch"></div>
-  <div class="stats"><div><small>Cash</small><b>${fmt(S.cash)}</b></div><div><small>Positions</small><b>${S.pos.length}</b></div><div><small>Open orders</small><b>${S.ord.length}</b></div></div>
+  document.body.classList.toggle('hb',!!S.settings.hideBalances);$('#t-p').className=tab==='p'?'on':'';$('#t-m').className=tab==='m'?'on':'';$('#t-s').className=tab==='s'?'on':'';
+  $('#v').innerHTML=tab==='s'?viewS():tab==='p'?`<h2>Portfolio</h2><div class="big priv" id="eq"></div><div id="pl" class="priv"></div><div class="chart" id="ch"></div>
+  <div class="stats"><div><small>Cash</small><b class="priv">${fmt(S.cash)}</b></div><div><small>Positions</small><b>${S.pos.length}</b></div><div><small>Open orders</small><b>${S.ord.length}</b></div></div>
   ${on('analytics')?'<div class="box" id="an">Loading performance…</div>':''}<h3>Positions</h3>${S.pos.map(posRow).join('')||'<p class="mu">No positions yet. Open the Market tab to place your first trade.</p>'}
-  ${on('alerts')&&S.alerts.length?'<h3>Price alerts</h3>'+S.alerts.map(a=>`<div class="row"><div><b>${a.sym}</b><small>${a.dir==='above'?'Rises to':'Falls to'} ${fmt(a.price)}</small></div><div class="r"><span class="${a.fired?'up':'mu'}">${a.fired?'Triggered':'Waiting'}</span><button class="g chip" onclick="delAlert(${a.id})">Remove</button></div></div>`).join(''):''}<h3>Recent trades</h3>${S.trd.slice(0,10).map(t=>`<div class="row" ${on('journal')?`onclick="note(${t.id})"`:''}><div><b>${{buy:'Bought',sell:'Sold',div:'Dividend'}[t.side]} ${t.sym}</b><small>${t.why} · ${new Date(t.ts).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</small>${on('journal')&&t.note?`<br><small>📝 ${esc(t.note)}</small>`:''}</div><div class="r"><b>${fmt(t.qty*t.price)}</b>${t.pnl==null?'':`<span class="${cls(t.pnl)}">${t.pnl>=0?'+':''}${fmt(t.pnl)}</span>`}</div></div>`).join('')||'<p class="mu">Your trades will show up here.</p>'}
-  <p style="margin-top:30px"><button class="g" onclick="resetAcct()">Reset account to $10,000</button></p>`
+  ${on('alerts')&&S.alerts.length?'<h3>Price alerts</h3>'+S.alerts.map(a=>`<div class="row"><div><b>${a.sym}</b><small>Price ${a.dir==='above'?'rises to':'falls to'} ${fmt(a.price)}${a.label?' ('+esc(a.label)+')':''}</small></div><div class="r"><span class="${a.fired?'up':'mu'}">${a.fired?'Triggered':'Waiting'}</span><button class="g chip" onclick="delAlert(${a.id})">Remove</button></div></div>`).join(''):''}<h3>Recent trades</h3>${S.trd.slice(0,10).map(t=>`<div class="row" ${on('journal')?`onclick="note(${t.id})"`:''}><div><b>${{buy:'Bought',sell:'Sold',div:'Dividend'}[t.side]} ${t.sym}</b><small>${t.why} · ${new Date(t.ts).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</small>${on('journal')&&t.note?`<br><small>📝 ${esc(t.note)}</small>`:''}</div><div class="r"><b>${fmt(t.qty*t.price)}</b>${t.pnl==null?'':`<span class="${cls(t.pnl)}">${t.pnl>=0?'+':''}${fmt(t.pnl)}</span>`}</div></div>`).join('')||'<p class="mu">Your trades will show up here.</p>'}
+  <p style="margin-top:30px"><button class="g" onclick="resetAcct()">Reset account to ${fmt(SB())}</button></p>`
   :`<h2>Market</h2><input id="q" placeholder="Search any stock or coin" oninput="search()"><div id="res"></div>${on('watch')&&S.watch.length?'<h3>Watchlist</h3>'+S.watch.map(mkt).join(''):''}${S.live?'':'<p class="mu">Stock prices are off. Add FINNHUB_KEY in Railway to turn them on.</p>'}<h3>Stocks</h3>${STK.map(mkt).join('')}<h3>Crypto</h3>${CR.map(mkt).join('')}${S.extra.length?'<h3>Added by you</h3>'+S.extra.map(x=>mkt(x.sym)).join(''):''}`;
   if(tab==='p'&&on('analytics'))loadAn();if(tab==='s')pushUI();paint()}
 function paint(){
   if(!S)return;
   const e=eq(),el=$('#eq');
-  if(el){el.textContent=fmt(e);const d=e-10000;$('#pl').innerHTML=`<span class="${cls(d)}">${d>=0?'+':''}${fmt(d)} (${pc(d/100)})</span> <small>all time</small>`;chart(S.snap.concat(e),$('#ch'))}
+  if(el){el.textContent=fmt(e);const d=e-SB();$('#pl').innerHTML=`<span class="${cls(d)}">${d>=0?'+':''}${fmt(d)} (${pc(d/SB()*100)})</span> <small>all time</small>`;chart(S.snap.concat(e),$('#ch'))}
   document.querySelectorAll('[data-px]').forEach(n=>n.textContent=px(n.dataset.px)?fmt(px(n.dataset.px)):'…');
   document.querySelectorAll('[data-ch]').forEach(n=>{const c=chg(n.dataset.ch);n.textContent=pc(c);n.className=cls(c)});
   document.querySelectorAll('[data-val]').forEach(n=>{const p=S.pos.find(x=>x.sym===n.dataset.val);if(p)n.textContent=fmt(p.qty*px(p.sym))});
@@ -105,22 +106,22 @@ const orderBox=(kind,title,chips)=>{
 function openSheet(s){
   cur=s;const p=S.pos.find(x=>x.sym===s);
   $('#sheet').innerHTML=`<div class="hd"><div><b style="font-size:24px">${s}</b><br><small>${NAME[s]}</small></div>${on('watch')?`<button class="x" onclick="toggleWatch()">${S.watch.includes(s)?'★ Watching':'☆ Watch'}</button>`:''}<button class="x" onclick="closeSheet()">Close</button></div>
-  <div class="big" data-px="${s}"></div><span data-ch="${s}"></span> <small>today</small><div class="tabs" id="rg">${['1D','1W','1M','3M'].map(r=>`<button class="g" data-r="${r}" onclick="loadC('${r}')">${r}</button>`).join('')}<button class="g" id="tt" onclick="togType()">Line</button></div><div class="chart" id="sch" style="height:200px"></div><div class="box"><h4>Stats</h4><div class="grid" id="stats"><small>Loading…</small></div></div>
-  ${p?`<div class="box"><h4>Your position</h4><div class="two"><span>Amount</span><b>${+p.qty.toFixed(6)}</b></div><div class="two"><span>Average price</span><b>${fmt(p.avg)}</b></div><div class="two"><span>Value</span><b data-val="${s}"></b></div><div class="two"><span>Profit / loss</span><b data-pnl="${s}"></b></div></div>`:''}
-  ${on('alerts')?alertBox(s):''}<div class="box"><h4>Buy</h4><small>You have ${fmt(S.cash)} to spend</small><input id="usd" type="number" inputmode="decimal" placeholder="Amount in dollars">
+  <div class="big" data-px="${s}"></div><span data-ch="${s}"></span> <small>today</small><div class="tabs" id="rg">${['1D','1W','1M','3M'].map(r=>`<button class="g" data-r="${r}" onclick="loadC('${r}')">${r}</button>`).join('')}<button class="g" id="tt" onclick="togType()">${ty==='c'?'Line':'Candles'}</button></div><div class="chart" id="sch" style="height:200px"></div><div class="box"><h4>Stats</h4><div class="grid" id="stats"><small>Loading…</small></div></div>
+  ${p?`<div class="box"><h4>Your position</h4><div class="two"><span>Amount</span><b>${+p.qty.toFixed(6)}</b></div><div class="two"><span>Average price</span><b>${fmt(p.avg)}</b></div><div class="two"><span>Value</span><b class="priv" data-val="${s}"></b></div><div class="two"><span>Profit / loss</span><b data-pnl="${s}"></b></div></div>`:''}
+  ${on('alerts')?alertBox(s):''}<div class="box"><h4>Buy</h4><small>You have ${fmt(S.cash)} to spend</small><input id="usd" type="number" inputmode="decimal" placeholder="Amount in dollars" value="${S.settings.defaultBuy||''}">
   <div>${[25,50,100].map(n=>`<button class="g chip" onclick="setUsd(${n})">${n===100?'Max':n+'%'}</button>`).join('')} <button class="b chip" onclick="buy()">Buy ${s}</button></div></div>
-  ${p?`<div class="box"><h4>Sell</h4><div>${[25,50,75,100].map(n=>`<button class="s chip" onclick="sell(${n})">${n===100?'Sell all':n+'%'}</button>`).join('')}</div></div>${orderBox('stop','Stop loss (sell if price falls to)',[-3,-5,-10])}${orderBox('take','Take profit (sell if price rises to)',[3,5,10])}`
+  ${p?`<div class="box"><h4>Sell</h4><div>${[25,50,75,100].map(n=>`<button class="s chip" onclick="sell(${n})">${n===100?'Sell all':n+'%'}</button>`).join('')}</div></div>${ordBox('stop')}${ordBox('take')}`
   :'<div class="box"><h4>Stop loss and take profit</h4><small>Buy first, then set them here. They run on the server, so they trigger even when the app is closed.</small></div>'}`;
   $('#sheet').classList.remove('hide');cd=[];paint();loadStats();loadC(rg)}
 function closeSheet(){cur=null;$('#sheet').classList.add('hide')}
 async function act(fn,msg){try{await fn();await load();if(cur)openSheet(cur);toast(msg)}catch(e){if(e.message!=='auth')toast(e.message,1)}}
 const setUsd=n=>{$('#usd').value=(Math.floor(S.cash*n)/100).toFixed(2)};
-const buy=()=>{const v=+$('#usd').value;if(!(v>0))return toast('Enter an amount to buy',1);act(()=>api('trade','POST',{sym:cur,side:'buy',usd:v}),'Bought '+cur)};
-const sell=n=>{if(confirm(`Sell ${n===100?'all':n+'%'} of ${cur} at market price?`))act(()=>api('trade','POST',{sym:cur,side:'sell',pct:n}),'Sold '+cur)};
+const buy=()=>{const v=+$('#usd').value;if(!(v>0))return toast('Enter an amount to buy',1);if(S.settings.confirmBuy&&!confirm(`Buy ${fmt(v)} of ${cur} at market price?`))return;act(()=>api('trade','POST',{sym:cur,side:'buy',usd:v}),'Bought '+cur)};
+const sell=n=>{if(!S.settings.confirmSell||confirm(`Sell ${n===100?'all':n+'%'} of ${cur} at market price?`))act(()=>api('trade','POST',{sym:cur,side:'sell',pct:n}),'Sold '+cur)};
 const fill=(k,n)=>{$('#o_'+k).value=(px(cur)*(1+n/100)).toFixed(px(cur)<1?5:2)};
 const setOrder=k=>{const v=+$('#o_'+k).value;if(!(v>0))return toast('Enter a trigger price',1);act(()=>api('order','POST',{sym:cur,kind:k,price:v}),(k==='stop'?'Stop loss':'Take profit')+' set')};
 const cancelOrder=id=>act(()=>api('order/'+id,'DELETE'),'Order cancelled');
-const resetAcct=()=>{if(confirm('Reset to $10,000 and erase all trades?'))act(()=>api('reset','POST'),'Account reset')};
+const resetAcct=()=>{if(confirm('Reset to '+fmt(SB())+' and erase all trades?'))act(()=>api('reset','POST'),'Account reset')};
 let cd=[],rg='1D',ty='c',sdeb=0;
 function search(){clearTimeout(sdeb);sdeb=setTimeout(async()=>{const v=$('#q').value.trim();if(!v){$('#res').innerHTML='';return}
   try{const r=await api('search?q='+encodeURIComponent(v));$('#res').innerHTML=r.map(x=>`<div class="row" onclick="pick('${x.sym}','${x.kind}')"><div><b>${x.sym}</b><small>${x.name}</small></div><small>${x.kind}</small></div>`).join('')||'<p class="mu">No matches.</p>'}catch(e){if(e.message!=='auth')toast(e.message,1)}},350)}
@@ -141,15 +142,58 @@ const FEAT={watch:'Watchlist',alerts:'Price alerts',analytics:'Performance stats
 let FS=JSON.parse(localStorage.mangoF||'{}');const on=k=>FS[k]!==false;
 const esc=s=>String(s).replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
 function tog(k){FS[k]=!on(k);localStorage.mangoF=JSON.stringify(FS);render()}
-const viewS=()=>`<h2>Settings</h2><p class="mu">Turn features on or off. These switches are saved on this device.</p>${Object.entries(FEAT).map(([k,n])=>`<div class="row"><b>${n}</b><button class="${on(k)?'':'g'}" onclick="tog('${k}')">${on(k)?'On':'Off'}</button></div>`).join('')}<div class="row"><div><b>Dividend income</b><br><small>Saved on the server</small></div><button class="${S.divOn?'':'g'}" onclick="act(()=>api('divs','POST',{on:!S.divOn}),'Dividends '+(S.divOn?'off':'on'))">${S.divOn?'On':'Off'}</button></div><h3>Notifications</h3><div class="box" id="pushbox"><small>Checking…</small></div>`;
-const alertBox=s=>`<div class="box"><h4>Price alert</h4>${S.alerts.filter(a=>a.sym===s&&!a.fired).map(a=>`<div class="two"><span>${a.dir==='above'?'Rises to':'Falls to'} <b>${fmt(a.price)}</b></span><button class="g chip" onclick="delAlert(${a.id})">Remove</button></div>`).join('')}<input id="al" type="number" inputmode="decimal" placeholder="Alert me at this price"><button class="chip" onclick="setAlert()">Set alert</button><br><small>Alerts show up as a banner while the app is open, and stay listed in Portfolio.</small></div>`;
+const viewS=()=>`<h2>Settings</h2><p class="mu">Only you can change these, and they sync across your devices.</p>${setSections()}<h3>Features</h3><p class="mu">These switches are saved on this device only.</p>${Object.entries(FEAT).map(([k,n])=>`<div class="row"><b>${n}</b><button class="${on(k)?'':'g'}" onclick="tog('${k}')">${on(k)?'On':'Off'}</button></div>`).join('')}<div class="row"><div><b>Dividend income</b><br><small>Saved on the server</small></div><button class="${S.divOn?'':'g'}" onclick="act(()=>api('divs','POST',{on:!S.divOn}),'Dividends '+(S.divOn?'off':'on'))">${S.divOn?'On':'Off'}</button></div><h3>Notifications</h3><div class="box" id="pushbox"><small>Checking…</small></div><h3>Account</h3><button class="g" onclick="logout()">Log out of this device</button>`;
+let am='p';
+const isCr=s=>CR.includes(s)||S.extra.some(x=>x.sym===s&&x.kind==='crypto');
+const alertBox=s=>{const p=S.pos.find(x=>x.sym===s),u=isCr(s)?'coin':'share';
+  const M=[['p','Price per '+u],['%','% move']].concat(p?[['v','My position value']]:[]);if(!M.some(x=>x[0]===am))am='p';
+  const H={p:`Alert when 1 ${u} of ${s} reaches this price`,'%':`Alert when the price moves this % from now. Use a minus for a drop.`,v:`Alert when your whole ${s} position is worth this much`};
+  const PH2={p:'Price in dollars','%':'Percent, e.g. 5 or -5',v:'Total value in dollars'};
+  return `<div class="box" id="abox"><h4>Price alert</h4><small>Now: <b data-px="${s}"></b> per ${u}${p?' · your position: <b class="priv" data-val="'+s+'"></b>':''}</small>
+  ${S.alerts.filter(a=>a.sym===s&&!a.fired).map(a=>`<div class="two"><span>Price ${a.dir==='above'?'rises to':'falls to'} <b>${fmt(a.price)}</b>${a.label?' <small>('+esc(a.label)+')</small>':''}</span><button class="g chip" onclick="delAlert(${a.id})">Remove</button></div>`).join('')}
+  <div>${M.map(([m,l])=>`<button class="g chip ${am===m?'on':''}" onclick="setAM('${m}')">${l}</button>`).join('')}</div>
+  <input id="al" type="number" inputmode="decimal" placeholder="${PH2[am]}" oninput="alPrev()"><p class="mu" id="alp" data-h="${H[am]}">${H[am]}</p><button class="chip" onclick="setAlert()">Set alert</button></div>`};
+function alTarget(){const v=+$('#al').value,p=S.pos.find(x=>x.sym===cur),n=px(cur);if(!v)return null;
+  if(am==='p')return{price:v,label:''};
+  if(am==='%')return{price:n*(1+v/100),label:(v>0?'+':'')+v+'% from '+fmt(n)};
+  if(am==='v'&&p)return{price:v/p.qty,label:'position worth '+fmt(v)}}
+function alPrev(){const t=alTarget(),n=px(cur),e=$('#alp');e.textContent=t?`Fires when 1 ${cur} ${t.price>n?'rises to':'falls to'} ${fmt(t.price)} (${pc((t.price/n-1)*100)} from now)`:e.dataset.h}
+function setAM(m){am=m;$('#abox').outerHTML=alertBox(cur);paint()}
 const toggleWatch=()=>act(()=>api('watch','POST',{sym:cur,on:!S.watch.includes(cur)}),S.watch.includes(cur)?'Removed from watchlist':'Added to watchlist');
-const setAlert=()=>{const v=+$('#al').value;if(!(v>0))return toast('Enter a price',1);act(()=>api('alert','POST',{sym:cur,price:v}),'Alert set')};
+const setAlert=()=>{const t=alTarget();if(!t)return toast('Enter a value',1);act(()=>api('alert','POST',{sym:cur,price:t.price,label:t.label}),'Alert set')};
+const SB=()=>S.settings.startBalance||10000;
+let om={stop:'%e',take:'%e'},os={stop:100,take:100};
+const MODES={stop:[['%e','% below my buy price'],['$','$ loss'],['px','Price'],['trail','Trailing %']],take:[['%e','% above my buy price'],['$','$ profit'],['px','Price']]};
+const OPH={'%e':'Percent, e.g. 5','$':'Dollars, e.g. 200','px':'Trigger price per unit','trail':'Distance from peak, e.g. 5'};
+function ordTarget(k){const p=S.pos.find(x=>x.sym===cur),v=+($('#ov_'+k)?.value),m=om[k],g=k==='stop'?-1:1;if(!p||!(v>0))return null;
+  if(m==='px')return{price:v};if(m==='%e')return{price:p.avg*(1+g*v/100)};if(m==='$')return{price:p.avg+g*v/p.qty};
+  if(m==='trail')return{trail:v,price:px(cur)*(1-v/100)}}
+function ordPrev(k){const t=ordTarget(k),p=S.pos.find(x=>x.sym===cur),e=$('#op_'+k);if(!e)return;if(!t){e.textContent='';return}
+  const n=px(cur),q=p.qty*os[k]/100,d=(t.price-p.avg)*q;
+  e.textContent=t.trail?`Follows the highest price. Sells if it drops ${t.trail}% from the peak (that would be ${fmt(t.price)} right now).`:`Sells ${os[k]}% (${+q.toFixed(6)}) if the price hits ${fmt(t.price)}, which is ${pc((t.price/n-1)*100)} from now. About ${d>=0?'+':'-'}${fmt(Math.abs(d))} versus your buy price.`}
+const ordBox=k=>{
+  const list=S.ord.filter(o=>o.sym===cur&&(k==='stop'?o.kind!=='take':o.kind==='take'));
+  return `<div class="box" id="ob_${k}"><h4>${k==='stop'?'Stop loss':'Take profit'}</h4><small>${k==='stop'?'Sells automatically if the price falls':'Sells automatically if the price rises'}</small>
+  ${list.map(o=>`<div class="two"><span>${o.kind==='trail'?`Trailing ${o.trail}% (peak ${fmt(o.peak)}, sells near ${fmt(o.peak*(1-o.trail/100))})`:`At <b>${fmt(o.price)}</b>`} · sell ${o.pct}%</span><button class="g chip" onclick="cancelOrder(${o.id})">Cancel</button></div>`).join('')}
+  <div>${MODES[k].map(([m,l])=>`<button class="g chip ${om[k]===m?'on':''}" onclick="setOM('${k}','${m}')">${l}</button>`).join('')}</div>
+  <input id="ov_${k}" type="number" inputmode="decimal" placeholder="${OPH[om[k]]}" oninput="ordPrev('${k}')">
+  <div><small>How much to sell</small><br>${[25,50,75,100].map(n=>`<button class="g chip ${os[k]===n?'on':''}" onclick="setOS('${k}',${n})">${n}%</button>`).join('')}</div>
+  <p class="mu" id="op_${k}"></p><button class="chip" onclick="saveOrd('${k}')">Set ${k==='stop'?'stop loss':'take profit'}</button></div>`};
+function redrawO(k){const v=$('#ov_'+k).value;$('#ob_'+k).outerHTML=ordBox(k);$('#ov_'+k).value=v;ordPrev(k)}
+const setOM=(k,m)=>{om[k]=m;redrawO(k)},setOS=(k,n)=>{os[k]=n;redrawO(k)};
+function saveOrd(k){const t=ordTarget(k);if(!t)return toast('Enter a value first',1);const tr=om[k]==='trail';
+  act(()=>api('order','POST',{sym:cur,kind:tr?'trail':k,price:t.price,pct:os[k],trail:t.trail}),(k==='stop'?'Stop loss':'Take profit')+' set')}
+const SET=[['Trading',[['autoSL','Auto stop loss on every buy','num','Percent below your buy price. 0 turns it off.'],['autoTP','Auto take profit on every buy','num','Percent above your buy price. 0 turns it off.'],['defaultBuy','Default buy amount','num','Dollars prefilled in the buy box. 0 leaves it empty.'],['confirmBuy','Confirm before buying','bool'],['confirmSell','Confirm before selling','bool'],['startBalance','Starting balance for resets','num','Dollars you get when you reset the account.']]],
+ ['Notifications',[['pushAlerts','Notify for price alerts','bool'],['pushOrders','Notify for stop loss and take profit','bool']]],
+ ['Display',[['hideBalances','Hide balances (blur amounts)','bool'],['defaultRange','Default chart range','sel',['1D','1W','1M']],['defaultChart','Default chart style','sel',['Candles','Line']]]]];
+const setSections=()=>SET.map(([h,it])=>`<h3>${h}</h3>`+it.map(([k,n,t,x])=>`<div class="row"><div><b>${n}</b>${t==='num'?`<br><small>${x}</small>`:''}</div>${t==='bool'?`<button class="${S.settings[k]?'':'g'}" onclick="setSet('${k}',${!S.settings[k]})">${S.settings[k]?'On':'Off'}</button>`:t==='num'?`<input type="number" inputmode="decimal" value="${S.settings[k]}" style="width:100px" onchange="setSet('${k}',+this.value)">`:`<div>${x.map(o=>`<button class="g chip ${S.settings[k]===o?'on':''}" onclick="setSet('${k}','${o}')">${o}</button>`).join('')}</div>`}</div>`).join('')).join('');
+const setSet=(k,v)=>act(()=>api('settings','POST',{[k]:v}),'Saved');
+function logout(){localStorage.removeItem('mango');T=null;S=null;if(ws)ws.close();show('login')}
 const delAlert=id=>act(()=>api('alert/'+id,'DELETE'),'Alert removed');
 function note(id){const t=S.trd.find(x=>x.id===id),v=prompt('Note for this trade',t.note||'');if(v!==null)act(()=>api('note','POST',{id,note:v}),'Note saved')}
 async function loadAn(){try{const a=await api('analytics'),el=$('#an');if(!el)return;
   const m=v=>v==null?'–':(v>=0?'+':'')+fmt(v),p=v=>v==null?'–':v.toFixed(1)+'%',c=(l,v,k='')=>`<div><small>${l}</small><b class="${k}">${v}</b></div>`;
-  el.innerHTML=`<h4>Performance</h4><div class="grid">${c('Win rate',p(a.win))}${c('Closed trades',a.closed)}${c('Average win',m(a.avgWin),'up')}${c('Average loss',m(a.avgLoss),'dn')}${c('Best trade',m(a.best))}${c('Worst trade',m(a.worst))}${c('Realized P/L',m(a.realized))}${c('Max drawdown',p(a.maxDD))}${c('Profit factor',a.pf==null?'–':a.pf.toFixed(2))}${c('Dividends',fmt(a.dividends))}${c('You vs S&P 500',pc(eq()/100-100)+' vs '+(a.spy==null?'–':pc(a.spy)))}</div>`}catch(e){}}
+  el.innerHTML=`<h4>Performance</h4><div class="grid">${c('Win rate',p(a.win))}${c('Closed trades',a.closed)}${c('Average win',m(a.avgWin),'up')}${c('Average loss',m(a.avgLoss),'dn')}${c('Best trade',m(a.best))}${c('Worst trade',m(a.worst))}${c('Realized P/L',m(a.realized))}${c('Max drawdown',p(a.maxDD))}${c('Profit factor',a.pf==null?'–':a.pf.toFixed(2))}${c('Dividends',fmt(a.dividends))}${c('You vs S&P 500',pc((eq()/SB()-1)*100)+' vs '+(a.spy==null?'–':pc(a.spy)))}</div>`}catch(e){}}
 const b64=s=>{const r=atob((s+'='.repeat((4-s.length%4)%4)).replace(/-/g,'+').replace(/_/g,'/'));return Uint8Array.from(r,c=>c.charCodeAt(0))};
 async function pushUI(){
   const el=$('#pushbox');if(!el)return;

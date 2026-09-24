@@ -9,6 +9,8 @@ const pool = new Pool({ connectionString: DATABASE_URL, ssl: DATABASE_URL.includ
 const STOCKS = ['AAPL', 'MSFT', 'GOOGL', 'META', 'NVDA', 'TSLA', 'AMZN', 'LMT', 'NOC', 'WMT'];
 const CRYPTO = ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'ADA'];
 const prices = {}, lastSent = {}, firing = new Set();
+const DEF = { autoSL: 0, autoTP: 0, defaultBuy: 0, startBalance: 10000, confirmBuy: false, confirmSell: true, pushAlerts: true, pushOrders: true, hideBalances: false, defaultRange: '1D', defaultChart: 'Candles' };
+let settings = { ...DEF };
 let open = {}, alerts = {}, divOn = true;
 
 // ---------- auth ----------
@@ -32,12 +34,16 @@ async function init() {
     create table if not exists divpaid(sym text, ex text, primary key(sym, ex));
     create table if not exists kv(k text primary key, v text);
     create table if not exists push(endpoint text primary key, sub text);
+    alter table ord add column if not exists pct numeric default 100;
+    alter table ord add column if not exists trail numeric;
+    alter table ord add column if not exists peak numeric;
+    alter table alert add column if not exists label text;
     alter table trd add column if not exists note text;
     alter table pos add column if not exists since timestamptz default now();`);
 }
 async function loadOrders() {
   open = {};
-  for (const o of (await pool.query('select * from ord')).rows) (open[o.sym] ??= []).push(o);
+  for (const o of (await pool.query('select * from ord')).rows) { o.pct = +o.pct || 100; o.trail = +o.trail; o.peak = Math.max(+o.peak || 0, prices[o.sym]?.p || 0); (open[o.sym] ??= []).push(o); }
 }
 
 // ---------- trading ----------
@@ -78,14 +84,16 @@ async function trade(sym, side, qty, why) {
 async function check(s, p) {
   const list = open[s];
   if (!list || firing.has(s)) return;
-  const hit = list.find(o => (o.kind === 'stop' && p <= +o.price) || (o.kind === 'take' && p >= +o.price));
+  for (const o of list) if (o.kind === 'trail' && p > o.peak) o.peak = p;
+  const hit = list.find(o => o.kind === 'trail' ? p <= o.peak * (1 - o.trail / 100) : (o.kind === 'stop' && p <= +o.price) || (o.kind === 'take' && p >= +o.price));
   if (!hit) return;
   firing.add(s);
   try {
     const r = (await pool.query('select qty from pos where sym=$1', [s])).rows[0];
-    if (r) await trade(s, 'sell', +r.qty, hit.kind === 'stop' ? 'stop loss' : 'take profit');
-    if (r) sendPush(hit.kind === 'stop' ? 'Stop loss hit' : 'Take profit hit', `Sold all ${s} at $${prices[s].p.toFixed(prices[s].p < 1 ? 5 : 2)}`);
-    await pool.query('delete from ord where sym=$1', [s]);
+    const label = hit.kind === 'take' ? 'Take profit' : hit.kind === 'trail' ? 'Trailing stop' : 'Stop loss', pct = hit.pct;
+    if (r) await trade(s, 'sell', pct >= 100 ? +r.qty : +(r.qty * pct / 100).toFixed(8), label.toLowerCase());
+    if (r) sendPush(label + ' hit', `Sold ${pct >= 100 ? 'all' : pct + '% of'} ${s} at $${prices[s].p.toFixed(prices[s].p < 1 ? 5 : 2)}`, 'order');
+    if (pct >= 100) await pool.query('delete from ord where sym=$1', [s]); else await pool.query('delete from ord where id=$1', [hit.id]);
     await loadOrders();
   } catch (e) { console.error('order error', e.message); } finally { firing.delete(s); }
 }
@@ -152,11 +160,11 @@ app.get('/api/state', auth, W(async (q, r) => {
   r.json({
     cash: +a[0].cash,
     pos: ps.map(x => ({ sym: x.sym, qty: +x.qty, avg: +x.avg })),
-    ord: os.map(x => ({ id: x.id, sym: x.sym, kind: x.kind, price: +x.price })),
+    ord: os.map(x => ({ id: x.id, sym: x.sym, kind: x.kind, price: +x.price, pct: +x.pct, trail: x.trail == null ? null : +x.trail, peak: x.peak == null ? null : +x.peak })),
     trd: ts.map(x => ({ id: x.id, note: x.note, ts: x.ts, sym: x.sym, side: x.side, qty: +x.qty, price: +x.price, why: x.why, pnl: x.pnl == null ? null : +x.pnl })),
     snap: sn.map(x => +x.eq),
     prices: Object.fromEntries(Object.entries(prices).map(([k, v]) => [k, { p: v.p, prev: v.prev }])),
-    watch: wl.map(x => x.sym), alerts: al.map(x => ({ id: x.id, sym: x.sym, dir: x.dir, price: +x.price, fired: x.fired })), divOn,
+    watch: wl.map(x => x.sym), alerts: al.map(x => ({ id: x.id, sym: x.sym, dir: x.dir, price: +x.price, fired: x.fired, label: x.label })), divOn, settings,
     extra: ex.map(x => ({ sym: x.sym, kind: x.kind })),
     live: !!FINNHUB_KEY
   });
@@ -174,18 +182,28 @@ app.post('/api/trade', auth, W(async (q, r) => {
   }
   if (!(qty > 0)) throw Error('Enter a valid amount');
   await trade(sym, side, qty);
+  if (side === 'buy') {
+    const px = prices[sym].p;
+    for (const [k, v, m] of [['stop', settings.autoSL, 1 - settings.autoSL / 100], ['take', settings.autoTP, 1 + settings.autoTP / 100]]) if (v > 0) {
+      await pool.query('delete from ord where sym=$1 and kind=$2', [sym, k]);
+      await pool.query('insert into ord(sym,kind,price,pct) values($1,$2,$3,100)', [sym, k, px * m]);
+    }
+    await loadOrders();
+  }
   r.json({ ok: 1 });
 }));
 
 app.post('/api/order', auth, W(async (q, r) => {
-  const { sym, kind, price } = q.body;
-  if (!['stop', 'take'].includes(kind)) throw Error('Bad order type');
+  const { sym, kind, price, trail } = q.body, pct = Math.min(100, Math.max(1, +q.body.pct || 100));
+  if (!['stop', 'take', 'trail'].includes(kind)) throw Error('Bad order type');
   if (!(await pool.query('select 1 from pos where sym=$1', [sym])).rows[0]) throw Error('Buy first, then set stop loss or take profit');
   const p = prices[sym]?.p;
+  let trig = price;
+  if (kind === 'trail') { if (!(trail >= 0.1 && trail <= 50)) throw Error('Trailing distance must be between 0.1% and 50%'); trig = p * (1 - trail / 100); }
   if (kind === 'stop' && !(price < p)) throw Error('Stop loss must be below the current price');
   if (kind === 'take' && !(price > p)) throw Error('Take profit must be above the current price');
   await pool.query('delete from ord where sym=$1 and kind=$2', [sym, kind]);
-  await pool.query('insert into ord(sym,kind,price) values($1,$2,$3)', [sym, kind, price]);
+  await pool.query('insert into ord(sym,kind,price,pct,trail,peak) values($1,$2,$3,$4,$5,$6)', [sym, kind, trig, pct, kind === 'trail' ? trail : null, kind === 'trail' ? p : null]);
   await loadOrders();
   r.json({ ok: 1 });
 }));
@@ -197,7 +215,7 @@ app.delete('/api/order/:id', auth, W(async (q, r) => {
 }));
 
 app.post('/api/reset', auth, W(async (q, r) => {
-  await pool.query('delete from pos; delete from ord; delete from trd; delete from snap; update acct set cash=10000;');
+  await pool.query(`delete from pos; delete from ord; delete from trd; delete from snap; update acct set cash=${+settings.startBalance || 10000};`);
   await loadOrders();
   r.json({ ok: 1 });
 }));
@@ -280,7 +298,7 @@ function alertCheck(s, p) {
     a.fired = true;
     pool.query('update alert set fired=true where id=$1', [a.id]).catch(() => {});
     const m = JSON.stringify({ alert: { sym: s, dir: a.dir, price: +a.price } });
-    sendPush('Price alert', `${s} ${a.dir === 'above' ? 'rose to' : 'fell to'} $${+a.price}`);
+    sendPush('Price alert', `${s} price ${a.dir === 'above' ? 'rose to' : 'fell to'} $${+a.price}`, 'alert');
     wss.clients.forEach(c => c.readyState === 1 && c.send(m));
   }
 }
@@ -296,7 +314,7 @@ app.post('/api/watch', auth, W(async (q, r) => {
 app.post('/api/alert', auth, W(async (q, r) => {
   const { sym, price } = q.body, p = prices[sym]?.p;
   if (!p || !(price > 0) || price === p) throw Error('Pick a price different from the current one');
-  await pool.query('insert into alert(sym,dir,price) values($1,$2,$3)', [sym, price > p ? 'above' : 'below', price]);
+  await pool.query('insert into alert(sym,dir,price,label) values($1,$2,$3,$4)', [sym, price > p ? 'above' : 'below', price, String(q.body.label || '').slice(0, 80)]);
   await loadAlerts(); r.json({ ok: 1 });
 }));
 app.delete('/api/alert/:id', auth, W(async (q, r) => { await pool.query('delete from alert where id=$1', [q.params.id]); await loadAlerts(); r.json({ ok: 1 }); }));
@@ -353,8 +371,8 @@ async function initPush() {
     VAPID_PUB = pub; pushOn = true;
   } catch (e) { console.error('push setup', e.message); }
 }
-async function sendPush(title, body) {
-  if (!pushOn) return;
+async function sendPush(title, body, kind) {
+  if (!pushOn || (kind === 'alert' && !settings.pushAlerts) || (kind === 'order' && !settings.pushOrders)) return;
   try {
     for (const row of (await pool.query('select * from push')).rows) {
       try { await webpush.sendNotification(JSON.parse(row.sub), JSON.stringify({ title, body })); }
@@ -381,9 +399,21 @@ app.post('/api/push/sub', auth, W(async (q, r) => {
 app.post('/api/push/unsub', auth, W(async (q, r) => { await pool.query('delete from push where endpoint=$1', [q.body.endpoint]); r.json({ ok: 1 }); }));
 app.post('/api/push/test', auth, W(async (q, r) => { await sendPush('Mango test', 'Notifications are working 🥭'); r.json({ ok: 1 }); }));
 
+app.post('/api/settings', auth, W(async (q, r) => {
+  for (const k of Object.keys(DEF)) {
+    if (!(k in q.body) || typeof q.body[k] !== typeof DEF[k]) continue;
+    let v = q.body[k];
+    if (typeof v === 'number') v = Math.max(k === 'startBalance' ? 100 : 0, Math.min(k.startsWith('auto') ? 90 : 1e9, v || 0));
+    settings[k] = v;
+  }
+  await pool.query("insert into kv values('settings',$1) on conflict(k) do update set v=$1", [JSON.stringify(settings)]);
+  r.json({ ok: 1 });
+}));
+
 // equity snapshots for the portfolio chart
 setInterval(async () => {
   try {
+    for (const l of Object.values(open)) for (const o of l) if (o.kind === 'trail') pool.query('update ord set peak=$1 where id=$2', [o.peak, o.id]).catch(() => {});
     const cash = +(await pool.query('select cash from acct')).rows[0].cash;
     const ps = (await pool.query('select * from pos')).rows;
     await pool.query('insert into snap(eq) values($1)', [cash + ps.reduce((t, x) => t + x.qty * (prices[x.sym]?.p || x.avg), 0)]);
@@ -392,6 +422,7 @@ setInterval(async () => {
 
 (async () => {
   await init(); await loadOrders(); await loadAlerts(); await initPush();
+  try { settings = { ...DEF, ...JSON.parse((await pool.query("select v from kv where k='settings'")).rows[0]?.v || '{}') }; } catch (e) {}
   divOn = (await pool.query("select v from kv where k='div'")).rows[0]?.v !== 'off'; divJob(); setInterval(divJob, 6 * 36e5);
   for (const x of (await pool.query('select * from extra')).rows) { const l = x.kind === 'crypto' ? CRYPTO : STOCKS; if (!l.includes(x.sym)) l.push(x.sym); }
   coinbase(); finnhub(); pollStocks(); setInterval(pollStocks, 60000);
