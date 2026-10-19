@@ -39,6 +39,7 @@ async function init() {
     alter table ord add column if not exists peak numeric;
     alter table alert add column if not exists label text;
     create table if not exists lim(id serial primary key, sym text, side text, price numeric, amt numeric, ts timestamptz default now());
+    create table if not exists seasons(id serial primary key, ts timestamptz default now(), started timestamptz, start_bal numeric, final_bal numeric, trades int, wins int, closed int);
     alter table trd add column if not exists note text;
     alter table pos add column if not exists since timestamptz default now();`);
 }
@@ -161,10 +162,10 @@ app.post('/api/login', (q, r) => {
 
 app.get('/api/state', auth, W(async (q, r) => {
   const Q = s => pool.query(s).then(x => x.rows);
-  const [a, ps, os, ts, sn, ex, wl, al, lm] = await Promise.all([
+  const [a, ps, os, ts, sn, ex, wl, al, lm, se] = await Promise.all([
     Q('select cash from acct'), Q('select * from pos order by sym'), Q('select * from ord'),
     Q('select * from trd order by id desc limit 30'),
-    Q("select eq from snap where ts>now()-interval '24 hours' order by ts"), Q('select * from extra'), Q('select * from watch'), Q('select * from alert order by id desc limit 40'), Q('select * from lim order by id')]);
+    Q("select eq from snap where ts>now()-interval '24 hours' order by ts"), Q('select * from extra'), Q('select * from watch'), Q('select * from alert order by id desc limit 40'), Q('select * from lim order by id'), Q('select * from seasons order by id desc limit 20')]);
   r.json({
     cash: +a[0].cash,
     pos: ps.map(x => ({ sym: x.sym, qty: +x.qty, avg: +x.avg })),
@@ -173,6 +174,7 @@ app.get('/api/state', auth, W(async (q, r) => {
     snap: sn.map(x => +x.eq),
     prices: Object.fromEntries(Object.entries(prices).map(([k, v]) => [k, { p: v.p, prev: v.prev }])),
     watch: wl.map(x => x.sym), alerts: al.map(x => ({ id: x.id, sym: x.sym, dir: x.dir, price: +x.price, fired: x.fired, label: x.label })), divOn, settings, lims: lm.map(x => ({ id: x.id, sym: x.sym, side: x.side, price: +x.price, amt: +x.amt })),
+    seasons: se.map(x => ({ id: x.id, ts: x.ts, started: x.started, start: +x.start_bal, final: +x.final_bal, trades: +x.trades, wins: +x.wins, closed: +x.closed })),
     extra: ex.map(x => ({ sym: x.sym, kind: x.kind })),
     live: !!FINNHUB_KEY
   });
@@ -223,6 +225,10 @@ app.delete('/api/order/:id', auth, W(async (q, r) => {
 }));
 
 app.post('/api/reset', auth, W(async (q, r) => {
+  // save this season to the leaderboard before wiping
+  const cash0 = +(await pool.query('select cash from acct')).rows[0].cash, ps0 = (await pool.query('select * from pos')).rows;
+  const tr = (await pool.query("select count(*) n, count(*) filter (where side='sell') closed, count(*) filter (where side='sell' and pnl>0) wins from trd where side in ('buy','sell')")).rows[0];
+  if (+tr.n > 0) await pool.query('insert into seasons(started,start_bal,final_bal,trades,wins,closed) values((select min(ts) from snap),$1,$2,$3,$4,$5)', [settings.startBalance, cash0 + ps0.reduce((t, x) => t + x.qty * (prices[x.sym]?.p || x.avg), 0), tr.n, tr.wins, tr.closed]);
   await pool.query(`delete from pos; delete from ord; delete from lim; delete from trd; delete from snap; update acct set cash=${+settings.startBalance || 10000};`); lims = {};
   await loadOrders();
   r.json({ ok: 1 });
@@ -346,7 +352,11 @@ app.get('/api/analytics', auth, W(async (q, r) => {
     res.timestamp.forEach((x, i) => { if (x * 1000 <= t0 && cl[i] != null) i0 = i; });
     spy = (cl.filter(x => x != null).pop() / cl[i0] - 1) * 100;
   } catch (e) {}
-  r.json({ closed: t.length, win: t.length ? w.length / t.length * 100 : null, avgWin: w.length ? sum(w) / w.length : null, avgLoss: l.length ? sum(l) / l.length : null, best: t.length ? Math.max(...t) : null, worst: t.length ? Math.min(...t) : null, realized: sum(t), dividends: dv, maxDD: dd * 100, pf: l.length ? sum(w) / -sum(l) : null, spy });
+  const wy = Object.fromEntries((await pool.query('select why, count(*) c from trd group by why')).rows.map(x => [x.why, +x.c]));
+  const nt = +(await pool.query("select count(*) c from trd where side in ('buy','sell')")).rows[0].c;
+  let stk = 0, bs = 0;
+  for (const x of (await pool.query("select pnl from trd where side='sell' order by id")).rows) { stk = +x.pnl > 0 ? stk + 1 : 0; bs = Math.max(bs, stk); }
+  r.json({ closed: t.length, win: t.length ? w.length / t.length * 100 : null, avgWin: w.length ? sum(w) / w.length : null, avgLoss: l.length ? sum(l) / l.length : null, best: t.length ? Math.max(...t) : null, worst: t.length ? Math.min(...t) : null, realized: sum(t), dividends: dv, since: eqs[0]?.ts ?? null, whys: wy, streak: stk, bestStreak: bs, trades: nt, maxDD: dd * 100, pf: l.length ? sum(w) / -sum(l) : null, spy });
 }));
 // dividends: credited when a held stock's ex-dividend date passes (checked every 6 hours)
 async function divJob() {

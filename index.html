@@ -49,13 +49,16 @@ button{transition:transform .12s ease,filter .15s,background .2s,color .2s,opaci
 #toast{transform:translateX(-50%) translateY(14px);transition:opacity .25s,transform .3s cubic-bezier(.2,.8,.2,1)}#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
 input{transition:border-color .2s,box-shadow .2s}input:focus{outline:0;border-color:var(--ac);box-shadow:0 0 0 3px #ffb02e33}
 @media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+.hm{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.tl{border-radius:12px;padding:10px 4px;text-align:center;color:#fff;transition:background .4s}.tl b{display:block;font-size:14px}.tl span{font-size:12px}
+.bar{height:8px;background:var(--line);border-radius:6px;overflow:hidden}.bar i{display:block;height:100%;background:var(--ac);transition:width .6s}
+.badges{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.bd{background:var(--card);border-radius:14px;padding:12px 6px;text-align:center}.bd.no{opacity:.35;filter:grayscale(1)}.bd b{display:block;font-size:13px}
 </style></head><body>
 <div id="splash" class="full"><div class="logo">🥭</div><h1>Mango</h1><p class="mu">Paper trading, real markets</p></div>
 <form id="login" class="full hide"><div class="logo" style="font-size:56px;text-align:center">🥭</div><h1 style="text-align:center">Welcome back</h1>
 <input id="u" placeholder="Username" autocomplete="username" autocapitalize="off"><input id="pw" type="password" placeholder="Password" autocomplete="current-password">
 <button>Log in</button><p id="err" class="dn" style="text-align:center"></p></form>
 <main id="app" class="hide"><div id="v"></div>
-<nav><button id="t-p" onclick="setTab('p')">Portfolio</button><button id="t-m" onclick="setTab('m')">Market</button><button id="t-s" onclick="setTab('s')">Settings</button></nav></main>
+<nav><button id="t-p" onclick="setTab('p')">Portfolio</button><button id="t-m" onclick="setTab('m')">Market</button><button id="t-g" onclick="setTab('g')">Goals</button><button id="t-s" onclick="setTab('s')">Settings</button></nav></main>
 <div id="sheet"></div><div id="toast"></div>
 <script>
 const $=s=>document.querySelector(s);
@@ -92,19 +95,20 @@ const mkt=s=>`<div class="row" onclick="openSheet('${s}')"><div><b>${s}</b><smal
 const posRow=p=>`<div class="row" onclick="openSheet('${p.sym}')"><div><b>${p.sym}</b><small>${+p.qty.toFixed(6)} @ ${fmt(p.avg)}</small></div><div class="r"><b class="priv" data-val="${p.sym}"></b><span data-pnl="${p.sym}"></span></div></div>`;
 function render(){
   if(!S)return;
-  document.body.classList.toggle('hb',!!S.settings.hideBalances);$('#t-p').className=tab==='p'?'on':'';$('#t-m').className=tab==='m'?'on':'';$('#t-s').className=tab==='s'?'on':'';
-  $('#v').innerHTML=tab==='s'?viewS():tab==='p'?`<h2>Portfolio</h2><div class="big priv" id="eq"></div><div id="pl" class="priv"></div><div class="chart" id="ch"></div>
+  document.body.classList.toggle('hb',!!S.settings.hideBalances);$('#t-p').className=tab==='p'?'on':'';$('#t-m').className=tab==='m'?'on':'';$('#t-s').className=tab==='s'?'on':'';$('#t-g').className=tab==='g'?'on':'';
+  $('#v').innerHTML=tab==='g'?viewG():tab==='s'?viewS():tab==='p'?`<h2>Portfolio</h2><div class="big priv" id="eq"></div><div id="pl" class="priv"></div><div class="chart" id="ch"></div>
   <div class="stats"><div><small>Cash</small><b class="priv">${fmt(S.cash)}</b></div><div><small>Positions</small><b>${S.pos.length}</b></div><div><small>Open orders</small><b>${S.ord.length}</b></div></div>
   ${on('analytics')?'<div class="box" id="an">Loading performance…</div>':''}<h3>Positions</h3>${S.pos.map(posRow).join('')||'<p class="mu">No positions yet. Open the Market tab to place your first trade.</p>'}
   ${on('alerts')&&S.alerts.length?'<h3>Price alerts</h3>'+S.alerts.map(a=>`<div class="row"><div><b>${a.sym}</b><small>Price ${a.dir==='above'?'rises to':'falls to'} ${fmt(a.price)}${a.label?' ('+esc(a.label)+')':''}</small></div><div class="r"><span class="${a.fired?'up':'mu'}">${a.fired?'Triggered':'Waiting'}</span><button class="g chip" onclick="delAlert(${a.id})">Remove</button></div></div>`).join(''):''}${S.lims.length?'<h3>Limit orders</h3>'+S.lims.map(l=>`<div class="row" onclick="openSheet('${l.sym}')"><div><b>${l.sym}</b><small>${l.side==='buy'?'Buy '+fmt(l.amt)+' at or below':'Sell '+l.amt+'% at or above'} ${fmt(l.price)}</small></div><small>Waiting</small></div>`).join(''):''}<h3>Recent trades</h3>${S.trd.slice(0,10).map(t=>`<div class="row" ${on('journal')?`onclick="note(${t.id})"`:''}><div><b>${{buy:'Bought',sell:'Sold',div:'Dividend',cash:'Balance change'}[t.side]} ${t.sym}</b><small>${t.why} · ${new Date(t.ts).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</small>${on('journal')&&t.note?`<br><small>📝 ${esc(t.note)}</small>`:''}</div><div class="r"><b>${fmt(t.qty*t.price)}</b>${t.pnl==null?'':`<span class="${cls(t.pnl)}">${t.pnl>=0?'+':''}${fmt(t.pnl)}</span>`}</div></div>`).join('')||'<p class="mu">Your trades will show up here.</p>'}
   <p style="margin-top:30px"><button class="g" onclick="resetAcct()">Reset account to ${fmt(SB())}</button></p>`
-  :`<h2>Market</h2><input id="q" placeholder="Search any stock or coin" oninput="search()"><div id="res"></div>${on('watch')&&S.watch.length?'<h3>Watchlist</h3>'+S.watch.map(mkt).join(''):''}${S.live?'':'<p class="mu">Stock prices are off. Add FINNHUB_KEY in Railway to turn them on.</p>'}<h3>Stocks</h3>${STK.map(mkt).join('')}<h3>Crypto</h3>${CR.map(mkt).join('')}${S.extra.length?'<h3>Added by you</h3>'+S.extra.map(x=>mkt(x.sym)).join(''):''}`;
-  if(tab==='p'&&on('analytics'))loadAn();if(tab==='s')pushUI();paint()}
+  :`<h2>Market</h2><input id="q" placeholder="Search any stock or coin" oninput="search()"><div id="res"></div>${on('watch')&&S.watch.length?'<h3>Watchlist</h3>'+S.watch.map(mkt).join(''):''}${S.live?'':'<p class="mu">Stock prices are off. Add FINNHUB_KEY in Railway to turn them on.</p>'}${heat()}<h3>Stocks</h3>${STK.map(mkt).join('')}<h3>Crypto</h3>${CR.map(mkt).join('')}${S.extra.length?'<h3>Added by you</h3>'+S.extra.map(x=>mkt(x.sym)).join(''):''}`;
+  if(tab==='p'&&on('analytics'))loadAn();if(tab==='s')pushUI();if(tab==='g')loadG();paint()}
 function paint(){
   if(!S)return;
   const e=eq(),el=$('#eq');
   if(el){el.textContent=fmt(e);const d=e-SB();$('#pl').innerHTML=`<span class="${cls(d)}">${d>=0?'+':''}${fmt(d)} (${pc(d/SB()*100)})</span> <small>all time</small>`;chart(S.snap.concat(e),$('#ch'))}
   document.querySelectorAll('[data-px]').forEach(n=>{const v=px(n.dataset.px);n.textContent=v?fmt(v):'…';if(n._p!=null&&v!==n._p){n.classList.remove('fu','fd');void n.offsetWidth;n.classList.add(v>n._p?'fu':'fd')}n._p=v});
+  document.querySelectorAll('[data-hm]').forEach(n=>{const c=chg(n.dataset.hm),a=Math.min(.85,.18+Math.abs(c)/5);n.style.background=c>=0?`rgba(56,217,169,${a})`:`rgba(255,107,122,${a})`;n.lastChild.textContent=pc(c)});
   document.querySelectorAll('[data-ch]').forEach(n=>{const c=chg(n.dataset.ch);n.textContent=pc(c);n.className=cls(c)});
   document.querySelectorAll('[data-val]').forEach(n=>{const p=S.pos.find(x=>x.sym===n.dataset.val);if(p)n.textContent=fmt(p.qty*px(p.sym))});
   document.querySelectorAll('[data-pnl]').forEach(n=>{const p=S.pos.find(x=>x.sym===n.dataset.pnl);if(p&&px(p.sym)){const c=(px(p.sym)/p.avg-1)*100;n.textContent=pc(c);n.className=cls(c)}});
@@ -132,7 +136,7 @@ const sell=n=>{if(!S.settings.confirmSell||confirm(`Sell ${n===100?'all':n+'%'} 
 const fill=(k,n)=>{$('#o_'+k).value=(px(cur)*(1+n/100)).toFixed(px(cur)<1?5:2)};
 const setOrder=k=>{const v=+$('#o_'+k).value;if(!(v>0))return toast('Enter a trigger price',1);act(()=>api('order','POST',{sym:cur,kind:k,price:v}),(k==='stop'?'Stop loss':'Take profit')+' set')};
 const cancelOrder=id=>act(()=>api('order/'+id,'DELETE'),'Order cancelled');
-const resetAcct=()=>{if(confirm('Reset to '+fmt(SB())+' and erase all trades?'))act(()=>api('reset','POST'),'Account reset')};
+const resetAcct=()=>{if(confirm('Reset to '+fmt(SB())+' and erase all trades? This season is saved to your leaderboard.'))act(()=>api('reset','POST'),'Account reset')};
 let cd=[],rg='1D',ty='c',sdeb=0;
 function search(){clearTimeout(sdeb);sdeb=setTimeout(async()=>{const v=$('#q').value.trim();if(!v){$('#res').innerHTML='';return}
   try{const r=await api('search?q='+encodeURIComponent(v));$('#res').innerHTML=r.map(x=>`<div class="row" onclick="pick('${x.sym}','${x.kind}')"><div><b>${x.sym}</b><small>${x.name}</small></div><small>${x.kind}</small></div>`).join('')||'<p class="mu">No matches.</p>'}catch(e){if(e.message!=='auth')toast(e.message,1)}},350)}
@@ -234,6 +238,18 @@ const setLS=x=>{ls=x;$('#lbox').outerHTML=limBox(cur)};
 const limFill=n=>{$('#lp').value=(px(cur)*(1+n/100)).toFixed(px(cur)<1?5:2)};
 const setLim=()=>{const price=+$('#lp').value,amt=+$('#la').value;if(!(price>0&&amt>0))return toast('Enter a price and an amount',1);act(()=>api('limit','POST',{sym:cur,side:ls,price,amt}),'Limit order set')};
 const delLim=id=>act(()=>api('limit/'+id,'DELETE'),'Limit order cancelled');
+const heat=()=>'<h3>Heatmap</h3><div class="hm">'+[...STK,...CR,...S.extra.map(x=>x.sym)].map(s=>`<div class="tl" data-hm="${s}" onclick="openSheet('${s}')"><b>${s}</b><span></span></div>`).join('')+'</div>';
+const viewG=()=>'<h2>Goals</h2><div id="gv"><p class="mu">Loading…</p></div>';
+async function loadG(){try{const a=await api('analytics'),el=$('#gv');if(!el)return;
+  const you=(eq()/SB()-1)*100,spy=a.spy,tr=a.trades||0,w=a.whys||{},n=S.pos.length,bs=a.bestStreak||0;
+  const isC=x=>CR.includes(x)||S.extra.some(e=>e.sym===x&&e.kind==='crypto'),has=f=>S.pos.some(x=>f(x.sym));
+  const rows=[{n:'You, this season',r:you,me:1}].concat(spy==null?[]:[{n:'S&P 500, same period',r:spy}],S.seasons.map(s=>({n:'Season ended '+new Date(s.ts).toLocaleDateString([],{month:'short',day:'numeric'}),r:(s.final/s.start-1)*100,sub:s.trades+' trades'}))).sort((x,y)=>y.r-x.r);
+  const med=['🥇','🥈','🥉'];
+  const CH=[['Beat the S&P 500','Finish this season ahead of the index',spy==null?0:+(you>spy),1],['Make 10 trades','Get some practice in',tr,10],['Win 5 in a row','Five profitable sales in a row',bs,5],['Grow 10%','Reach +10% this season',Math.max(0,you),10],['Diversify','Hold 5 different assets at once',n,5],['Steady hands','Max drawdown under 5%, after 5+ trades',tr>=5&&Math.abs(a.maxDD)<5?1:0,1],['Sharp shooter','60%+ win rate, after 5 closed trades',a.closed>=5&&a.win>=60?1:0,1]];
+  const AC=[['🥇','First trade',tr>=1],['🔟','10 trades',tr>=10],['💯','100 trades',tr>=100],['💰','First winning sale',(a.best||0)>0],['🔥','5 wins in a row',bs>=5],['🛡️','Stop loss triggered',(w['stop loss']||0)+(w['trailing stop']||0)>0],['🎯','Take profit hit',(w['take profit']||0)>0],['🧲','Limit order filled',(w['limit order']||0)>0],['🌈','5 assets at once',n>=5],['🪙','Stocks and crypto',has(isC)&&has(x=>!isC(x))],['💵','Earned a dividend',(a.dividends||0)>0],['🚀','Up 10%',you>=10],['🏆','Beat the S&P',spy!=null&&you>spy]];
+  el.innerHTML=`<h3>Leaderboard</h3>${rows.map((r,i)=>`<div class="row"${r.me?' style="background:#ffb02e14;border-radius:12px;padding-left:8px;padding-right:8px"':''}><div><b>${med[i]||'#'+(i+1)} ${r.n}</b>${r.sub?`<small>${r.sub}</small>`:''}</div><b class="${cls(r.r)}">${pc(r.r)}</b></div>`).join('')}<p class="mu">Best trade ${a.best==null?'–':fmt(a.best)} · Best win streak ${bs}</p>
+  <h3>Challenges</h3>${CH.map(([t,d,v,g])=>{const p=Math.min(100,Math.max(0,v/g*100));return `<div class="box"><div class="two"><b>${p>=100?'✅ ':''}${t}</b><small>${+Math.min(v,g).toFixed(1)} / ${g}</small></div><small>${d}</small><div class="bar" style="margin-top:8px"><i style="width:${p}%"></i></div></div>`}).join('')}
+  <h3>Achievements <small>${AC.filter(x=>x[2]).length}/${AC.length}</small></h3><div class="badges">${AC.map(([i,t,ok])=>`<div class="bd ${ok?'':'no'}"><div style="font-size:26px">${i}</div><b>${t}</b></div>`).join('')}</div>`}catch(e){}}
 $('#login').onsubmit=async e=>{e.preventDefault();$('#err').textContent='';
   try{const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({u:$('#u').value,p:$('#pw').value})});
   const j=await r.json();if(!r.ok)throw Error(j.error);T=j.token;localStorage.mango=T;await start()}catch(x){$('#err').textContent=x.message;const f=$('#login');f.classList.remove('shake');void f.offsetWidth;f.classList.add('shake')}};
