@@ -212,6 +212,53 @@ const MIGRATIONS = [
     // Existing user-added symbols get a meta row so names survive.
     await c.query(`insert into meta(sym,kind) select sym,kind from extra on conflict do nothing`);
   },
+  // 2 — real-market rules: broker profiles, account types, tax lots, settlement, transfers, splits, richer orders and fills
+  async c => {
+    await c.query(`
+      alter table wallets add column if not exists profile text not null default 'robinhood';
+      alter table wallets add column if not exists acct text not null default 'instant';
+      alter table wallets add column if not exists gold boolean not null default false;
+      alter table wallets add column if not exists drip boolean not null default false;
+      alter table wallets add column if not exists lot_method text not null default 'fifo';
+      alter table wallets add column if not exists crypto_route text not null default 'mm';
+      alter table wallets add column if not exists margin_max numeric;
+      alter table wallets add column if not exists broker text;
+      alter table wallets add column if not exists margin_accrued numeric not null default 0;
+      alter table wallets add column if not exists call_amt numeric not null default 0;
+      alter table wallets add column if not exists call_since timestamptz;
+      alter table trd add column if not exists fees text;
+      alter table trd add column if not exists bid numeric;
+      alter table trd add column if not exists ask numeric;
+      alter table trd add column if not exists otype text;
+      alter table trd add column if not exists tif text;
+      alter table trd add column if not exists sess text;
+      alter table trd add column if not exists settle timestamptz;
+      alter table trd add column if not exists liq text;
+      alter table trd add column if not exists via text;
+      alter table trd add column if not exists ext_id text;
+      create unique index if not exists trd_ext on trd(ext_id);
+      alter table lim add column if not exists lpx numeric;
+      alter table lim add column if not exists tif text not null default 'gtc';
+      alter table lim add column if not exists sess text not null default 'regular';
+      alter table lim add column if not exists rested boolean not null default true;
+      alter table lim add column if not exists trig boolean not null default false;
+      alter table lim add column if not exists why text;
+      alter table ord add column if not exists expires timestamptz;
+      create table if not exists lots(id serial primary key, wid int not null, sym text not null, qty numeric not null, basis numeric not null, ts timestamptz not null, trd_id int, wash_used numeric not null default 0);
+      create index if not exists lots_w on lots(wid, sym);
+      create table if not exists realized(id serial primary key, wid int not null, trd_id int, sym text not null, qty numeric not null, proceeds numeric not null, basis numeric not null,
+        acquired timestamptz not null, sold timestamptz not null, term text not null, crypto boolean not null default false, wash numeric not null default 0, wash_qty numeric not null default 0);
+      create index if not exists realized_w on realized(wid, sold);
+      create table if not exists settle(id serial primary key, wid int not null, amount numeric not null, settles timestamptz not null, trd_id int);
+      create table if not exists xfer(id serial primary key, wid int not null, kind text not null, amount numeric not null, instant numeric not null default 0, status text not null default 'pending',
+        created timestamptz not null default now(), avail timestamptz, done timestamptz, method text, fee numeric not null default 0);
+      create table if not exists splits(wid int not null, sym text not null, ex text not null, primary key(wid, sym, ex));
+    `);
+    // Open GTC orders get the brokers' 90-day limit, counted from today so nothing disappears right away.
+    await c.query("update ord set expires = now() + interval '90 days' where expires is null");
+    await c.query("update lim set expires = now() + interval '90 days' where expires is null and kind <> 'moo'");
+    await backfillLots(c);
+  },
 ];
 
 async function migrate() {
@@ -243,7 +290,7 @@ const DEF = {
   // features (every one can be switched off)
   f_watch: true, f_alerts: true, f_analytics: true, f_journal: true, f_news: true, f_earnings: true,
   f_heatmap: true, f_book: true, f_fng: true, f_games: true, f_preds: true, f_achv: true, f_leader: true,
-  f_divs: true, f_ext: true, f_movers: true, f_insights: true,
+  f_divs: true, f_ext: true, f_movers: true, f_insights: true, f_taxes: true, f_statements: true,
 };
 const LIMITS = {
   feeFlat: [0, 1000], feePct: [0, 10], slippage: [0, 5], maxPos: [0, 100], reservePct: [0, 100], autoSL: [0, 90], autoTP: [0, 1000],
@@ -485,6 +532,7 @@ function cbConnect() {
     if (d.type === 'ticker' && d.price) {
       const s = d.product_id.split('-')[0]; feeds.crypto.last = Date.now();
       tick(s, +d.price, { prev: +d.open_24h, hi: +d.high_24h, lo: +d.low_24h, open: +d.open_24h });
+      const q = prices.get(s); if (q && +d.best_bid > 0 && +d.best_ask > 0) { q.bid = +d.best_bid; q.ask = +d.best_ask; q.bqT = Date.now(); }
     } else if (d.type === 'error') {
       const bad = /([A-Z0-9]+)-USD/.exec(d.reason || d.message || '');
       if (bad) { cbBad.add(bad[1]); cbSubs.delete(bad[1]); }
@@ -571,11 +619,31 @@ async function pollOneQuote() {
       if (!(d && d.c > 0)) return;
       feeds.stocks.polled = Date.now();
       const cur = prices.get(s);
-      if (cur && cur.wsT > Date.now() - 90e3) { cur.prev = d.pc || cur.prev; cur.hi = d.h || cur.hi; cur.lo = d.l || cur.lo; cur.open = d.o || cur.open; cur.qT = Date.now(); dirty.add(s); }
+      if (mk.state !== 'open' && cur) cur.close = d.c;
+      if (cur && (cur.wsT > Date.now() - 90e3 || (mk.state !== 'open' && cur.extT > Date.now() - 15 * 60e3))) { cur.prev = d.pc || cur.prev; cur.hi = d.h || cur.hi; cur.lo = d.l || cur.lo; cur.open = d.o || cur.open; cur.qT = Date.now(); dirty.add(s); }
       else { tick(s, d.c, { prev: d.pc, hi: d.h, lo: d.l, open: d.o, src: 'rest' }); prices.get(s).qT = Date.now(); }
     } catch (e) { /* try again later */ }
     return;
   }
+}
+
+// Pre-market, after-hours and overnight prices for the stocks that matter (Yahoo includes extended trading).
+let extCursor = 0;
+async function pollExtended() {
+  const st = market().state; if (st !== 'pre' && st !== 'post') return; // Yahoo has pre-market and after-hours trades, not overnight ones
+  const now = Date.now();
+  const want = [...new Set([...userSyms.pos, ...userSyms.orders, ...[...focus.entries()].filter(([, t]) => now - t < 3 * 60e3).map(([s]) => s)])].filter(s => kindOf(s) === 'stock').slice(0, 12);
+  if (!want.length) return;
+  const sym = want[extCursor++ % want.length];
+  try {
+    const r = await yahooChart(sym, 'range=1d&interval=1m&includePrePost=true');
+    const z = r.indicators?.quote?.[0]?.close || [], ts = r.timestamp || [];
+    for (let i = ts.length - 1; i >= 0; i--) if (z[i] != null) {
+      const t = ts[i] * 1000, q = prices.get(sym);
+      if (q && now - t < 20 * 60e3 && t > (q.extT || 0) && !(q.wsT > t)) { tick(sym, z[i], { src: 'ext' }); prices.get(sym).extT = t; }
+      break;
+    }
+  } catch (e) { /* quiet */ }
 }
 
 // =====================================================================
@@ -756,6 +824,8 @@ async function ensureMeta(sym) {
   metaTried.set(sym, Date.now());
   if (a.kind === 'stock' && FINNHUB_KEY) {
     const p = await cached('prof:' + sym, 24 * 3600e3, () => fhApi('stock/profile2?symbol=' + encodeURIComponent(sym), 1)).catch(() => null);
+    const met = await cached('met:' + sym, 6 * 3600e3, () => fhApi('stock/metric?symbol=' + encodeURIComponent(sym) + '&metric=all', 2)).catch(() => null);
+    if (met?.metric?.['10DayAverageTradingVolume']) a.adv = met.metric['10DayAverageTradingVolume'] * 1e6;
     if (p && p.name) { if (!NAMES[sym]) a.name = p.name.replace(/[,\s]+(Inc|Corp|Corporation|Co|Ltd|Plc|Holdings|Class [A-C])\.?$/i, '').trim() || a.name; a.logo = p.logo || a.logo; a.industry = p.finnhubIndustry || a.industry; a.cap = p.marketCapitalization ? p.marketCapitalization * 1e6 : a.cap; a.exchange = p.exchange ? exchangeName(p.exchange) : a.exchange; }
   } else if (a.kind === 'crypto') {
     const id = await cgId(sym).catch(() => null);
@@ -813,6 +883,7 @@ async function assetDetails(sym) {
       S.f_ext ? cached('ext:' + sym, 60e3, () => yahooChart(sym, 'range=1d&interval=2m&includePrePost=true')).catch(() => null) : null,
     ]);
     const m = met?.metric || {};
+    if (m['10DayAverageTradingVolume']) a.adv = m['10DayAverageTradingVolume'] * 1e6;
     stat('Open', q.open); stat('Day high', q.hi); stat('Day low', q.lo); stat('Previous close', q.prev);
     stat('52-week high', m['52WeekHigh'] ?? ych?.meta?.fiftyTwoWeekHigh); stat('52-week low', m['52WeekLow'] ?? ych?.meta?.fiftyTwoWeekLow);
     stat('Market cap', prof?.marketCapitalization ? prof.marketCapitalization * 1e6 : a.cap, 'cap');
@@ -909,6 +980,170 @@ async function cryptoGlobal() {
 }
 
 // =====================================================================
+// Real-market rules: broker profiles, sessions, quotes, fees, settlement, margin
+// Sources (checked Oct 2026): SEC fee rate advisory 2026-2, FINRA SR-FINRA-2026-021 (TAF pause),
+// Robinhood "Trading fees", crypto fee schedule, margin rates; Alpaca crypto fees and margin docs.
+// =====================================================================
+const PROFILES = {
+  robinhood: {
+    key: 'robinhood', name: 'Robinhood rules', pre: 7 * 60, post: 20 * 60, overnight: true, gtcDays: 90, minUsd: 1,
+    instant: { std: 1000, gold: 5000 }, achDays: 3, wdDays: 2, goldFee: 5, goldFree: 1000, maintBase: 25,
+    marginRates: [[50e3, 5.25], [100e3, 5.05], [1e6, 4.75], [10e6, 4.5], [50e6, 4.45], [Infinity, 4.2]],
+    // exchange routing tiers by 30-day crypto volume: [up to, taker %, maker %]
+    cryptoTiers: [[10e3, 0.95, 0.5], [50e3, 0.75, 0.35], [250e3, 0.25, 0.125], [500e3, 0.15, 0.075], [1e6, 0.125, 0.06], [5e6, 0.10, 0.04], [10e6, 0.04, 0.02], [25e6, 0.03, 0.01], [Infinity, 0.03, 0]],
+  },
+  alpaca: {
+    key: 'alpaca', name: 'Alpaca rules', pre: 4 * 60, post: 20 * 60, overnight: false, gtcDays: 90, minUsd: 1,
+    instant: { std: 0, gold: 0 }, achDays: 3, wdDays: 2, goldFee: 0, goldFree: 0, maintBase: 30,
+    marginRates: [[Infinity, 6.5]],
+    cryptoTiers: [[100e3, 0.25, 0.15], [500e3, 0.22, 0.12], [1e6, 0.20, 0.10], [10e6, 0.18, 0.08], [25e6, 0.15, 0.05], [50e6, 0.13, 0.02], [100e6, 0.12, 0.02], [Infinity, 0.10, 0]],
+  },
+  practice: { key: 'practice', name: 'Practice rules', pre: 4 * 60, post: 20 * 60, overnight: false, gtcDays: 0, minUsd: 0, instant: { std: Infinity, gold: Infinity }, achDays: 0, wdDays: 0, goldFee: 0, goldFree: 0, maintBase: 25, marginRates: [[Infinity, 0]], cryptoTiers: [] },
+};
+const profOf = w => PROFILES[w?.profile] || PROFILES.robinhood;
+const isReal = w => !!w && w.profile !== 'practice';
+
+// Regulatory fees on US stock sales, with the dates they took effect.
+const REG = {
+  sec: [['2024-05-22', 27.80e-6], ['2025-05-14', 0], ['2026-04-04', 20.60e-6]],               // per dollar sold
+  taf: [['2024-01-01', 0.000166, 8.30], ['2026-01-01', 0.000195, 9.79], ['2026-10-01', 0, 0], ['2027-01-01', 0.000195, 9.79]], // per share sold, max per trade
+  cat: 0.000003,                                                                                  // per share, both sides
+};
+const rateAt = (table, date) => { let r = table[0]; for (const x of table) if (date >= x[0]) r = x; return r; };
+const cents = v => Math.round(v * 100 + 1e-9) / 100;
+const ceilCents = v => v <= 0 ? 0 : Math.ceil(v * 100 - 1e-7) / 100;
+function stockFees(prof, side, shares, notional, date = etDate()) {
+  const lines = [];
+  const [, secRate] = rateAt(REG.sec, date), [, tafRate, tafMax] = rateAt(REG.taf, date);
+  let sec = 0, taf = 0, cat = 0;
+  if (prof.key === 'robinhood') {
+    if (side === 'sell' && notional > 500) sec = ceilCents(notional * secRate);
+    if (side === 'sell' && shares > 50) taf = Math.min(tafMax, cents(shares * tafRate));
+    const c = shares * REG.cat; cat = c < 0.01 ? 0 : cents(c);
+  } else {
+    if (side === 'sell') { sec = ceilCents(notional * secRate); taf = Math.min(tafMax, ceilCents(shares * tafRate)); }
+    cat = ceilCents(shares * REG.cat);
+  }
+  if (side === 'sell') {
+    lines.push({ k: 'sec', label: 'SEC fee', amt: sec, note: secRate ? `$${(secRate * 1e6).toFixed(2)} per $1M sold${prof.key === 'robinhood' ? ', $500 or less is free' : ''}` : 'Rate is $0 right now' });
+    lines.push({ k: 'taf', label: 'FINRA trading activity fee', amt: taf, note: tafRate ? `$${tafRate} a share, max $${tafMax}${prof.key === 'robinhood' ? ', 50 shares or less is free' : ''}` : 'Paused by FINRA until Jan 1, 2027' });
+  }
+  lines.push({ k: 'cat', label: 'CAT fee', amt: cat, note: `$${REG.cat} a share${prof.key === 'robinhood' ? ', under 1¢ is free' : ''}` });
+  lines.push({ k: 'comm', label: 'Commission', amt: 0, note: 'Free' });
+  return { lines, total: cents(sec + taf + cat) };
+}
+function cryptoTier(prof, vol30) { const t = prof.cryptoTiers.find(x => vol30 < x[0]) || prof.cryptoTiers[prof.cryptoTiers.length - 1]; return t ? { taker: t[1], maker: t[2] } : { taker: 0, maker: 0 }; }
+function cryptoFees(prof, w, notional, liq, vol30) {
+  if (prof.key === 'robinhood' && (w.crypto_route || 'mm') === 'mm') return { lines: [{ k: 'comm', label: 'Commission', amt: 0, note: 'Market maker routing: no fee, you pay the spread' }], total: 0, rate: 0 };
+  const t = cryptoTier(prof, vol30), rate = liq === 'maker' ? t.maker : t.taker;
+  const amt = ceilCents(notional * rate / 100);
+  return { lines: [{ k: 'crypto', label: `${liq === 'maker' ? 'Maker' : 'Taker'} fee`, amt, note: `${rate}% at your 30-day volume of ${money(vol30)}` }], total: amt, rate };
+}
+async function cryptoVolume30(wid, c = pool) {
+  const r = (await c.query("select coalesce(sum(qty*price),0) v from trd where wid=$1 and side in ('buy','sell') and ts > now() - interval '30 days' and sym = any($2::text[])", [wid, [...assets.values()].filter(a => a.kind === 'crypto').map(a => a.sym)])).rows[0];
+  return +r.v || 0;
+}
+
+// ---------- trading sessions ----------
+// regular 9:30–4:00 (1:00 on early-close days), pre-market, after hours (until 8 PM, or 5 PM on early days),
+// and Robinhood's 24 Hour Market overnight (8 PM–7 AM, Sunday to Thursday night) for stocks and ETFs.
+const SESSION_LABEL = { regular: 'Regular hours', pre: 'Pre-market', post: 'After hours', overnight: '24 Hour Market', closed: 'Closed' };
+function sessionAt(prof, t = Date.now()) {
+  const ov = ENV.MARKET_OVERRIDE;
+  if (ov === 'open') return 'regular'; if (ov === 'closed') return 'closed'; if (ov === 'pre' || ov === 'post' || ov === 'overnight') return ov;
+  const p = etParts(t), mins = p.h * 60 + p.mi, trading = isTradingDay(p.y, p.m, p.d);
+  const early = trading && earlyClose(p.y, p.m, p.d), close = early ? 13 * 60 : 16 * 60, postEnd = early ? 17 * 60 : prof.post;
+  const [ty, tm, td] = addDays(p.y, p.m, p.d, 1);
+  if (trading && mins >= 570 && mins < close) return 'regular';
+  if (trading && mins >= prof.pre && mins < 570) return 'pre';
+  if (trading && mins >= close && mins < postEnd) return 'post';
+  if (prof.overnight && ((mins >= 20 * 60 && isTradingDay(ty, tm, td)) || (mins < prof.pre && trading))) return 'overnight';
+  return 'closed';
+}
+// When does the session the order belongs to end? Used for day orders.
+function sessionEnd(prof, ext, t = Date.now()) {
+  const mk = market(t); const base = mk.state === 'open' ? t : mk.opensAt;
+  const endOn = (y, m, d) => { const early = earlyClose(y, m, d); return ext ? etToUtc(y, m, d, early ? 17 : Math.floor(prof.post / 60), 0) : etToUtc(y, m, d, early ? 13 : 16, 0); };
+  let p = etParts(base), end = endOn(p.y, p.m, p.d);
+  if (end < t + 60e3) { const [y, m, d] = nextTradingDay(p.y, p.m, p.d); end = endOn(y, m, d); }
+  return end;
+}
+
+// ---------- settlement (T+1) ----------
+// Settlement skips weekends, market holidays and the two bank holidays the market stays open for.
+function bankOnlyHoliday(y, m, d) {
+  if (m === 10 && d === nthWeekday(y, 10, 1, 2)) return true;                          // Columbus Day
+  const w = dow(y, 11, 11); if (m === 11 && ((d === 11 && w !== 0 && w !== 6) || (d === 12 && w === 1))) return true; // Veterans Day
+  return false;
+}
+const isSettleDay = (y, m, d) => isTradingDay(y, m, d) && !bankOnlyHoliday(y, m, d);
+function tradeDate(prof, t = Date.now()) {
+  const p = etParts(t); let [y, m, d] = [p.y, p.m, p.d];
+  if (!isTradingDay(y, m, d) || p.h >= 20) [y, m, d] = nextTradingDay(y, m, d);
+  return [y, m, d];
+}
+function addSettleDays([y, m, d], n) { let out = [y, m, d]; for (let i = 0; i < n;) { out = addDays(...out, 1); if (isSettleDay(...out)) i++; } return out; }
+const settleTime = (prof, t = Date.now()) => { const sd = addSettleDays(tradeDate(prof, t), 1); return etToUtc(sd[0], sd[1], sd[2], 6, 0); };
+const businessDaysLater = (n, t = Date.now()) => { const p = etParts(t); const sd = addSettleDays([p.y, p.m, p.d], n); return etToUtc(sd[0], sd[1], sd[2], 9, 0); };
+
+// ---------- quotes: bid, ask and how prices fill ----------
+const TICKS = { stockBig: 0.01, stockSmall: 0.0001 };
+const tickOf = (sym, p) => isCrypto(sym) ? (p >= 1000 ? 0.01 : p >= 1 ? 0.0001 : 1e-8) : (p >= 1 ? TICKS.stockBig : TICKS.stockSmall);
+const floorTo = (v, t) => Math.floor(v / t + 1e-9) * t, ceilTo = (v, t) => Math.ceil(v / t - 1e-9) * t;
+function modelSpreadBps(sym, sess) {
+  if (isCrypto(sym)) return sym === 'BTC' || sym === 'ETH' ? 1 : 4;
+  const a = assets.get(sym), cap = a?.cap || 0;
+  let bps = INDEXES.includes(sym) ? 0.3 : cap >= 200e9 ? 1 : cap >= 50e9 ? 1.5 : cap >= 10e9 ? 3 : cap >= 2e9 ? 8 : cap >= 300e6 ? 20 : cap > 0 ? 50 : 6;
+  if (sess === 'pre' || sess === 'post') bps *= 5; else if (sess === 'overnight') bps *= 10;
+  return bps;
+}
+function quoteOf(sym, sess = 'regular') {
+  const q = prices.get(sym); if (!q?.p) return null;
+  const now = Date.now(), fresh_ = q.bqT && now - q.bqT < (isCrypto(sym) ? 90e3 : 30e3);
+  if (fresh_ && q.bid > 0 && q.ask >= q.bid && (q.ask - q.bid) / q.p < 0.05 && Math.abs((q.bid + q.ask) / 2 / q.p - 1) < 0.02)
+    return { bid: q.bid, ask: q.ask, mid: (q.bid + q.ask) / 2, last: q.p, src: isCrypto(sym) ? 'Coinbase' : 'Alpaca', live: true };
+  const t = tickOf(sym, q.p), half = Math.max(t / 2, q.p * modelSpreadBps(sym, sess) / 1e4 / 2);
+  const dp = t >= 0.01 ? 2 : t >= 0.0001 ? 4 : 8, bid = round(floorTo(q.p - half, t), dp), ask = round(Math.max(bid + t, ceilTo(q.p + half, t)), dp);
+  return { bid, ask, mid: (bid + ask) / 2, last: q.p, src: 'estimated', live: false };
+}
+// Square-root market impact: big orders compared with daily volume move the price against you.
+function impactOf(sym, shares, px) {
+  const adv = assets.get(sym)?.adv; if (!adv || !shares) return 0;
+  return px * 0.02 * Math.sqrt(Math.min(1, shares / adv));
+}
+// Crypto market orders walk Coinbase's live order book level by level.
+async function bookDepth(sym) {
+  return cached('depth:' + sym, 2500, async () => {
+    const d = await getJ(`${CBX}/products/${sym}-USD/book?level=2`, { timeout: 4000 });
+    return { bids: (d.bids || []).slice(0, 60).map(x => [+x[0], +x[1]]), asks: (d.asks || []).slice(0, 60).map(x => [+x[0], +x[1]]), t: Date.now() };
+  });
+}
+async function walkBook(sym, side, { qty, usd }) {
+  let b; try { b = await bookDepth(sym); } catch (e) { return null; }
+  const levels = side === 'buy' ? b.asks : b.bids; if (!levels.length) return null;
+  let gotQ = 0, spent = 0;
+  for (const [p, s] of levels) {
+    if (qty > 0) { const take = Math.min(s, qty - gotQ); gotQ += take; spent += take * p; if (gotQ >= qty - 1e-12) break; }
+    else { const take = Math.min(s * p, usd - spent); spent += take; gotQ += take / p; if (spent >= usd - 1e-9) break; }
+  }
+  const filled = qty > 0 ? gotQ >= qty - 1e-12 : spent >= usd - 1e-6;
+  if (!filled) { // ran past the levels we can see: price the rest at the deepest level plus a little
+    const last = levels[levels.length - 1][0] * (side === 'buy' ? 1.002 : 0.998);
+    if (qty > 0) { spent += (qty - gotQ) * last; gotQ = qty; } else { gotQ += (usd - spent) / last; spent = usd; }
+  }
+  return { px: spent / gotQ, levels: levels.length, top: levels[0][0], deep: !filled };
+}
+
+// ---------- margin ----------
+function maintRate(prof, sym, px) {
+  if (isCrypto(sym)) return 100;
+  if (prof.key === 'alpaca') return px < 2.5 ? 100 : px < 6 ? 50 : 30;
+  return px < 3 ? 100 : px < 5 ? 50 : prof.maintBase;
+}
+const marginable = (sym, px) => !isCrypto(sym) && px >= 5;
+function marginRate(prof, debit) { const t = prof.marginRates.find(x => debit <= x[0]) || prof.marginRates[prof.marginRates.length - 1]; return t[1]; }
+
+// =====================================================================
 // Wallets and trading
 // =====================================================================
 const qtyDp = sym => isCrypto(sym) ? 8 : 6;
@@ -923,57 +1158,150 @@ async function activeWalletId(req) {
   if (r) return r.id;
   return (await row('select id from wallets where not archived order by sort, id limit 1'))?.id || 1;
 }
-const walletJson = w => ({ id: w.id, name: w.name, emoji: w.emoji, color: w.color, cash: +w.cash, start: +w.start_bal, created: tsMs(w.created), seasonStart: tsMs(w.season_start), archived: w.archived, sort: w.sort });
+const walletJson = w => ({
+  id: w.id, name: w.name, emoji: w.emoji, color: w.color, cash: +w.cash, start: +w.start_bal, created: tsMs(w.created), seasonStart: tsMs(w.season_start),
+  archived: w.archived, sort: w.sort, profile: w.profile || 'robinhood', acct: w.acct || 'instant', gold: !!w.gold, drip: !!w.drip, lotMethod: w.lot_method || 'fifo',
+  cryptoRoute: w.crypto_route || 'mm', marginMax: w.margin_max == null ? null : +w.margin_max, broker: w.broker || null, brokerEnv: w.broker ? (BROKER?.env || null) : null,
+  call: +w.call_amt > 0 ? { amount: +w.call_amt, since: tsMs(w.call_since) } : null,
+});
 async function positions(wid, c = null) {
   return ((await (c || pool).query('select * from pos where wid=$1 order by sym', [wid])).rows).map(p => ({ sym: p.sym, qty: +p.qty, avg: +p.avg, since: tsMs(p.since) }));
 }
 const marketValue = pos => pos.reduce((t, x) => t + x.qty * (priceOf(x.sym) || x.avg), 0);
+// Profile, account type and broker link for every wallet, kept in memory for the order engine.
+const walletMeta = new Map();
+async function loadWalletMeta() { walletMeta.clear(); for (const w of await rows('select * from wallets')) walletMeta.set(w.id, w); }
+
+// ---------- buying power, holds and the account picture ----------
+function holdsFor(wid, pos, exclude = null) {
+  const out = { cash: 0, shares: {} };
+  for (const list of limOrders.values()) for (const l of list) {
+    if (l.wid !== wid || l.id === exclude) continue;
+    const px = priceOf(l.sym) || l.price;
+    if (l.side === 'buy') {
+      const unitPx = l.kind === 'stoplimit' ? l.lpx : l.kind === 'limit' ? l.price : px * 1.05;
+      out.cash += l.units === 'qty' ? l.amt * unitPx : l.amt;
+    } else {
+      const p = pos.find(x => x.sym === l.sym); if (!p) continue;
+      const q = l.units === 'qty' ? l.amt : l.units === 'usd' ? l.amt / px : p.qty * Math.min(100, l.amt) / 100;
+      out.shares[l.sym] = (out.shares[l.sym] || 0) + q;
+    }
+  }
+  return out;
+}
+async function accountInfo(wid, { c = pool, w = null, pos = null, exclude = null } = {}) {
+  w = w || await walletRow(wid, c); pos = pos || await positions(wid, c);
+  const prof = profOf(w), real = isReal(w), cash = +w.cash;
+  const unsettled = real ? +(await c.query('select coalesce(sum(amount),0) s from settle where wid=$1 and settles > now()', [wid])).rows[0].s : 0;
+  const nextSettle = real && unsettled > 0 ? tsMs((await c.query('select min(settles) t from settle where wid=$1 and settles > now()', [wid])).rows[0].t) : null;
+  const pending = real ? +(await c.query("select coalesce(sum(amount-instant),0) s from xfer where wid=$1 and kind='deposit' and status='pending'", [wid])).rows[0].s : 0;
+  const holds = real ? holdsFor(wid, pos, exclude) : { cash: 0, shares: {} };
+  let lmv = 0, lmvM = 0, maint = 0;
+  for (const p of pos) { const px = priceOf(p.sym) || p.avg, v = p.qty * px; lmv += v; if (marginable(p.sym, px)) lmvM += v; maint += v * maintRate(prof, p.sym, px) / 100; }
+  const equity = cash + lmv, debit = Math.max(0, -cash), avail = cash - holds.cash;
+  let bp, bpCrypto, withdrawable, marginOn = false;
+  if (w.broker && BROKER?.account) { // the broker's own numbers
+    const a = BROKER.account;
+    return { profile: 'alpaca', acct: w.acct, broker: true, cash, settled: cash, unsettled: 0, nextSettle: null, pendingDeposits: 0, holdsCash: 0, holdsShares: {}, lmv, lmvMarginable: lmvM, equity: +a.equity || equity, debit, maint: +a.maintenance_margin || maint, excess: (+a.equity || equity) - (+a.maintenance_margin || maint),
+      bp: +a.buying_power || 0, bpCrypto: +a.non_marginable_buying_power || Math.max(0, cash), withdrawable: +a.cash_withdrawable || 0, marginOn: +a.multiplier > 1, marginRate: 0, accrued: 0, call: 0, daytrades: +a.daytrade_count || 0, status: a.status };
+  }
+  if (!real) { bp = bpCrypto = Math.max(0, cash); withdrawable = Math.max(0, cash); }
+  else if (w.acct === 'cash') { bp = bpCrypto = Math.max(0, cash - unsettled - holds.cash); withdrawable = bp; }
+  else if (w.acct === 'margin' && equity >= 2000) {
+    marginOn = true;
+    const regT = lmvM + 2 * avail, maintCap = (equity - maint) / (prof.maintBase / 100);
+    const cap = w.margin_max == null ? Infinity : avail + +w.margin_max;
+    bp = Math.max(0, Math.min(regT, maintCap, cap)); bpCrypto = Math.max(0, avail);
+    withdrawable = debit > 0 ? 0 : Math.max(0, Math.min(cash - unsettled - holds.cash, equity - maint));
+  } else { bp = bpCrypto = Math.max(0, avail); withdrawable = Math.max(0, cash - unsettled - holds.cash); }
+  return {
+    profile: prof.key, acct: w.acct, cash, settled: cash - unsettled, unsettled, nextSettle, pendingDeposits: pending, holdsCash: holds.cash, holdsShares: holds.shares,
+    lmv, lmvMarginable: lmvM, equity, debit, maint, excess: equity - maint, bp, bpCrypto, withdrawable, marginOn,
+    marginRate: debit > 0 ? marginRate(prof, debit) : marginRate(prof, 0), accrued: +w.margin_accrued || 0, call: +w.call_amt > 0 ? +w.call_amt : 0,
+  };
+}
+
+// ---------- planning an order: price, quantity, fees, checks ----------
+// Used for the live preview on the trade screen and again at the moment an order fills.
+async function planOrder(c, w, pos, acct, sym, side, o = {}) {
+  const prof = profOf(w), crypto = isCrypto(sym), sess = crypto ? 'regular' : sessionAt(prof);
+  const q = prices.get(sym), quote = quoteOf(sym, sess);
+  if (!quote) fail(`There's no live price for ${sym} yet. Try again in a few seconds.`);
+  const p = pos.find(x => x.sym === sym), dp = qtyDp(sym), unit = crypto ? sym : 'shares';
+  let qty = num(o.qty), px = o.px || null, via = o.px ? 'limit' : 'quote', deep = false;
+  if (side === 'sell') {
+    if (!p) fail(`You don't own any ${sym} in this wallet`);
+    if (!(qty > 0) && o.pct > 0) qty = o.pct >= 100 ? p.qty : p.qty * Math.min(100, o.pct) / 100;
+  }
+  if (!px) {
+    if (crypto && (qty > 0 || o.usd > 0)) { const wb = await walkBook(sym, side, qty > 0 ? { qty } : { usd: o.usd }); if (wb) { px = wb.px; via = 'book'; deep = wb.deep; } }
+    if (!px) {
+      px = side === 'buy' ? quote.ask : quote.bid;
+      if (!crypto) { const est = qty > 0 ? qty : (o.usd || 0) / px; const imp = impactOf(sym, est, px); if (imp) { px = side === 'buy' ? px + imp : Math.max(tickOf(sym, px), px - imp); via = 'quote+impact'; } }
+    }
+  }
+  if (!(qty > 0) && o.usd > 0) qty = o.usd / px;
+  const whole = !crypto && (S.wholeShares || sess === 'overnight');
+  if (side === 'buy') qty = whole ? Math.floor(qty + 1e-9) : Math.floor(qty * 10 ** dp + 1e-6) / 10 ** dp;
+  else {
+    if (qty >= p.qty * 0.99999 || qty > p.qty) qty = p.qty;
+    else qty = whole && Number.isInteger(p.qty) ? Math.floor(qty) : Math.floor(qty * 10 ** dp + 1e-6) / 10 ** dp;
+  }
+  if (!(qty > 0)) fail(whole ? (sess === 'overnight' ? 'The 24 Hour Market only trades whole shares' : `That's less than one share of ${sym}`) : `Enter an amount to ${side}`);
+  const notional = qty * px;
+  if (prof.minUsd && !o.drip && !o.auto && notional < prof.minUsd - 1e-9 && !(side === 'sell' && qty === p?.qty)) fail(`The smallest order is ${money(prof.minUsd)}`);
+  if (side === 'sell' && !o.force) {
+    const held = acct.holdsShares[sym] || 0, avail = p.qty - held;
+    if (qty > avail + 1e-9) fail(held > 0 ? `${+held.toFixed(6)} of your ${sym} ${crypto ? '' : 'shares '}are held for open sell orders. You can sell up to ${+Math.max(0, avail).toFixed(6)} ${unit}, or cancel an order first.` : `You only have ${+p.qty.toFixed(6)} ${unit}`);
+  }
+  const vol30 = crypto ? await cryptoVolume30(w.id, c) : 0;
+  const fees = crypto ? cryptoFees(prof, w, notional, o.liq || 'taker', vol30) : stockFees(prof, side, qty, notional);
+  const cashAfter = side === 'buy' ? acct.cash - notional - fees.total : acct.cash + notional - fees.total;
+  if (side === 'buy') {
+    const cashOnly = crypto || !marginable(sym, px), need = notional + fees.total, bp = cashOnly ? acct.bpCrypto : acct.bp;
+    if (need > bp + 0.005) {
+      let why = `Not enough buying power. This needs ${money(need)} and you have ${money(bp)}.`;
+      if (acct.acct === 'cash' && acct.unsettled > 0) why += ` ${money(acct.unsettled)} from recent sales settles ${acct.nextSettle ? new Date(acct.nextSettle).toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'long' }) : 'soon'}.`;
+      if (acct.holdsCash > 0) why += ` ${money(acct.holdsCash)} is held for open buy orders.`;
+      if (cashOnly && acct.marginOn) why += crypto ? ' Crypto can only be bought with cash, not margin.' : ' Stocks under $5 can only be bought with cash, not margin.';
+      fail(why);
+    }
+    const equity = acct.equity;
+    if (S.maxPos > 0 && ((p ? p.qty : 0) + qty) * px > equity * S.maxPos / 100 + 0.01) fail(`One position can be at most ${S.maxPos}% of this wallet (${money(equity * S.maxPos / 100)}). Change this in Settings → Trading.`);
+    if (S.reservePct > 0 && cashAfter < equity * S.reservePct / 100 - 0.01) fail(`That would leave less than your ${S.reservePct}% cash reserve (${money(equity * S.reservePct / 100)}).`);
+  }
+  const pnl = side === 'sell' ? (px - p.avg) * qty - fees.total : null;
+  return {
+    sym, side, qty, px, notional, fees, quote, sess, via, deep, pnl, cashAfter, liq: o.liq || 'taker',
+    settle: !crypto && side === 'sell' ? settleTime(prof) : null, borrow: side === 'buy' && cashAfter < 0 ? -cashAfter : 0,
+  };
+}
 
 const firing = new Set();
 const fillCbs = []; // functions to run after every trade
-// The heart of the app: buys and sells, with every rule from Settings applied.
+// The heart of the app: buys and sells, with every rule applied.
 async function execTrade(wid, sym, side, o = {}) {
   sym = cleanSym(sym); if (!sym) fail('Pick something to trade');
   if (side !== 'buy' && side !== 'sell') fail('Choose buy or sell');
-  const q = prices.get(sym); const base = o.px || q?.p;
-  if (!(base > 0)) fail(`There's no live price for ${sym} yet. Try again in a few seconds.`);
-  const slip = S.slippage / 100, px = side === 'buy' ? base * (1 + slip) : base * (1 - slip);
-  const dp = qtyDp(sym), stockWhole = S.wholeShares && !isCrypto(sym);
   const fill = await tx(async c => {
     const w = (await c.query('select * from wallets where id=$1 for update', [wid])).rows[0];
     if (!w) fail('That wallet does not exist', 404);
+    if (w.broker) fail('This wallet is connected to your broker, so orders go through the broker.');
     if (w.archived) fail('That wallet is archived. Restore it first.');
-    const cash = +w.cash;
-    const pr = (await c.query('select * from pos where wid=$1 and sym=$2 for update', [wid, sym])).rows[0];
-    const pos = pr ? { qty: +pr.qty, avg: +pr.avg } : null;
-    let qty = num(o.qty), pnl = null, fee = 0, newCash = cash, closed = false;
+    if (!isReal(w)) return practiceTrade(c, w, sym, side, o);
+    await c.query('select 1 from pos where wid=$1 and sym=$2 for update', [wid, sym]);
+    const pos = await positions(wid, c), acct = await accountInfo(wid, { c, w, pos, exclude: o.limId });
+    const pl = await planOrder(c, w, pos, acct, sym, side, o);
+    const p = pos.find(x => x.sym === sym), prof = profOf(w);
+    const newCash = round(pl.cashAfter, 6);
+    let closed = false;
+    await c.query('update wallets set cash=$1 where id=$2', [newCash, wid]);
     if (side === 'buy') {
-      if (!(qty > 0) && o.usd > 0) qty = o.usd / px;
-      qty = stockWhole ? Math.floor(qty + 1e-9) : round(qty, dp);
-      if (!(qty > 0)) fail(stockWhole ? `That's less than one share of ${sym}. Whole shares only is on in Settings.` : 'Enter an amount to buy');
-      const cost = qty * px; fee = round(S.feeFlat + cost * S.feePct / 100, 6);
-      if (cost + fee > cash + 0.005) fail(`Not enough cash. This needs ${money(cost + fee)}${fee ? ' including the ' + money(fee) + ' fee' : ''} and you have ${money(cash)}.`);
-      const all = (await c.query('select sym, qty, avg from pos where wid=$1', [wid])).rows.map(x => ({ sym: x.sym, qty: +x.qty, avg: +x.avg }));
-      const equity = cash + marketValue(all);
-      if (S.maxPos > 0 && ((pos ? pos.qty : 0) + qty) * px > equity * S.maxPos / 100 + 0.01) fail(`One position can be at most ${S.maxPos}% of this wallet (${money(equity * S.maxPos / 100)}). Change this in Settings → Trading.`);
-      if (S.reservePct > 0 && cash - cost - fee < equity * S.reservePct / 100 - 0.01) fail(`That would leave less than your ${S.reservePct}% cash reserve (${money(equity * S.reservePct / 100)}).`);
-      const nq = (pos ? pos.qty : 0) + qty;
-      const avg = ((pos ? pos.qty * pos.avg : 0) + cost + fee) / nq;
-      newCash = Math.max(0, round(cash - cost - fee, 6));
-      await c.query('update wallets set cash=$1 where id=$2', [newCash, wid]);
+      const nq = round((p ? p.qty : 0) + pl.qty, qtyDp(sym));
+      const avg = ((p ? p.qty * p.avg : 0) + pl.notional + pl.fees.total) / nq;
       await c.query(`insert into pos(wid,sym,qty,avg,since) values($1,$2,$3,$4,now()) on conflict(wid,sym) do update set qty=$3, avg=$4`, [wid, sym, nq, avg]);
     } else {
-      if (!pos) fail(`You don't own any ${sym} in this wallet`);
-      if (!(qty > 0) && o.pct > 0) qty = o.pct >= 100 ? pos.qty : pos.qty * Math.min(100, o.pct) / 100;
-      if (!(qty > 0) && o.usd > 0) qty = o.usd / px;
-      if (qty >= pos.qty * 0.99999 || qty > pos.qty) qty = pos.qty;
-      qty = qty === pos.qty ? qty : (stockWhole && Number.isInteger(pos.qty) ? Math.floor(qty) : round(qty, dp));
-      if (!(qty > 0)) fail('Enter an amount to sell');
-      const proceeds = qty * px; fee = round(S.feeFlat + proceeds * S.feePct / 100, 6);
-      pnl = round((px - pos.avg) * qty - fee, 6);
-      newCash = round(cash + Math.max(0, proceeds - fee), 6);
-      await c.query('update wallets set cash=$1 where id=$2', [newCash, wid]);
-      const left = round(pos.qty - qty, dp);
+      const left = round(p.qty - pl.qty, qtyDp(sym));
       if (left <= 0) {
         closed = true;
         await c.query('delete from pos where wid=$1 and sym=$2', [wid, sym]);
@@ -981,30 +1309,93 @@ async function execTrade(wid, sym, side, o = {}) {
         await c.query("delete from lim where wid=$1 and sym=$2 and side='sell'", [wid, sym]);
       } else await c.query('update pos set qty=$1 where wid=$2 and sym=$3', [left, wid, sym]);
     }
-    const t = (await c.query('insert into trd(wid,sym,side,qty,price,why,pnl,fee,note) values($1,$2,$3,$4,$5,$6,$7,$8,$9) returning id, ts',
-      [wid, sym, side, qty, px, o.why || 'manual', pnl, fee, o.note ? String(o.note).slice(0, 500) : null])).rows[0];
-    return { id: t.id, ts: tsMs(t.ts), wid, sym, side, qty, price: px, fee, pnl, pnlPct: pnl != null && pos ? pnl / (pos.avg * qty) * 100 : null, cash: newCash, closed, stale: q?.src === 'cache' || (q && Date.now() - q.t > 10 * 60e3) };
+    const feeMap = Object.fromEntries(pl.fees.lines.map(l => [l.k, l.amt]));
+    const t = (await c.query(`insert into trd(wid,sym,side,qty,price,why,pnl,fee,note,fees,bid,ask,otype,tif,sess,settle,liq,via)
+      values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) returning id, ts`,
+      [wid, sym, side, pl.qty, pl.px, o.why || 'manual', pl.pnl == null ? null : round(pl.pnl, 6), pl.fees.total, o.note ? String(o.note).slice(0, 500) : null,
+        JSON.stringify(feeMap), pl.quote.bid, pl.quote.ask, o.otype || 'market', o.tif || null, pl.sess, pl.settle ? new Date(pl.settle) : null, pl.liq, pl.via])).rows[0];
+    let tax = null;
+    if (side === 'buy') await addLot(c, wid, sym, pl.qty, (pl.notional + pl.fees.total) / pl.qty, t.id);
+    else tax = await consumeLots(c, w, sym, pl.qty, pl.notional - pl.fees.total, t.id);
+    if (pl.settle) await c.query('insert into settle(wid,amount,settles,trd_id) values($1,$2,$3,$4)', [wid, round(pl.notional - pl.fees.total, 6), new Date(pl.settle), t.id]);
+    return {
+      id: t.id, ts: tsMs(t.ts), wid, sym, side, qty: pl.qty, price: pl.px, fee: pl.fees.total, fees: pl.fees.lines, pnl: pl.pnl, pnlPct: pl.pnl != null && p ? pl.pnl / (p.avg * pl.qty) * 100 : null,
+      cash: newCash, closed, bid: pl.quote.bid, ask: pl.quote.ask, quoteSrc: pl.quote.src, sess: pl.sess, settle: pl.settle, via: pl.via, borrow: pl.borrow, tax, profile: prof.key,
+      stale: prices.get(sym)?.src === 'cache',
+    };
   });
   for (const cb of fillCbs) try { await cb(fill); } catch (e) { warn('after trade', e.message); }
   return fill;
 }
+// The original simple engine, kept for wallets on practice rules.
+async function practiceTrade(c, w, sym, side, o) {
+  const wid = w.id, q = prices.get(sym); const base = o.px || q?.p;
+  if (!(base > 0)) fail(`There's no live price for ${sym} yet. Try again in a few seconds.`);
+  const slip = S.slippage / 100, px = o.px ? o.px : side === 'buy' ? base * (1 + slip) : base * (1 - slip);
+  const dp = qtyDp(sym), stockWhole = S.wholeShares && !isCrypto(sym);
+  const cash = +w.cash;
+  const pr = (await c.query('select * from pos where wid=$1 and sym=$2 for update', [wid, sym])).rows[0];
+  const pos = pr ? { qty: +pr.qty, avg: +pr.avg } : null;
+  let qty = num(o.qty), pnl = null, fee = 0, newCash = cash, closed = false, tax = null;
+  if (side === 'buy') {
+    if (!(qty > 0) && o.usd > 0) qty = o.usd / px;
+    qty = stockWhole ? Math.floor(qty + 1e-9) : round(qty, dp);
+    if (!(qty > 0)) fail(stockWhole ? `That's less than one share of ${sym}. Whole shares only is on in Settings.` : 'Enter an amount to buy');
+    const cost = qty * px; fee = round(S.feeFlat + cost * S.feePct / 100, 6);
+    if (cost + fee > cash + 0.005) fail(`Not enough cash. This needs ${money(cost + fee)}${fee ? ' including the ' + money(fee) + ' fee' : ''} and you have ${money(cash)}.`);
+    const all = (await c.query('select sym, qty, avg from pos where wid=$1', [wid])).rows.map(x => ({ sym: x.sym, qty: +x.qty, avg: +x.avg }));
+    const equity = cash + marketValue(all);
+    if (S.maxPos > 0 && ((pos ? pos.qty : 0) + qty) * px > equity * S.maxPos / 100 + 0.01) fail(`One position can be at most ${S.maxPos}% of this wallet (${money(equity * S.maxPos / 100)}). Change this in Settings → Trading.`);
+    if (S.reservePct > 0 && cash - cost - fee < equity * S.reservePct / 100 - 0.01) fail(`That would leave less than your ${S.reservePct}% cash reserve (${money(equity * S.reservePct / 100)}).`);
+    const nq = (pos ? pos.qty : 0) + qty;
+    const avg = ((pos ? pos.qty * pos.avg : 0) + cost + fee) / nq;
+    newCash = Math.max(0, round(cash - cost - fee, 6));
+    await c.query('update wallets set cash=$1 where id=$2', [newCash, wid]);
+    await c.query(`insert into pos(wid,sym,qty,avg,since) values($1,$2,$3,$4,now()) on conflict(wid,sym) do update set qty=$3, avg=$4`, [wid, sym, nq, avg]);
+  } else {
+    if (!pos) fail(`You don't own any ${sym} in this wallet`);
+    if (!(qty > 0) && o.pct > 0) qty = o.pct >= 100 ? pos.qty : pos.qty * Math.min(100, o.pct) / 100;
+    if (!(qty > 0) && o.usd > 0) qty = o.usd / px;
+    if (qty >= pos.qty * 0.99999 || qty > pos.qty) qty = pos.qty;
+    qty = qty === pos.qty ? qty : (stockWhole && Number.isInteger(pos.qty) ? Math.floor(qty) : round(qty, dp));
+    if (!(qty > 0)) fail('Enter an amount to sell');
+    const proceeds = qty * px; fee = round(S.feeFlat + proceeds * S.feePct / 100, 6);
+    pnl = round((px - pos.avg) * qty - fee, 6);
+    newCash = round(cash + Math.max(0, proceeds - fee), 6);
+    await c.query('update wallets set cash=$1 where id=$2', [newCash, wid]);
+    const left = round(pos.qty - qty, dp);
+    if (left <= 0) {
+      closed = true;
+      await c.query('delete from pos where wid=$1 and sym=$2', [wid, sym]);
+      await c.query('delete from ord where wid=$1 and sym=$2', [wid, sym]);
+      await c.query("delete from lim where wid=$1 and sym=$2 and side='sell'", [wid, sym]);
+    } else await c.query('update pos set qty=$1 where wid=$2 and sym=$3', [left, wid, sym]);
+  }
+  const t = (await c.query('insert into trd(wid,sym,side,qty,price,why,pnl,fee,note,otype,tif) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning id, ts',
+    [wid, sym, side, qty, px, o.why || 'manual', pnl, fee, o.note ? String(o.note).slice(0, 500) : null, o.otype || 'market', o.tif || null])).rows[0];
+  if (side === 'buy') await addLot(c, wid, sym, qty, (qty * px + fee) / qty, t.id);
+  else tax = await consumeLots(c, w, sym, qty, qty * px - fee, t.id);
+  return { id: t.id, ts: tsMs(t.ts), wid, sym, side, qty, price: px, fee, fees: fee ? [{ k: 'custom', label: 'Fee', amt: fee, note: 'From your settings' }] : [], pnl, pnlPct: pnl != null && pos ? pnl / (pos.avg * qty) * 100 : null, cash: newCash, closed, stale: q?.src === 'cache' || (q && Date.now() - q.t > 10 * 60e3), tax, profile: 'practice' };
+}
 
-// ---------- automatic orders (stop loss, take profit, trailing stop, limit, stop, queued) ----------
+// ---------- automatic orders (stop loss, take profit, trailing stop, limit, stop, stop limit, queued) ----------
 const condOrders = new Map(), limOrders = new Map();
 async function loadOrders() {
   condOrders.clear(); limOrders.clear();
+  await loadWalletMeta();
   for (const r of await rows('select * from ord order by id')) {
-    const x = { id: r.id, wid: r.wid, sym: r.sym, kind: r.kind, price: +r.price, pct: +r.pct || 100, trail: r.trail == null ? null : +r.trail, peak: r.peak == null ? null : +r.peak, created: tsMs(r.created) };
+    const x = { id: r.id, wid: r.wid, sym: r.sym, kind: r.kind, price: +r.price, pct: +r.pct || 100, trail: r.trail == null ? null : +r.trail, peak: r.peak == null ? null : +r.peak, created: tsMs(r.created), expires: tsMs(r.expires) };
     if (x.kind === 'trail') x.peak = Math.max(x.peak || 0, priceOf(x.sym) || 0);
     (condOrders.get(x.sym) || condOrders.set(x.sym, []).get(x.sym)).push(x);
   }
   for (const r of await rows('select * from lim order by id')) {
-    const x = { id: r.id, wid: r.wid, sym: r.sym, side: r.side, kind: r.kind || 'limit', price: +r.price, amt: +r.amt, units: r.units || 'auto', sl: r.sl == null ? null : +r.sl, tp: r.tp == null ? null : +r.tp, expires: tsMs(r.expires), ts: tsMs(r.ts) };
+    const x = { id: r.id, wid: r.wid, sym: r.sym, side: r.side, kind: r.kind || 'limit', price: +r.price, lpx: r.lpx == null ? null : +r.lpx, amt: +r.amt, units: r.units || 'auto', sl: r.sl == null ? null : +r.sl, tp: r.tp == null ? null : +r.tp, expires: tsMs(r.expires), ts: tsMs(r.ts), tif: r.tif || 'gtc', sess: r.sess || 'regular', rested: !!r.rested, trig: !!r.trig, why: r.why || null };
     (limOrders.get(x.sym) || limOrders.set(x.sym, []).get(x.sym)).push(x);
   }
 }
 const orderJson = o => ({ ...o, stop: o.kind === 'trail' ? o.peak * (1 - o.trail / 100) : o.price });
 async function addCondOrder(wid, sym, kind, { price, pct = 100, trail = null }) {
+  const w = await walletRow(wid); if (w.broker) fail('Use your broker connection for this wallet');
   const p = priceOf(sym); if (!p) fail('No live price yet for ' + sym);
   if (!(await row('select 1 from pos where wid=$1 and sym=$2', [wid, sym]))) fail(`Buy ${sym} first, then add a stop loss or take profit`);
   pct = clamp(num(pct, 100), 1, 100);
@@ -1012,11 +1403,14 @@ async function addCondOrder(wid, sym, kind, { price, pct = 100, trail = null }) 
   else if (kind === 'stop') { if (!(price > 0 && price < p)) fail(`A stop loss has to be below the current price (${pxStr(p)})`); }
   else if (kind === 'take') { if (!(price > p)) fail(`A take profit has to be above the current price (${pxStr(p)})`); }
   else fail('Unknown order type');
+  if (isReal(w) && !isCrypto(sym)) price = kind === 'trail' ? price : roundTick(sym, price);
   const same = kind === 'take' ? ['take'] : ['stop', 'trail'];
   if (pct >= 100) await Q('delete from ord where wid=$1 and sym=$2 and kind = any($3::text[])', [wid, sym, same]);
-  const r = await row('insert into ord(wid,sym,kind,price,pct,trail,peak) values($1,$2,$3,$4,$5,$6,$7) returning id', [wid, sym, kind, price, pct, kind === 'trail' ? trail : null, kind === 'trail' ? p : null]);
+  const gtc = profOf(w).gtcDays && isReal(w) ? new Date(Date.now() + profOf(w).gtcDays * 864e5) : null;
+  const r = await row('insert into ord(wid,sym,kind,price,pct,trail,peak,expires) values($1,$2,$3,$4,$5,$6,$7,$8) returning id', [wid, sym, kind, price, pct, kind === 'trail' ? trail : null, kind === 'trail' ? p : null, gtc]);
   await loadOrders(); return r.id;
 }
+const roundTick = (sym, v) => { const t = tickOf(sym, v); return Math.round(v / t) * t; };
 // After a buy: attach the stop loss / take profit that came with it.
 async function attachBracket(wid, sym, fillPx, b = {}) {
   const out = [];
@@ -1029,89 +1423,184 @@ async function attachBracket(wid, sym, fillPx, b = {}) {
   } catch (e) { warn('bracket', e.message); }
   return out;
 }
+function checkTick(sym, v, label) {
+  if (isCrypto(sym)) return;
+  const t = v >= 1 ? 0.01 : 0.0001;
+  if (Math.abs(Math.round(v / t) * t - v) > t / 1000) fail(`${label} for stocks ${v >= 1 ? 'over $1 must be in whole cents' : 'under $1 can use up to 4 decimals'}`);
+}
 async function addLimit(wid, sym, o) {
+  const w = await walletRow(wid); if (w.broker) fail('Use your broker connection for this wallet');
   const p = priceOf(sym); if (!p) fail('No live price yet for ' + sym);
-  const side = o.side === 'sell' ? 'sell' : 'buy', kind = ['limit', 'stop', 'moo'].includes(o.kind) ? o.kind : 'limit';
-  const price = num(o.price), amt = num(o.amount ?? o.amt);
+  const real = isReal(w), prof = profOf(w), crypto = isCrypto(sym);
+  const side = o.side === 'sell' ? 'sell' : 'buy', kind = ['limit', 'stop', 'stoplimit', 'moo'].includes(o.kind) ? o.kind : 'limit';
+  let price = num(o.price), lpx = num(o.lpx) || null, amt = num(o.amount ?? o.amt);
   let units = o.units || (side === 'buy' ? 'usd' : 'pct');
   if (!['usd', 'qty', 'pct'].includes(units)) units = side === 'buy' ? 'usd' : 'pct';
   if (side === 'buy' && units === 'pct') units = 'usd';
   if (!(amt > 0)) fail('Enter how much to ' + side);
-  if (kind !== 'moo' && !(price > 0)) fail('Enter the trigger price');
-  if (kind === 'limit' && side === 'buy' && price >= p) fail(`A buy limit has to be below the current price (${pxStr(p)}). To buy higher, use a stop order.`);
-  if (kind === 'limit' && side === 'sell' && price <= p) fail(`A sell limit has to be above the current price (${pxStr(p)}). To sell lower, use a stop loss.`);
-  if (kind === 'stop' && side === 'buy' && price <= p) fail(`A buy stop has to be above the current price (${pxStr(p)})`);
-  if (kind === 'stop' && side === 'sell' && price >= p) fail(`A sell stop has to be below the current price (${pxStr(p)})`);
+  if (kind !== 'moo' && !(price > 0)) fail('Enter the ' + (kind === 'limit' ? 'limit' : 'stop') + ' price');
+  if (kind === 'stoplimit' && !(lpx > 0)) fail('Enter the limit price for the stop limit order');
   if (side === 'sell' && !(await row('select 1 from pos where wid=$1 and sym=$2', [wid, sym]))) fail(`You don't own any ${sym} in this wallet`);
+  let sess = crypto ? 'regular' : ['regular', 'extended', '24h'].includes(o.sess) ? o.sess : 'regular', tif = o.tif === 'day' ? 'day' : 'gtc';
+  if (!real) {
+    if (kind === 'limit' && side === 'buy' && price >= p) fail(`A buy limit has to be below the current price (${pxStr(p)}). To buy higher, use a stop order.`);
+    if (kind === 'limit' && side === 'sell' && price <= p) fail(`A sell limit has to be above the current price (${pxStr(p)}). To sell lower, use a stop loss.`);
+    sess = 'regular';
+  } else {
+    if (kind !== 'moo') checkTick(sym, price, kind === 'limit' ? 'Limit prices' : 'Stop prices');
+    if (lpx) checkTick(sym, lpx, 'Limit prices');
+    if (sess !== 'regular' && kind !== 'limit') fail('Only limit orders can trade outside regular hours. Stop orders wait for the regular session.');
+    if (sess === '24h' && !prof.overnight) fail('The 24 Hour Market is a Robinhood feature. Pick extended hours instead.');
+    if (kind === 'moo') tif = 'day';
+  }
+  if (kind === 'stop' || kind === 'stoplimit') {
+    if (side === 'buy' && price <= p) fail(`A buy stop has to be above the current price (${pxStr(p)})`);
+    if (side === 'sell' && price >= p) fail(`A sell stop has to be below the current price (${pxStr(p)})`);
+  }
+  // Real brokers hold your cash (buys) and shares (sells) for open orders.
+  if (real) {
+    const pos = await positions(wid), acct = await accountInfo(wid, { w, pos });
+    if (side === 'buy') {
+      const unitPx = kind === 'stoplimit' ? lpx : kind === 'limit' ? price : p * 1.05;
+      const need = units === 'qty' ? amt * unitPx : amt, bp = crypto || !marginable(sym, unitPx) ? acct.bpCrypto : acct.bp;
+      if (need > bp + 0.005) fail(`Not enough buying power to hold for this order. It needs ${money(need)}${kind === 'moo' || kind === 'stop' ? ' (with a 5% cushion for price moves)' : ''} and you have ${money(bp)}.`);
+    } else {
+      const ps = pos.find(x => x.sym === sym), want = units === 'qty' ? amt : units === 'usd' ? amt / (kind === 'limit' ? price : p) : ps.qty * Math.min(100, amt) / 100;
+      const free = ps.qty - (acct.holdsShares[sym] || 0);
+      if (want > free + 1e-9) fail(`Only ${+Math.max(0, free).toFixed(6)} ${crypto ? sym : 'shares'} are free to sell. The rest are held for other open sell orders.`);
+    }
+  }
   let expires = null;
-  if (o.expires === 'day') expires = isCrypto(sym) ? Date.now() + 86400e3 : sessionClose();
-  else if (o.expires && o.expires !== 'gtc' && Number.isFinite(tsMs(o.expires))) expires = tsMs(o.expires);
-  const r = await row('insert into lim(wid,sym,side,kind,price,amt,units,sl,tp,expires) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning id',
-    [wid, sym, side, kind, kind === 'moo' ? p : price, units === 'pct' ? Math.min(100, amt) : amt, units, num(o.sl) || null, num(o.tp) || null, expires ? new Date(expires) : null]);
-  await loadOrders(); await refreshUserSyms(); return r.id;
+  if (kind === 'moo') expires = null;
+  else if (tif === 'day') expires = crypto ? Date.now() + 86400e3 : sessionEnd(prof, sess !== 'regular');
+  else if (real && prof.gtcDays) expires = Date.now() + prof.gtcDays * 864e5;
+  if (o.expires && o.expires !== 'gtc' && o.expires !== 'day' && Number.isFinite(tsMs(o.expires))) expires = tsMs(o.expires);
+  if (o.expires === 'day' && !real) expires = crypto ? Date.now() + 86400e3 : sessionClose();
+  const q = quoteOf(sym, crypto ? 'regular' : sessionAt(prof));
+  const marketable = kind === 'limit' && q && (side === 'buy' ? q.ask <= price : q.bid >= price);
+  const r = await row('insert into lim(wid,sym,side,kind,price,lpx,amt,units,sl,tp,expires,tif,sess,rested,why) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) returning id',
+    [wid, sym, side, kind, kind === 'moo' ? p : price, lpx, units === 'pct' ? Math.min(100, amt) : amt, units, num(o.sl) || null, num(o.tp) || null, expires ? new Date(expires) : null, tif, sess, !marketable, o.why || null]);
+  await loadOrders(); await refreshUserSyms();
+  // A marketable order fills right away when its session is open.
+  let fill = null;
+  const l = (limOrders.get(sym) || []).find(x => x.id === r.id);
+  if (l && limHit(l, p, 'ws')) fill = await fireLim(l, p, { quiet: true });
+  return { id: r.id, fill };
 }
 
-// Can automatic orders for this stock fire right now?
-function canFire(sym, src) {
+// Can automatic orders fire right now?
+function canFire(sym, src) { // practice rules
   if (isCrypto(sym)) return src !== 'cache';
   if (src === 'cache') return false;
   const st = market().state;
   if (st === 'open') return true;
   return !S.rthOrders && src === 'ws';
 }
+function condAllowed(o, src) {
+  const w = walletMeta.get(o.wid); if (!w || w.archived || w.broker) return false;
+  if (!isReal(w)) return canFire(o.sym, src);
+  if (src === 'cache') return false;
+  return isCrypto(o.sym) || sessionAt(profOf(w)) === 'regular';
+}
+function limAllowed(l, src) {
+  const w = walletMeta.get(l.wid); if (!w || w.archived || w.broker) return false;
+  if (!isReal(w)) return canFire(l.sym, src) && (l.kind !== 'moo' || isCrypto(l.sym) || market().state === 'open');
+  if (src === 'cache') return false;
+  if (isCrypto(l.sym)) return true;
+  const s = sessionAt(profOf(w));
+  if (s === 'regular') return true;
+  if (l.kind !== 'limit') return false;
+  if (s === 'pre' || s === 'post') return l.sess === 'extended' || l.sess === '24h';
+  if (s === 'overnight') return l.sess === '24h';
+  return false;
+}
 engineHook = (sym, p, src) => {
-  for (const o of condOrders.get(sym) || []) if (o.kind === 'trail' && p > (o.peak || 0)) { o.peak = p; o.dirty = true; }
-  if (canFire(sym, src)) { checkCond(sym, p); checkLims(sym, p); }
+  for (const o of condOrders.get(sym) || []) if (o.kind === 'trail' && p > (o.peak || 0) && condAllowed(o, src === 'cache' ? 'cache' : 'ws')) { o.peak = p; o.dirty = true; }
+  checkCond(sym, p, src); checkLims(sym, p, src);
   if (src !== 'cache') checkAlerts(sym, p);
 };
-async function checkCond(sym, p) {
+function condHit(o, p) {
+  if (o.kind === 'trail') return p <= o.peak * (1 - o.trail / 100);
+  if (o.kind === 'stop') return p <= o.price;
+  if (o.kind === 'take') { const w = walletMeta.get(o.wid); if (!isReal(w)) return p >= o.price; const q = quoteOf(o.sym); return q ? q.bid >= o.price : p >= o.price; }
+  return false;
+}
+async function checkCond(sym, p, src = 'ws') {
   const list = condOrders.get(sym); if (!list || !list.length) return;
-  const hit = list.find(o => !firing.has(o.wid + ':' + sym) && (o.kind === 'trail' ? p <= o.peak * (1 - o.trail / 100) : o.kind === 'stop' ? p <= o.price : o.kind === 'take' ? p >= o.price : false));
+  const hit = list.find(o => !firing.has(o.wid + ':' + sym) && condAllowed(o, src) && condHit(o, p));
   if (!hit) return;
   const key = hit.wid + ':' + sym; firing.add(key);
   try {
     const label = hit.kind === 'take' ? 'Take profit' : hit.kind === 'trail' ? 'Trailing stop' : 'Stop loss';
     const pos = await row('select qty from pos where wid=$1 and sym=$2', [hit.wid, sym]);
     if (!pos) { await Q('delete from ord where id=$1', [hit.id]); await loadOrders(); return; }
-    const f = await execTrade(hit.wid, sym, 'sell', { pct: hit.pct, why: label.toLowerCase() });
+    const w = walletMeta.get(hit.wid), real = isReal(w);
+    const o = { pct: hit.pct, why: label.toLowerCase(), otype: hit.kind === 'take' ? 'limit' : hit.kind === 'trail' ? 'trail' : 'stop', auto: true, liq: hit.kind === 'take' ? 'maker' : 'taker' };
+    if (real && hit.kind === 'take') { const q = quoteOf(sym); if (q) o.px = Math.max(hit.price, q.bid); }
+    const f = await execTrade(hit.wid, sym, 'sell', o);
     if (!f.closed) await Q('delete from ord where id=$1', [hit.id]);
     await loadOrders();
-    const w = await row('select name, emoji from wallets where id=$1', [hit.wid]);
-    await notify('order', `${label} hit · ${sym}`, `Sold ${hit.pct >= 100 ? 'all' : hit.pct + '% of'} your ${sym} (${+f.qty.toFixed(6)}) at ${pxStr(f.price)}. ${f.pnl >= 0 ? 'Profit' : 'Loss'}: ${money(f.pnl)} (${pct(f.pnlPct || 0)}).${walletCount > 1 ? ' Wallet: ' + w.emoji + ' ' + w.name : ''}`, { sym, wid: hit.wid, data: { kind: 'fill', fill: f, label } });
+    await notify('order', `${label} hit · ${sym}`, `Sold ${hit.pct >= 100 ? 'all' : hit.pct + '% of'} your ${sym} (${+f.qty.toFixed(6)}) at ${pxStr(f.price)}${hit.kind !== 'take' && real ? ` (triggered at ${pxStr(p)})` : ''}. ${f.pnl >= 0 ? 'Profit' : 'Loss'}: ${money(f.pnl)} (${pct(f.pnlPct || 0)}).${f.fee ? ` Fees ${money(f.fee)}.` : ''}${walletCount > 1 ? ' Wallet: ' + w.emoji + ' ' + w.name : ''}`, { sym, wid: hit.wid, data: { kind: 'fill', fill: f, label } });
   } catch (e) {
     warn('order', sym, e.message);
     await Q('delete from ord where id=$1', [hit.id]).catch(() => {}); await loadOrders();
     await notify('order', `Couldn't sell ${sym}`, `Your ${hit.kind === 'take' ? 'take profit' : 'stop loss'} triggered but the sale failed: ${e.message}`, { sym, wid: hit.wid });
   } finally { firing.delete(key); }
 }
-async function checkLims(sym, p) {
+function limHit(l, p, src) {
+  if (firing.has('L' + l.id) || (l.expires && l.expires <= Date.now()) || !limAllowed(l, src)) return false;
+  const w = walletMeta.get(l.wid);
+  if (l.kind === 'moo') return true;
+  if (!isReal(w)) return l.kind === 'stop' ? (l.side === 'buy' ? p >= l.price : p <= l.price) : (l.side === 'buy' ? p <= l.price : p >= l.price);
+  const q = quoteOf(l.sym, isCrypto(l.sym) ? 'regular' : sessionAt(profOf(w))); if (!q) return false;
+  if (l.kind === 'stop') return l.side === 'buy' ? p >= l.price : p <= l.price;
+  if (l.kind === 'stoplimit' && !l.trig) return l.side === 'buy' ? p >= l.price : p <= l.price;
+  const lim = l.kind === 'stoplimit' ? l.lpx : l.price;
+  return l.side === 'buy' ? q.ask <= lim : q.bid >= lim;
+}
+async function checkLims(sym, p, src = 'ws') {
   const list = limOrders.get(sym); if (!list || !list.length) return;
-  const now = Date.now();
-  const hit = list.find(l => !firing.has('L' + l.id) && (!l.expires || l.expires > now) && (
-    l.kind === 'moo' ? true :
-    l.kind === 'stop' ? (l.side === 'buy' ? p >= l.price : p <= l.price) :
-    (l.side === 'buy' ? p <= l.price : p >= l.price)));
-  if (!hit) return;
+  const hit = list.find(l => limHit(l, p, src));
+  if (hit) await fireLim(hit, p);
+}
+async function fireLim(hit, p, { quiet = false } = {}) {
+  const sym = hit.sym, w = walletMeta.get(hit.wid), real = isReal(w);
+  // A stop limit that just triggered becomes a resting limit order.
+  if (real && hit.kind === 'stoplimit' && !hit.trig) {
+    hit.trig = true; await Q('update lim set trig=true where id=$1', [hit.id]).catch(() => {});
+    if (!quiet) await notify('order', `Stop limit triggered · ${sym}`, `${sym} reached ${pxStr(hit.price)}. Your ${hit.side} order is now a limit order at ${pxStr(hit.lpx)}.`, { sym, wid: hit.wid, push: false });
+    if (!limHit(hit, p, 'ws')) return null;
+  }
   firing.add('L' + hit.id);
-  const label = hit.kind === 'moo' ? 'Queued order' : hit.kind === 'stop' ? 'Stop order' : 'Limit order';
+  const label = hit.kind === 'moo' ? 'Queued order' : hit.kind === 'stop' ? 'Stop order' : hit.kind === 'stoplimit' ? 'Stop limit order' : 'Limit order';
   try {
     const del = await row('delete from lim where id=$1 returning id', [hit.id]); await loadOrders();
-    if (!del) return;
-    const o = { why: label.toLowerCase() };
+    if (!del) return null;
+    const o = { why: hit.why || label.toLowerCase(), limId: hit.id, otype: hit.kind === 'moo' ? 'market' : hit.kind, tif: hit.tif, auto: hit.kind !== 'moo' || hit.why === 'dividend reinvestment', drip: hit.why === 'dividend reinvestment' };
     if (hit.side === 'buy') { if (hit.units === 'qty') o.qty = hit.amt; else o.usd = hit.amt; }
     else { if (hit.units === 'qty') o.qty = hit.amt; else if (hit.units === 'usd') o.usd = hit.amt; else o.pct = hit.amt; }
+    if (real && (hit.kind === 'limit' || hit.kind === 'stoplimit')) {
+      const q = quoteOf(sym, isCrypto(sym) ? 'regular' : sessionAt(profOf(w))), lim = hit.kind === 'stoplimit' ? hit.lpx : hit.price;
+      o.px = hit.side === 'buy' ? Math.min(lim, q.ask) : Math.max(lim, q.bid);
+      o.liq = hit.rested ? 'maker' : 'taker';
+    }
     const f = await execTrade(hit.wid, sym, hit.side, o);
-    if (hit.side === 'buy' && (hit.sl || hit.tp)) await attachBracket(hit.wid, sym, f.price, { sl: hit.sl, tp: hit.tp });
-    await notify('order', `${label} filled · ${sym}`, `${hit.side === 'buy' ? 'Bought' : 'Sold'} ${+f.qty.toFixed(6)} ${sym} at ${pxStr(f.price)} (${money(f.qty * f.price)}).${f.pnl != null ? ` ${f.pnl >= 0 ? 'Profit' : 'Loss'}: ${money(f.pnl)}.` : ''}`, { sym, wid: hit.wid, data: { kind: 'fill', fill: f, label } });
+    if (hit.side === 'buy' && (hit.sl || hit.tp)) f.bracket = await attachBracket(hit.wid, sym, f.price, { sl: hit.sl, tp: hit.tp });
+    if (!quiet) await notify('order', `${label} filled · ${sym}`, `${hit.side === 'buy' ? 'Bought' : 'Sold'} ${+f.qty.toFixed(6)} ${sym} at ${pxStr(f.price)} (${money(f.qty * f.price)}).${f.pnl != null ? ` ${f.pnl >= 0 ? 'Profit' : 'Loss'}: ${money(f.pnl)}.` : ''}${f.fee ? ` Fees ${money(f.fee)}.` : ''}`, { sym, wid: hit.wid, data: { kind: 'fill', fill: f, label } });
+    return f;
   } catch (e) {
+    if (quiet) throw e;
     await notify('order', `${label} not filled · ${sym}`, `It triggered at ${pxStr(p)} but couldn't go through: ${e.message}`, { sym, wid: hit.wid });
+    return null;
   } finally { firing.delete('L' + hit.id); }
 }
 async function expireOrders() {
   const gone = await rows('delete from lim where expires is not null and expires < now() returning *');
-  if (!gone.length) return;
+  const goneOrd = await rows('delete from ord where expires is not null and expires < now() returning *');
+  if (!gone.length && !goneOrd.length) return;
   await loadOrders();
-  for (const l of gone) await notify('order', `Order expired · ${l.sym}`, `Your ${l.kind === 'stop' ? 'stop' : 'limit'} ${l.side} order at ${pxStr(+l.price)} expired without filling.`, { sym: l.sym, wid: l.wid, push: false });
+  for (const l of gone) await notify('order', `Order expired · ${l.sym}`, `Your ${{ stop: 'stop', stoplimit: 'stop limit', limit: 'limit', moo: 'queued' }[l.kind] || 'limit'} ${l.side} order${l.kind !== 'moo' ? ' at ' + pxStr(+l.price) : ''} ${l.tif === 'day' ? 'was a day order and ended with the session' : 'reached the 90-day limit for good-till-canceled orders'} without filling.`, { sym: l.sym, wid: l.wid, push: false });
+  for (const o of goneOrd) await notify('order', `Order expired · ${o.sym}`, `Your ${o.kind === 'take' ? 'take profit' : o.kind === 'trail' ? 'trailing stop' : 'stop loss'} reached the 90-day limit for good-till-canceled orders, so the broker cancelled it. Set a new one to stay protected.`, { sym: o.sym, wid: o.wid });
 }
 
 // ---------- price alerts ----------
@@ -1149,6 +1638,233 @@ function checkAlerts(sym, p) {
     notify('alert', `${sym} ${a.dir === 'above' ? 'rose to' : 'fell to'} ${pxStr(a.price)}`, `${sym} is now ${pxStr(p)} per ${isCrypto(sym) ? 'coin' : 'share'}.${a.label ? ' ' + a.label : ''}${a.rep ? ' This alert repeats.' : ''}`, { sym, data: { kind: 'alert' } });
     break;
   }
+}
+
+// =====================================================================
+// Broker connection (Alpaca): live bid/ask quotes, and a wallet that mirrors a real paper or live account.
+// Turned on by adding ALPACA_KEY_ID and ALPACA_SECRET_KEY in Railway. Live trading also needs ALPACA_ENV=live,
+// so real money can never be switched on from inside the app.
+// =====================================================================
+const crypto_ = crypto;
+const ALP = {
+  key: (ENV.ALPACA_KEY_ID || ENV.APCA_API_KEY_ID || '').trim(),
+  secret: (ENV.ALPACA_SECRET_KEY || ENV.APCA_API_SECRET_KEY || '').trim(),
+  env: String(ENV.ALPACA_ENV || 'paper').trim().toLowerCase() === 'live' ? 'live' : 'paper',
+  feed: String(ENV.ALPACA_FEED || 'iex').trim().toLowerCase() === 'sip' ? 'sip' : 'iex',
+  maxOrder: +ENV.ALPACA_MAX_ORDER || 0,
+};
+const BROKER = ALP.key && ALP.secret ? {
+  env: ALP.env, feed: ALP.feed, base: ENV.ALPACA_BASE || (ALP.env === 'live' ? 'https://api.alpaca.markets' : 'https://paper-api.alpaca.markets'),
+  data: ENV.ALPACA_DATA || 'https://data.alpaca.markets', stream: ENV.ALPACA_STREAM || 'wss://stream.data.alpaca.markets',
+  ok: false, err: null, account: null, orders: [], lastSync: 0, wid: null, dataOk: false, dataErr: null, tuOk: false,
+} : null;
+async function apca(pathq, { method = 'GET', body, data = false, timeout = 10000 } = {}) {
+  if (!BROKER) fail('No broker is connected. Add ALPACA_KEY_ID and ALPACA_SECRET_KEY in Railway.', 503);
+  let r;
+  try {
+    r = await fetch((data ? BROKER.data : BROKER.base) + pathq, { method, headers: { 'APCA-API-KEY-ID': ALP.key, 'APCA-API-SECRET-KEY': ALP.secret, 'Content-Type': 'application/json', Accept: 'application/json' }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(timeout) });
+  } catch (e) { BROKER.err = 'Could not reach Alpaca'; fail('Could not reach Alpaca. Try again in a moment.', 502); }
+  const txt = await r.text(); let j = null; try { j = txt ? JSON.parse(txt) : null; } catch (e) {}
+  if (r.status === 401) { BROKER.err = 'Alpaca refused the API keys'; fail('Alpaca refused the API keys. Check ALPACA_KEY_ID and ALPACA_SECRET_KEY in Railway.', 502); }
+  if (!r.ok) fail('Alpaca says: ' + (j?.message || txt || 'error ' + r.status), r.status >= 500 ? 502 : r.status === 404 ? 404 : 400);
+  return j;
+}
+const alpSym = sym => isCrypto(sym) ? sym + '/USD' : sym;
+const fromAlp = (s, cls) => { s = String(s || ''); if (s.includes('/')) return s.split('/')[0]; if (cls === 'crypto' || (/USDT?$/.test(s) && s.length > 5 && CRYPTO_DEFAULT.includes(s.replace(/USDT?$/, '')))) return s.replace(/USDT?$/, ''); return s; };
+
+// ---------- market data: real bid/ask for stocks ----------
+let adws = null, adSubs = new Set(), adBackoff = 3000;
+function adConnect() {
+  if (!BROKER) return;
+  let ws;
+  try { ws = adws = new WebSocket(`${BROKER.stream}/v2/${ALP.feed}`); } catch (e) { return setTimeout(adConnect, adBackoff); }
+  ws.on('open', () => { try { ws.send(JSON.stringify({ action: 'auth', key: ALP.key, secret: ALP.secret })); } catch (e) {} });
+  ws.on('message', m => {
+    let list; try { list = JSON.parse(m.toString()); } catch (e) { return; }
+    for (const d of [].concat(list)) {
+      if (d.T === 'success' && d.msg === 'authenticated') { adBackoff = 3000; BROKER.dataOk = true; BROKER.dataErr = null; adSubs = new Set(); adSync(); }
+      else if (d.T === 'error') { BROKER.dataErr = d.msg || 'data error'; if (d.code === 402 || d.code === 406) BROKER.dataOk = false; }
+      else if (d.T === 'q') { const q = prices.get(d.S); if (q && d.bp > 0 && d.ap > 0) { q.bid = +d.bp; q.ask = +d.ap; q.bqT = Date.now(); } }
+      else if (d.T === 't') { const q = prices.get(d.S); if (!FINNHUB_KEY || !(q?.wsT > Date.now() - 60e3)) tick(d.S, +d.p); }
+    }
+  });
+  ws.on('close', () => { BROKER.dataOk = false; if (adws === ws) setTimeout(adConnect, adBackoff = Math.min(adBackoff * 2, 120000)); });
+  ws.on('error', e => { BROKER.dataErr = e.message; try { ws.terminate(); } catch (_) {} });
+}
+function adSync() {
+  if (!adws || adws.readyState !== 1 || !BROKER.dataOk) return;
+  const want = new Set(stockPriority().slice(0, 30));
+  const drop = [...adSubs].filter(s => !want.has(s)), add = [...want].filter(s => !adSubs.has(s));
+  if (drop.length) { adws.send(JSON.stringify({ action: 'unsubscribe', quotes: drop, trades: drop })); drop.forEach(s => adSubs.delete(s)); }
+  if (add.length) { adws.send(JSON.stringify({ action: 'subscribe', quotes: add, trades: add })); add.forEach(s => adSubs.add(s)); }
+}
+
+// ---------- the broker wallet ----------
+async function brokerWallet() { return row("select * from wallets where broker='alpaca' and not archived order by id limit 1"); }
+const KIND_OF = { market: 'market', limit: 'limit', stop: 'stop', stop_limit: 'stoplimit', trailing_stop: 'trail' };
+function mapOrder(o, wid) {
+  const sym = fromAlp(o.symbol, o.asset_class), kind = KIND_OF[o.type] || o.type;
+  return {
+    id: 'a:' + o.id, wid, sym, side: o.side, kind: kind === 'market' ? 'moo' : kind, price: +(o.limit_price || o.stop_price || o.hwm || 0) || null, lpx: o.type === 'stop_limit' ? +o.limit_price : null,
+    stop: o.type === 'trailing_stop' ? +o.stop_price || null : null, trail: o.trail_percent ? +o.trail_percent : null, peak: o.hwm ? +o.hwm : null,
+    amt: o.qty ? +o.qty : +o.notional, units: o.qty ? 'qty' : 'usd', filled: +o.filled_qty || 0, tif: o.time_in_force, sess: o.extended_hours ? 'extended' : 'regular',
+    expires: null, ts: tsMs(o.submitted_at || o.created_at), status: o.status, broker: true, cls: o.order_class || 'simple',
+    legs: (o.legs || []).map(l => ({ id: 'a:' + l.id, kind: KIND_OF[l.type] || l.type, price: +(l.limit_price || l.stop_price || 0) })),
+  };
+}
+let syncing = null;
+async function brokerSync() {
+  if (!BROKER) return;
+  if (syncing) return syncing;
+  syncing = (async () => {
+    const w = await brokerWallet(); BROKER.wid = w ? w.id : null;
+    if (!w) { try { BROKER.account = await apca('/v2/account'); BROKER.ok = true; BROKER.err = null; } catch (e) { BROKER.ok = false; BROKER.err = e.message; } return; }
+    try {
+      const [acct, posL, ords] = await Promise.all([apca('/v2/account'), apca('/v2/positions'), apca('/v2/orders?status=open&limit=200&nested=true')]);
+      BROKER.account = acct; BROKER.ok = true; BROKER.err = null; BROKER.lastSync = Date.now();
+      let after = (await kvGet('alpaca_after')) || new Date(tsMs(w.created)).toISOString(), acts = [], token = null;
+      for (let i = 0; i < 10; i++) {
+        const page = await apca(`/v2/account/activities?after=${encodeURIComponent(after)}&direction=asc&page_size=100${token ? '&page_token=' + encodeURIComponent(token) : ''}`);
+        if (!Array.isArray(page) || !page.length) break; acts = acts.concat(page); if (page.length < 100) break; token = page[page.length - 1].id;
+      }
+      const before = await positions(w.id);
+      let newSyms = false;
+      await tx(async c => {
+        for (const a of acts) {
+          const t = a.transaction_time || (a.date ? a.date + 'T20:00:00Z' : new Date().toISOString());
+          if (t > after) after = t;
+          const type = a.activity_type, ext = 'alp:' + a.id;
+          if (type === 'FILL') {
+            const sym = fromAlp(a.symbol, a.asset_class || (String(a.symbol).includes('/') ? 'crypto' : null));
+            if (!assets.has(sym)) { addAsset(sym, String(a.symbol).includes('/') || CRYPTO_DEFAULT.includes(sym) ? 'crypto' : 'stock'); newSyms = true; }
+            const pb = before.find(p => p.sym === sym), qty = +a.qty, px = +a.price;
+            const pnl = a.side !== 'buy' && pb ? round((px - pb.avg) * qty, 6) : null;
+            await c.query("insert into trd(wid,sym,side,qty,price,why,pnl,fee,ext_id,ts,otype) values($1,$2,$3,$4,$5,'broker',$6,0,$7,$8,$9) on conflict (ext_id) do nothing", [w.id, sym, a.side === 'buy' ? 'buy' : 'sell', qty, px, pnl, ext, t, a.order_type || null]);
+          } else if (/^DIV/.test(type)) {
+            const sym = fromAlp(a.symbol), per = +a.per_share_amount || 0, q = +a.qty || 0, net = +a.net_amount || 0;
+            await c.query("insert into trd(wid,sym,side,qty,price,why,ext_id,ts) values($1,$2,'div',$3,$4,'dividend',$5,$6) on conflict (ext_id) do nothing", [w.id, sym, per && q ? q : 1, per && q ? net / q : net, ext, t]);
+          } else if (type === 'CSD' || type === 'CSW' || type === 'JNLC') {
+            const net = +a.net_amount || 0;
+            const r = await c.query("insert into trd(wid,sym,side,qty,price,why,ext_id,ts) values($1,'','cash',1,$2,$3,$4,$5) on conflict (ext_id) do nothing returning id", [w.id, net, net >= 0 ? 'deposit' : 'withdrawal', ext, t]);
+            if (r.rows.length) await c.query('update wallets set start_bal = greatest(start_bal + $1, 1) where id=$2', [net, w.id]);
+          } else if (type === 'INT' || type === 'FEE' || type === 'CFEE') {
+            const net = +a.net_amount || 0;
+            await c.query("insert into trd(wid,sym,side,qty,price,why,fee,ext_id,ts) values($1,'',$2,1,$3,$4,$5,$6,$7) on conflict (ext_id) do nothing", [w.id, type === 'INT' ? 'int' : 'fee', type === 'INT' ? net : Math.abs(net), type === 'INT' ? 'interest' : (a.description || 'broker fee'), type === 'INT' ? 0 : Math.abs(net), ext, t]);
+          }
+        }
+        if (acts.length) await c.query("insert into kv values('alpaca_after',$1) on conflict(k) do update set v=excluded.v", [after]);
+        await c.query('delete from pos where wid=$1', [w.id]);
+        for (const p of posL || []) {
+          const sym = fromAlp(p.symbol, p.asset_class);
+          if (!assets.has(sym)) { addAsset(sym, p.asset_class === 'crypto' ? 'crypto' : 'stock'); newSyms = true; }
+          const since = before.find(x => x.sym === sym)?.since;
+          await c.query('insert into pos(wid,sym,qty,avg,since) values($1,$2,$3,$4,$5) on conflict (wid,sym) do update set qty=excluded.qty, avg=excluded.avg', [w.id, sym, +p.qty, +p.avg_entry_price, since ? new Date(since) : new Date()]);
+          if (+p.current_price > 0 && !fresh(sym, 60e3)) tick(sym, +p.current_price, { src: 'rest', prev: +p.lastday_price || undefined });
+        }
+        await c.query('update wallets set cash=$1 where id=$2', [+acct.cash, w.id]);
+      });
+      BROKER.orders = (ords || []).map(o => mapOrder(o, w.id));
+      if (newSyms || acts.length) { refreshUserSymsSoon(); broadcast({ t: 'evt', e: 'fill', wid: w.id }); }
+    } catch (e) { BROKER.ok = false; BROKER.err = e.message; warn('broker sync', e.message); }
+  })();
+  try { await syncing; } finally { syncing = null; }
+}
+const brokerSyncSoon = debounce(() => brokerSync().catch(() => {}), 700);
+
+// ---------- placing and changing orders ----------
+function liveGuard(b, notional) {
+  if (BROKER.env !== 'live') return;
+  if (b.live !== true) fail('This wallet uses real money. Confirm the order in the app to send it.');
+  if (ALP.maxOrder && notional > ALP.maxOrder) fail(`Real-money orders are capped at ${money(ALP.maxOrder)} by ALPACA_MAX_ORDER in Railway.`);
+}
+async function brokerTrade(w, b) {
+  const sym = cleanSym(b.sym); if (!sym) fail('Pick something to trade');
+  if (!assets.has(sym)) await trackAsset(sym, b.kind);
+  const crypto = isCrypto(sym), side = b.side === 'sell' ? 'sell' : 'buy', otype = b.otype || 'market', px = priceOf(sym) || 0;
+  const mode = b.mode || 'usd', amount = num(b.amount); if (!(amount > 0)) fail('Enter an amount');
+  const body = { symbol: alpSym(sym), side, type: { market: 'market', limit: 'limit', stop: 'stop', stoplimit: 'stop_limit', trail: 'trailing_stop' }[otype] || 'market', time_in_force: crypto ? 'gtc' : (b.tif === 'gtc' ? 'gtc' : 'day'), client_order_id: 'mango-' + crypto_.randomUUID() };
+  const pos = side === 'sell' ? (await positions(w.id)).find(p => p.sym === sym) : null;
+  if (side === 'sell' && !pos) fail(`You don't own any ${sym} at Alpaca`);
+  if (mode === 'usd') { if (otype === 'market' || otype === 'limit') body.notional = amount.toFixed(2); else body.qty = String(+(amount / px).toFixed(6)); }
+  else if (mode === 'pct') body.qty = String(+(pos.qty * Math.min(100, amount) / 100).toFixed(9));
+  else body.qty = String(amount);
+  if (otype === 'limit' || otype === 'stoplimit') body.limit_price = String(num(otype === 'stoplimit' ? b.lpx : b.price));
+  if (otype === 'stop' || otype === 'stoplimit') body.stop_price = String(num(b.price));
+  if (otype === 'trail') body.trail_percent = String(num(b.trail));
+  if (b.sess === 'extended' && otype === 'limit' && !crypto) { body.extended_hours = true; body.time_in_force = 'day'; }
+  if (side === 'buy' && (num(b.sl) > 0 || num(b.tp) > 0) && body.qty && Number.isInteger(+body.qty) && otype !== 'trail') {
+    body.order_class = 'bracket'; const ref = num(b.price) || px;
+    if (num(b.tp) > 0) body.take_profit = { limit_price: String(+(ref * (1 + num(b.tp) / 100)).toFixed(ref >= 1 ? 2 : 4)) };
+    if (num(b.sl) > 0) body.stop_loss = { stop_price: String(+(ref * (1 - num(b.sl) / 100)).toFixed(ref >= 1 ? 2 : 4)) };
+    if (!body.take_profit || !body.stop_loss) body.order_class = 'oto';
+  }
+  liveGuard(b, mode === 'usd' ? amount : (+body.qty || 0) * (num(b.price) || px));
+  const o = await apca('/v2/orders', { method: 'POST', body });
+  log(`broker order ${BROKER.env}: ${side} ${sym} ${body.type} → ${o.status}`);
+  brokerSyncSoon();
+  return { broker: true, env: BROKER.env, status: o.status, order: mapOrder(o, w.id) };
+}
+async function brokerProtect(w, b) {
+  const sym = cleanSym(b.sym), pos = (await positions(w.id)).find(p => p.sym === sym); if (!pos) fail(`You don't own any ${sym} at Alpaca`);
+  const qty = String(+(pos.qty * clamp(num(b.pct, 100), 1, 100) / 100).toFixed(9)), kind = b.kind;
+  const body = { symbol: alpSym(sym), side: 'sell', qty, time_in_force: isCrypto(sym) ? 'gtc' : 'gtc', client_order_id: 'mango-' + crypto_.randomUUID() };
+  if (kind === 'trail') Object.assign(body, { type: 'trailing_stop', trail_percent: String(num(b.trail)) });
+  else if (kind === 'take') Object.assign(body, { type: 'limit', limit_price: String(+num(b.price).toFixed(2)) });
+  else Object.assign(body, { type: 'stop', stop_price: String(+num(b.price).toFixed(2)) });
+  liveGuard(b, +qty * (priceOf(sym) || 0));
+  const o = await apca('/v2/orders', { method: 'POST', body }); brokerSyncSoon();
+  return { id: 'a:' + o.id, status: o.status };
+}
+async function brokerCancel(id) { await apca('/v2/orders/' + encodeURIComponent(String(id).replace(/^a:/, '')), { method: 'DELETE' }); brokerSyncSoon(); }
+async function brokerReplace(id, b) {
+  const body = {};
+  const cur = BROKER.orders.find(o => o.id === id); if (!cur) fail('That order is gone', 404);
+  if (cur.kind === 'trail' && num(b.trail) > 0) body.trail = String(num(b.trail));
+  else if (cur.kind === 'limit' && num(b.price) > 0) body.limit_price = String(num(b.price));
+  else if ((cur.kind === 'stop' || cur.kind === 'stoplimit') && num(b.price) > 0) body.stop_price = String(num(b.price));
+  const o = await apca('/v2/orders/' + encodeURIComponent(id.replace(/^a:/, '')), { method: 'PATCH', body }); brokerSyncSoon();
+  return { id: 'a:' + o.id };
+}
+
+// ---------- order updates as they happen ----------
+let tuws = null, tuBackoff = 3000;
+function tuConnect() {
+  if (!BROKER || (tuws && tuws.readyState <= 1)) return;
+  let ws;
+  try { ws = tuws = new WebSocket(BROKER.base.replace(/^http/, 'ws') + '/stream'); } catch (e) { return setTimeout(tuConnect, tuBackoff); }
+  ws.on('open', () => { try { ws.send(JSON.stringify({ action: 'auth', key: ALP.key, secret: ALP.secret })); } catch (e) {} });
+  ws.on('message', m => {
+    let d; try { d = JSON.parse(m.toString()); } catch (e) { return; }
+    if (d.stream === 'authorization' && d.data?.status === 'authorized') { tuBackoff = 3000; BROKER.tuOk = true; ws.send(JSON.stringify({ action: 'listen', data: { streams: ['trade_updates'] } })); }
+    else if (d.stream === 'trade_updates') onTradeUpdate(d.data).catch(e => warn('trade update', e.message));
+  });
+  ws.on('close', () => { BROKER.tuOk = false; if (tuws === ws) setTimeout(tuConnect, tuBackoff = Math.min(tuBackoff * 2, 120000)); });
+  ws.on('error', () => { try { ws.terminate(); } catch (_) {} });
+}
+async function onTradeUpdate(u) {
+  const o = u?.order; if (!o) return;
+  const sym = fromAlp(o.symbol, o.asset_class), money_ = BROKER.env === 'live' ? 'real money' : 'paper';
+  if (u.event === 'fill' || u.event === 'partial_fill') {
+    await brokerSync();
+    const f = { sym, side: o.side, qty: +u.qty || +o.filled_qty, price: +u.price || +o.filled_avg_price, pnl: null };
+    await notify('order', `${u.event === 'fill' ? 'Filled' : 'Partly filled'} · ${sym}`, `${o.side === 'buy' ? 'Bought' : 'Sold'} ${+f.qty.toFixed(6)} ${sym} at ${pxStr(f.price)} on Alpaca (${money_}).`, { sym, wid: BROKER.wid, data: { kind: 'fill', fill: f, label: 'Broker' } });
+  } else if (u.event === 'rejected' || u.event === 'expired') {
+    brokerSyncSoon();
+    await notify('order', `Order ${u.event} · ${sym}`, `Alpaca ${u.event} your ${o.side} order for ${sym}.${o.reject_reason ? ' ' + o.reject_reason : ''}`, { sym, wid: BROKER.wid });
+  } else brokerSyncSoon();
+}
+async function brokerLink(confirm) {
+  if (!BROKER) fail('Add ALPACA_KEY_ID and ALPACA_SECRET_KEY in Railway first.');
+  if (await brokerWallet()) fail('Your Alpaca account is already connected.');
+  if (BROKER.env === 'live' && confirm !== 'REAL MONEY') fail('Type REAL MONEY to connect a live account.');
+  const a = await apca('/v2/account');
+  if (a.trading_blocked || a.account_blocked) fail('Alpaca says this account is blocked from trading right now.');
+  const name = BROKER.env === 'live' ? 'Alpaca Live' : 'Alpaca Paper';
+  const r = await row(`insert into wallets(name,emoji,color,cash,start_bal,sort,profile,acct,broker) values($1,$2,'sky',$3,$4,(select coalesce(max(sort),0)+1 from wallets),'alpaca',$5,'alpaca') returning *`,
+    [name, BROKER.env === 'live' ? '🔴' : '🦙', +a.cash, Math.max(1, +a.equity), +a.multiplier > 1 ? 'margin' : 'cash']);
+  await kvSet('alpaca_after', new Date().toISOString());
+  await loadWalletMeta(); await brokerSync(); await snapshot(r.id); await refreshUserSyms(); tuConnect();
+  return walletJson(await walletRow(r.id));
 }
 
 // =====================================================================
@@ -1330,8 +2046,8 @@ async function analytics(wid) {
   const unrealized = sum(pos.map(p => p.qty * ((priceOf(p.sym) || p.avg) - p.avg)));
   const realized = sum(sells.map(t => t.pnl));
   const dividends = sum(trades.filter(t => t.side === 'div').map(t => t.qty * t.price));
-  const interest = sum(trades.filter(t => t.side === 'int').map(t => t.price));
-  const fees = sum(trades.map(t => t.fee));
+  const interest = sum(trades.filter(t => t.side === 'int' && t.price > 0).map(t => t.price));
+  const fees = sum(trades.map(t => t.fee)), marginInterest = -sum(trades.filter(t => t.side === 'int' && t.price < 0).map(t => t.price));
   const deposits = sum(trades.filter(t => t.side === 'cash').map(t => t.price));
   // streaks
   let streak = 0, bestStreak = 0, worstStreak = 0, ls = 0;
@@ -1381,7 +2097,7 @@ async function analytics(wid) {
   const best = sells.reduce((a, t) => !a || t.pnl > a.pnl ? t : a, null), worst = sells.reduce((a, t) => !a || t.pnl < a.pnl ? t : a, null);
   return {
     wallet: walletJson(w), equity, invested, cash: +w.cash, start: +w.start_bal, ret, pl: equity - +w.start_bal,
-    realized, unrealized, dividends, interest, fees, deposits,
+    realized, unrealized, dividends, interest, fees, deposits, marginInterest,
     closed: sells.length, trades: trades.filter(t => t.side === 'buy' || t.side === 'sell').length,
     win: sells.length ? wins.length / sells.length * 100 : null, avgWin: wins.length ? sum(wins.map(t => t.pnl)) / wins.length : null,
     avgLoss: losses.length ? sum(losses.map(t => t.pnl)) / losses.length : null, pf: losses.length ? sum(wins.map(t => t.pnl)) / -sum(losses.map(t => t.pnl)) : (wins.length ? Infinity : null),
@@ -1393,6 +2109,303 @@ async function analytics(wid) {
     alloc, byKind: group('kind'), bySector: group('sector'), diversity: diversity(pos), protected: protectedPct(wid, pos),
     bench: { SPY: spy, QQQ: qqq, BTC: btc }, seasonStart: since,
     whys: trades.reduce((o, t) => (o[t.why] = (o[t.why] || 0) + 1, o), {}),
+  };
+}
+
+// =====================================================================
+// Money movement and margin: bank transfers, instant deposits, margin interest, margin calls
+// =====================================================================
+// Bank deposits arrive in a few business days. Instant and margin accounts can use part of a
+// pending deposit right away (Robinhood Instant Deposits); cash accounts wait for the money.
+async function deposit(wid, amount, how = 'bank') {
+  const w = await walletRow(wid);
+  if (w.broker) fail('Move money in and out with your broker. This wallet mirrors that account.');
+  if (!(amount > 0) || amount > 1e9) fail('Enter a valid amount');
+  if (!isReal(w) || how === 'practice') {
+    await tx(async c => moveCash(c, wid, amount, 'deposit'));
+    return { done: true, instant: amount, pending: 0 };
+  }
+  const prof = profOf(w);
+  const limit = w.acct === 'cash' ? 0 : prof.instant[w.gold ? 'gold' : 'std'];
+  const used = +(await row("select coalesce(sum(instant),0) s from xfer where wid=$1 and kind='deposit' and status='pending'", [wid])).s;
+  const instant = Math.max(0, Math.min(amount, limit - used));
+  const avail = businessDaysLater(prof.achDays);
+  const x = await tx(async c => {
+    const r = (await c.query("insert into xfer(wid,kind,amount,instant,status,avail,method) values($1,'deposit',$2,$3,'pending',$4,'ach') returning id", [wid, amount, instant, new Date(avail)])).rows[0];
+    if (instant > 0) await moveCash(c, wid, instant, 'instant deposit');
+    return r;
+  });
+  return { done: false, id: x.id, instant, pending: amount - instant, avail };
+}
+async function withdraw(wid, amount, how = 'bank') {
+  const w = await walletRow(wid);
+  if (w.broker) fail('Move money in and out with your broker. This wallet mirrors that account.');
+  if (!(amount > 0)) fail('Enter a valid amount');
+  if (!isReal(w) || how === 'practice') { await tx(async c => moveCash(c, wid, -amount, 'withdrawal')); return { done: true }; }
+  const acct = await accountInfo(wid, { w });
+  if (amount > acct.withdrawable + 0.005) fail(`You can withdraw up to ${money(acct.withdrawable)}.${acct.unsettled > 0 ? ` ${money(acct.unsettled)} from recent stock sales hasn't settled yet.` : ''}${acct.debit > 0 ? ' Pay off your margin balance first.' : ''}${acct.holdsCash > 0 ? ` ${money(acct.holdsCash)} is held for open orders.` : ''}`);
+  const prof = profOf(w), avail = businessDaysLater(prof.wdDays);
+  await tx(async c => {
+    await moveCash(c, wid, -amount, 'withdrawal');
+    await c.query("insert into xfer(wid,kind,amount,status,avail,method) values($1,'withdrawal',$2,'pending',$3,'ach')", [wid, amount, new Date(avail)]);
+  });
+  return { done: false, avail };
+}
+async function xferJob() {
+  for (const x of await rows("select * from xfer where status='pending' and avail <= now() order by id")) {
+    await tx(async c => {
+      const cur = (await c.query("select status from xfer where id=$1 for update", [x.id])).rows[0]; if (cur?.status !== 'pending') return;
+      if (x.kind === 'deposit') { const rest = +x.amount - +x.instant; if (rest > 0.0001) await moveCash(c, x.wid, rest, 'deposit'); }
+      await c.query("update xfer set status='done', done=now() where id=$1", [x.id]);
+    }).catch(e => warn('transfer', e.message));
+    if (x.kind === 'deposit') await notify('cash', 'Deposit complete', `${money(+x.amount)} from your bank is now fully available.`, { wid: x.wid, url: '/#/account' });
+    else await notify('cash', 'Withdrawal sent', `${money(+x.amount)} is on its way to your bank.`, { wid: x.wid, push: false, url: '/#/account' });
+  }
+}
+async function cancelXfer(id) {
+  const x = await row('select * from xfer where id=$1', [id]); if (!x) fail('That transfer is gone', 404);
+  if (x.status !== 'pending') fail('That transfer already went through');
+  if (x.kind !== 'deposit') fail('Withdrawals can\'t be cancelled once they are sent');
+  await tx(async c => {
+    if (+x.instant > 0) {
+      const w = (await c.query('select cash from wallets where id=$1 for update', [x.wid])).rows[0];
+      if (+w.cash < +x.instant - 0.005) fail(`You've already used the ${money(+x.instant)} instant part of this deposit. Sell something first.`);
+      await moveCash(c, x.wid, -+x.instant, 'deposit cancelled');
+    }
+    await c.query("update xfer set status='cancelled', done=now() where id=$1", [x.id]);
+  });
+}
+
+// ---------- margin: interest, Gold, maintenance calls ----------
+const posted = new Map();
+async function marginDaily() {
+  const p = etParts(), today = etDate(), mins = p.h * 60 + p.mi;
+  if (mins < 16 * 60 + 15 || (await kvGet('job_margin')) === today) return;
+  await kvSet('job_margin', today);
+  // Interest accrues each night on what you borrowed. Weekends and holidays count, so Fridays carry three days.
+  const [ny, nm, nd] = nextTradingDay(p.y, p.m, p.d);
+  const days = isTradingDay(p.y, p.m, p.d) ? Math.round((Date.UTC(ny, nm - 1, nd) - Date.UTC(p.y, p.m - 1, p.d)) / 864e5) : 0;
+  for (const w of await rows("select * from wallets where not archived and broker is null and profile <> 'practice'")) {
+    const prof = profOf(w), debit = Math.max(0, -+w.cash);
+    if (days && debit > 0 && w.acct === 'margin') {
+      const charged = Math.max(0, debit - (w.gold ? prof.goldFree : 0));
+      const amt = charged * marginRate(prof, debit) / 100 / 360 * days;
+      if (amt > 0) await Q('update wallets set margin_accrued = margin_accrued + $1 where id=$2', [amt, w.id]);
+    }
+  }
+  // Interest and the Gold subscription are charged once a month.
+  const ym = today.slice(0, 7);
+  if ((await kvGet('job_month')) !== ym) {
+    const first = (await kvGet('job_month')) == null; await kvSet('job_month', ym);
+    if (!first) for (const w of await rows("select * from wallets where not archived and broker is null and profile <> 'practice'")) {
+      const acc = round(+w.margin_accrued, 2), prof = profOf(w);
+      await tx(async c => {
+        if (acc >= 0.01) {
+          await c.query('update wallets set cash = cash - $1, margin_accrued = 0 where id=$2', [acc, w.id]);
+          await c.query("insert into trd(wid,sym,side,qty,price,why) values($1,'','int',1,$2,'margin interest')", [w.id, -acc]);
+        }
+        if (w.gold && prof.goldFee > 0) {
+          await c.query('update wallets set cash = cash - $1 where id=$2', [prof.goldFee, w.id]);
+          await c.query("insert into trd(wid,sym,side,qty,price,why,fee) values($1,'','fee',1,$2,'Robinhood Gold',$2)", [w.id, prof.goldFee]);
+        }
+      });
+      if (acc >= 0.01) await notify('cash', 'Margin interest charged', `${money(acc)} of interest on your margin balance was taken from ${w.emoji} ${w.name}.`, { wid: w.id, push: false });
+    }
+  }
+}
+// Every minute: is any margin account below its maintenance requirement?
+async function marginWatch() {
+  for (const w of await rows("select * from wallets where not archived and broker is null and profile <> 'practice' and (acct='margin' or call_amt > 0)")) {
+    const pos = await positions(w.id); if (pos.some(p => !priceOf(p.sym))) continue;
+    const a = await accountInfo(w.id, { w, pos });
+    if (a.debit <= 0) { if (+w.call_amt > 0) { await Q('update wallets set call_amt=0, call_since=null where id=$1', [w.id]); await notify('order', 'Margin call met', `${w.emoji} ${w.name} is back above its maintenance requirement.`, { wid: w.id }); } continue; }
+    const deficit = a.maint - a.equity;
+    if (deficit <= 0) { if (+w.call_amt > 0) { await Q('update wallets set call_amt=0, call_since=null where id=$1', [w.id]); await notify('order', 'Margin call met', `${w.emoji} ${w.name} is back above its maintenance requirement.`, { wid: w.id }); } continue; }
+    if (!(+w.call_amt > 0)) {
+      await Q('update wallets set call_amt=$1, call_since=now() where id=$2', [round(deficit, 2), w.id]);
+      await notify('order', `⚠️ Margin call · ${w.name}`, `Your equity (${money(a.equity)}) is below the maintenance requirement (${money(a.maint)}). Deposit ${money(deficit)} or sell positions. If it isn't fixed in 2 trading days, or the account keeps falling, positions will be sold for you.`, { wid: w.id, url: '/#/account' });
+      continue;
+    }
+    await Q('update wallets set call_amt=$1 where id=$2', [round(deficit, 2), w.id]);
+    const age = Date.now() - tsMs(w.call_since), severe = a.equity < a.maint * 0.6 || a.equity <= 0;
+    if ((age > 2 * 86400e3 || severe) && sessionAt(profOf(w)) === 'regular') await liquidate(w, a, pos, deficit);
+  }
+}
+// Sell the biggest marginable positions until the requirement is met again, with a 10% cushion.
+async function liquidate(w, a, pos, deficit) {
+  const prof = profOf(w);
+  const list = pos.map(p => ({ ...p, px: priceOf(p.sym), v: p.qty * priceOf(p.sym) })).sort((x, y) => y.v - x.v);
+  let need = deficit * 1.1; const sold = [];
+  for (const p of list) {
+    if (need <= 0) break;
+    // Selling $1 of a position pays down $1 of the loan and lowers the requirement by that position's rate.
+    const m = Math.max(0.25, maintRate(prof, p.sym, p.px) / 100);
+    const sellV = Math.min(p.v, need / m);
+    try { const f = await execTrade(w.id, p.sym, 'sell', { qty: Math.min(p.qty, sellV / p.px), why: 'margin call', auto: true, force: true }); sold.push(`${+f.qty.toFixed(4)} ${p.sym}`); need -= f.qty * f.price * m; }
+    catch (e) { warn('liquidation', p.sym, e.message); }
+  }
+  if (sold.length) await notify('order', `Positions sold for a margin call · ${w.name}`, `To bring the account back above its maintenance requirement, these were sold at market: ${sold.join(', ')}.`, { wid: w.id, url: '/#/account' });
+}
+
+// =====================================================================
+// Tax lots, realized gains, wash sales, stock splits, tax summary and monthly statements
+// =====================================================================
+// Long term means held more than one year: sold after the first anniversary of the purchase date.
+function isLongTerm(acq, sold) {
+  const a = etParts(tsMs(acq)), s = etParts(tsMs(sold));
+  const ann = [a.y + 1, a.m, a.d], sd = [s.y, s.m, s.d];
+  for (let i = 0; i < 3; i++) { if (sd[i] > ann[i]) return true; if (sd[i] < ann[i]) return false; }
+  return false;
+}
+async function addLot(c, wid, sym, qty, basis, trdId, ts = new Date()) {
+  const r = (await c.query('insert into lots(wid,sym,qty,basis,ts,trd_id) values($1,$2,$3,$4,$5,$6) returning id', [wid, sym, qty, basis, ts, trdId || null])).rows[0];
+  if (isCrypto(sym)) return r.id;
+  // Wash sale: a loss on this stock in the last 30 days is disallowed and added to the new shares' cost.
+  const losses = (await c.query("select * from realized where wid=$1 and sym=$2 and not crypto and proceeds < basis and sold > $3::timestamptz - interval '30 days' and wash_qty < qty order by sold", [wid, sym, ts])).rows;
+  let free = qty;
+  for (const L of losses) {
+    if (free <= 1e-12) break;
+    const m = Math.min(free, +L.qty - +L.wash_qty); if (m <= 1e-12) continue;
+    const dis = (+L.basis - +L.proceeds) / +L.qty * m;
+    await c.query('update realized set wash=wash+$1, wash_qty=wash_qty+$2 where id=$3', [dis, m, L.id]);
+    await c.query('update lots set basis = basis + $1, wash_used = wash_used + $2 where id=$3', [dis / qty, m, r.id]);
+    free -= m;
+  }
+  return r.id;
+}
+async function consumeLots(c, w, sym, qty, proceedsNet, trdId, sold = new Date()) {
+  const order = { fifo: 'ts, id', lifo: 'ts desc, id desc', hifo: 'basis desc, ts' }[w.lot_method] || 'ts, id';
+  const lots = (await c.query(`select * from lots where wid=$1 and sym=$2 and qty > 0 order by ${order} for update`, [w.id, sym])).rows;
+  let left = qty; const made = [];
+  const crypto = isCrypto(sym);
+  for (const lot of lots) {
+    if (left <= 1e-12) break;
+    const take = Math.min(+lot.qty, left), proceeds = proceedsNet * take / qty, basis = +lot.basis * take;
+    const term = isLongTerm(lot.ts, sold) ? 'long' : 'short';
+    const r = (await c.query('insert into realized(wid,trd_id,sym,qty,proceeds,basis,acquired,sold,term,crypto) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning *', [w.id, trdId, sym, take, proceeds, basis, lot.ts, sold, term, crypto])).rows[0];
+    made.push(r);
+    const rest = round(+lot.qty - take, 10);
+    if (rest <= 1e-10) await c.query('delete from lots where id=$1', [lot.id]);
+    else await c.query('update lots set qty=$1, wash_used=least(wash_used, $1) where id=$2', [rest, lot.id]);
+    left -= take;
+  }
+  if (left > 1e-9) { // shares with no recorded lot (very old data): treat the cost as the sale price
+    const proceeds = proceedsNet * left / qty;
+    made.push((await c.query("insert into realized(wid,trd_id,sym,qty,proceeds,basis,acquired,sold,term,crypto) values($1,$2,$3,$4,$5,$5,$6,$6,'short',$7) returning *", [w.id, trdId, sym, left, proceeds, sold, crypto])).rows[0]);
+  }
+  // Wash sale the other way: replacement shares bought in the 30 days before this losing sale.
+  let wash = 0;
+  if (!crypto) for (const r of made) {
+    const loss = +r.basis - +r.proceeds; if (loss <= 0) continue;
+    const cands = (await c.query("select * from lots where wid=$1 and sym=$2 and qty > wash_used and ts >= $3::timestamptz - interval '30 days' and ts <= $3::timestamptz order by ts", [w.id, sym, sold])).rows;
+    let need = +r.qty;
+    for (const lot of cands) {
+      if (need <= 1e-12) break;
+      const m = Math.min(need, +lot.qty - +lot.wash_used), dis = loss / +r.qty * m;
+      await c.query('update lots set basis = basis + $1, wash_used = wash_used + $2 where id=$3', [dis / +lot.qty, m, lot.id]);
+      await c.query('update realized set wash=wash+$1, wash_qty=wash_qty+$2 where id=$3', [dis, m, r.id]);
+      wash += dis; need -= m;
+    }
+  }
+  const sum = t => made.filter(r => r.term === t).reduce((s, r) => s + +r.proceeds - +r.basis, 0);
+  return { short: round(sum('short'), 2), long: round(sum('long'), 2), wash: round(wash, 2), lots: made.length };
+}
+// Rebuild lots from the trade history (used once, when upgrading).
+async function backfillLots(c) {
+  const ws = (await c.query('select * from wallets')).rows;
+  for (const w of ws) {
+    const trades = (await c.query("select * from trd where wid=$1 and side in ('buy','sell') order by id", [w.id])).rows;
+    const lots = {};
+    for (const t of trades) {
+      const L = lots[t.sym] ||= [];
+      if (t.side === 'buy') L.push({ qty: +t.qty, basis: +t.price + (+t.fee || 0) / +t.qty, ts: t.ts, trd: t.id });
+      else {
+        let left = +t.qty; const net = +t.qty * +t.price - (+t.fee || 0);
+        while (left > 1e-12 && L.length) {
+          const lot = L[0], take = Math.min(lot.qty, left);
+          await c.query('insert into realized(wid,trd_id,sym,qty,proceeds,basis,acquired,sold,term,crypto) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)', [w.id, t.id, t.sym, take, net * take / +t.qty, lot.basis * take, lot.ts, t.ts, isLongTerm(lot.ts, t.ts) ? 'long' : 'short', CRYPTO_DEFAULT.includes(t.sym)]);
+          lot.qty -= take; left -= take; if (lot.qty <= 1e-12) L.shift();
+        }
+      }
+    }
+    for (const p of (await c.query('select * from pos where wid=$1', [w.id])).rows) {
+      let L = (lots[p.sym] || []).filter(l => l.qty > 1e-12);
+      const have = L.reduce((t, l) => t + l.qty, 0);
+      if (Math.abs(have - +p.qty) > 1e-6) L = [{ qty: +p.qty, basis: +p.avg, ts: p.since || new Date(), trd: null }];
+      for (const l of L) await c.query('insert into lots(wid,sym,qty,basis,ts,trd_id) values($1,$2,$3,$4,$5,$6)', [w.id, p.sym, l.qty, l.basis, l.ts, l.trd]);
+    }
+  }
+}
+
+// ---------- stock splits ----------
+async function applySplit(wid, sym, num_, den, exTs) {
+  const r = num_ / den; if (!(r > 0) || r === 1) return false;
+  return tx(async c => {
+    const got = (await c.query('insert into splits(wid,sym,ex) values($1,$2,$3) on conflict do nothing returning sym', [wid, sym, String(exTs)])).rows[0];
+    if (!got) return false;
+    const p = (await c.query('select * from pos where wid=$1 and sym=$2 for update', [wid, sym])).rows[0]; if (!p) return false;
+    await c.query('update pos set qty=qty*$1, avg=avg/$1 where wid=$2 and sym=$3', [r, wid, sym]);
+    await c.query('update lots set qty=qty*$1, basis=basis/$1, wash_used=wash_used*$1 where wid=$2 and sym=$3', [r, wid, sym]);
+    await c.query('update ord set price=price/$1, peak=peak/$1 where wid=$2 and sym=$3', [r, wid, sym]);
+    await c.query("update lim set price=price/$1, lpx=lpx/$1, amt=case when units='qty' then amt*$1 else amt end where wid=$2 and sym=$3", [r, wid, sym]);
+    await c.query("insert into trd(wid,sym,side,qty,price,why) values($1,$2,'split',$3,$4,$5)", [wid, sym, +p.qty * r, 0, `${num_}-for-${den} split`]);
+    return { before: +p.qty, after: +p.qty * r };
+  });
+}
+async function splitJob() {
+  for (const p of await rows("select p.* from pos p join wallets w on w.id=p.wid where not w.archived and w.broker is null")) {
+    if (isCrypto(p.sym)) continue;
+    let ev; try { ev = Object.values((await cached('splits:' + p.sym, 6 * 3600e3, () => yahooChart(p.sym, 'range=3mo&interval=1d&events=split'))).events?.splits || {}); } catch (e) { continue; }
+    for (const s of ev) {
+      const ex = s.date * 1000; if (ex < tsMs(p.since) || ex > Date.now() || !(s.numerator > 0 && s.denominator > 0)) continue;
+      const done = await applySplit(p.wid, p.sym, +s.numerator, +s.denominator, s.date).catch(e => { warn('split', e.message); return false; });
+      if (done) {
+        await Q('update alert set price=price/$1 where sym=$2 and not fired', [s.numerator / s.denominator, p.sym]); await loadAlerts(); await loadOrders();
+        await notify('div', `${p.sym} split ${s.numerator}-for-${s.denominator}`, `You now have ${+done.after.toFixed(6)} shares instead of ${+done.before.toFixed(6)}. Your cost, orders and alerts were adjusted, so the value didn't change.`, { sym: p.sym, wid: p.wid });
+      }
+    }
+  }
+}
+
+// ---------- tax summary (like a 1099-B) ----------
+async function taxYear(wid, y) {
+  const from = new Date(etToUtc(y, 1, 1)), to = new Date(etToUtc(y + 1, 1, 1));
+  const rs = (await rows('select * from realized where wid=$1 and sold >= $2 and sold < $3 order by sold, id', [wid, from, to])).map(r => ({
+    id: r.id, sym: r.sym, qty: +r.qty, proceeds: +r.proceeds, basis: +r.basis, wash: +r.wash, gain: +r.proceeds - +r.basis + +r.wash, acquired: tsMs(r.acquired), sold: tsMs(r.sold), term: r.term, crypto: r.crypto,
+  }));
+  const group = f => { const l = rs.filter(f); return { count: l.length, proceeds: l.reduce((t, r) => t + r.proceeds, 0), basis: l.reduce((t, r) => t + r.basis, 0), wash: l.reduce((t, r) => t + r.wash, 0), gain: l.reduce((t, r) => t + r.gain, 0) }; };
+  const inc = await row(`select coalesce(sum(case when side='div' then qty*price end),0) div, coalesce(sum(case when side='int' and price>0 then price end),0) intr,
+      coalesce(-sum(case when side='int' and price<0 then price end),0) mint, coalesce(sum(fee),0) fees
+    from trd where wid=$1 and ts >= $2 and ts < $3`, [wid, from, to]);
+  const years = (await rows("select distinct extract(year from sold at time zone 'America/New_York')::int y from realized where wid=$1 union select distinct extract(year from ts at time zone 'America/New_York')::int from trd where wid=$1 and side='div' order by 1 desc", [wid])).map(r => r.y);
+  if (!years.includes(y)) years.unshift(y);
+  return { y, years: [...new Set(years)].sort((a, b) => b - a), short: group(r => r.term === 'short' && !r.crypto), long: group(r => r.term === 'long' && !r.crypto), cryptoShort: group(r => r.crypto && r.term === 'short'), cryptoLong: group(r => r.crypto && r.term === 'long'), all: group(() => true), dividends: +inc.div, interest: +inc.intr, marginInterest: +inc.mint, fees: +inc.fees, rows: rs };
+}
+
+// ---------- monthly statements ----------
+async function statementMonths(wid) {
+  return (await rows("select distinct to_char(ts at time zone 'America/New_York','YYYY-MM') m from trd where wid=$1 union select to_char(now() at time zone 'America/New_York','YYYY-MM') order by 1 desc", [wid])).map(r => r.m);
+}
+async function statement(wid, ym) {
+  if (!/^\d{4}-\d{2}$/.test(ym)) fail('Pick a month');
+  const [y, m] = ym.split('-').map(Number), [ny, nm] = m === 12 ? [y + 1, 1] : [y, m + 1];
+  const from = new Date(etToUtc(y, m, 1)), to = new Date(etToUtc(ny, nm, 1)), w = await walletRow(wid), live = Date.now() < to.getTime();
+  const open = await row('select eq from snap where wid=$1 and ts < $2 order by ts desc limit 1', [wid, from]);
+  const close = live ? null : await row('select eq from snap where wid=$1 and ts < $2 order by ts desc limit 1', [wid, to]);
+  const trades = (await rows('select * from trd where wid=$1 and ts >= $2 and ts < $3 order by id', [wid, from, to])).map(tradeJson);
+  const sum = f => trades.filter(f).reduce((t, x) => t + (x.side === 'cash' || x.side === 'int' || x.side === 'fee' ? x.price : x.qty * x.price), 0);
+  const fees = {}; for (const t of trades) { if (t.fees) for (const [k, v] of Object.entries(t.fees)) fees[k] = (fees[k] || 0) + v; else if (t.fee && t.side !== 'fee') fees.custom = (fees.custom || 0) + t.fee; }
+  const pos = live ? (await positions(wid)).map(p => ({ ...p, price: priceOf(p.sym) || p.avg, value: p.qty * (priceOf(p.sym) || p.avg) })) : null;
+  const closing = live ? +w.cash + pos.reduce((t, p) => t + p.value, 0) : (close ? +close.eq : null);
+  const opening = open ? +open.eq : (tsMs(w.season_start) >= from.getTime() ? 0 : null);
+  const flows = sum(t => t.side === 'cash');
+  return {
+    month: ym, wallet: walletJson(w), live, opening, closing, change: opening != null && closing != null ? closing - opening - flows : null,
+    deposits: sum(t => t.side === 'cash' && t.price > 0), withdrawals: -sum(t => t.side === 'cash' && t.price < 0),
+    bought: sum(t => t.side === 'buy'), sold: sum(t => t.side === 'sell'), buys: trades.filter(t => t.side === 'buy').length, sells: trades.filter(t => t.side === 'sell').length,
+    realized: trades.filter(t => t.pnl != null).reduce((s, t) => s + t.pnl, 0), dividends: sum(t => t.side === 'div'),
+    interest: sum(t => t.side === 'int' && t.price > 0), marginInterest: -sum(t => t.side === 'int' && t.price < 0), otherFees: sum(t => t.side === 'fee'),
+    fees, feeTotal: trades.reduce((s, t) => s + (t.side === 'fee' ? 0 : t.fee || 0), 0), trades, positions: pos, cash: live ? +w.cash : null,
   };
 }
 
@@ -1654,7 +2667,15 @@ const assetsJson = syms => {
   return o;
 };
 const pricesJson = () => { const o = {}; for (const [s, q] of prices) if (q.p > 0) o[s] = [round(q.p, 8), q.prev ? round(q.prev, 8) : null, q.t, q.src === 'cache' ? 1 : 0, q.hi || null, q.lo || null]; return o; };
-const tradeJson = t => ({ id: t.id, ts: tsMs(t.ts), sym: t.sym, side: t.side, qty: +t.qty, price: +t.price, why: t.why, pnl: t.pnl == null ? null : +t.pnl, fee: +t.fee || 0, note: t.note, tags: t.tags, wid: t.wid });
+const jsonOr = (s, d = null) => { if (!s) return d; try { return JSON.parse(s); } catch (e) { return d; } };
+const tradeJson = t => ({ id: t.id, ts: tsMs(t.ts), sym: t.sym, side: t.side, qty: +t.qty, price: +t.price, why: t.why, pnl: t.pnl == null ? null : +t.pnl, fee: +t.fee || 0, note: t.note, tags: t.tags, wid: t.wid,
+  fees: jsonOr(t.fees), bid: t.bid == null ? null : +t.bid, ask: t.ask == null ? null : +t.ask, otype: t.otype || null, tif: t.tif || null, sess: t.sess || null, settle: tsMs(t.settle), liq: t.liq || null, via: t.via || null, broker: !!t.ext_id });
+function rulesJson(w) {
+  const prof = profOf(w), sess = sessionAt(prof);
+  return { profile: prof.key, name: prof.name, session: sess, sessionLabel: SESSION_LABEL[sess], pre: prof.pre, post: prof.post, overnight: prof.overnight, gtcDays: prof.gtcDays, minUsd: prof.minUsd,
+    instant: w.acct === 'cash' ? 0 : prof.instant[w.gold ? 'gold' : 'std'], achDays: prof.achDays, settleNext: settleTime(prof), real: isReal(w) };
+}
+const brokerJson = () => BROKER ? { on: true, env: BROKER.env, feed: BROKER.feed, ok: BROKER.ok, err: BROKER.err, dataOk: BROKER.dataOk, wid: BROKER.wid, lastSync: BROKER.lastSync } : { on: false };
 const alertJson = a => ({ id: a.id, sym: a.sym, kind: a.kind || 'price', dir: a.dir, price: +a.price, pct: a.pct == null ? null : +a.pct, rep: a.rep, fired: a.fired, armed: a.armed, label: a.label, ts: tsMs(a.ts), last: tsMs(a.last_fired) });
 async function walletsSummary() {
   const ws = await rows('select * from wallets order by archived, sort, id');
@@ -1671,9 +2692,11 @@ GET('/api/state', auth, async req => {
     row(`select (select count(*) from trd where wid=$1 and side in ('buy','sell')) trades, (select count(*) from trd where wid=$1) events`, [wid]),
     rows('select id, sym, dir, start_px, start_ts, end_ts from preds where result is null order by end_ts'), rows('select count(*) n from seasons where wid=$1', [wid]),
   ]);
-  const w = wallets.find(x => x.id === wid);
+  const w = wallets.find(x => x.id === wid), wr = walletMeta.get(wid) || await walletRow(wid);
   const ord = [...condOrders.values()].flat().filter(o => o.wid === wid).map(orderJson);
-  const lims = [...limOrders.values()].flat().filter(l => l.wid === wid);
+  const lims = wr.broker ? (BROKER?.wid === wid ? BROKER.orders : []) : [...limOrders.values()].flat().filter(l => l.wid === wid);
+  const account = await accountInfo(wid, { pos }).catch(() => null);
+  const xfers = (await rows("select * from xfer where wid=$1 and (status='pending' or done > now() - interval '3 days') order by id desc limit 10", [wid])).map(xferJson);
   const syms = new Set([...STOCK_DEFAULT, ...INDEXES, ...CRYPTO_DEFAULT, ...assets.keys()]);
   const sp = {}, mine = [...pos.map(p => p.sym), ...watch.map(x => x.sym), ...userSyms.extra];
   for (const s of new Set([...mine, ...syms])) { const a = sparkFor(s); if (a) sp[s] = a; else wantSpark(s); }
@@ -1681,7 +2704,7 @@ GET('/api/state', auth, async req => {
   const eq = await equitySeries(wid, '1D').catch(() => null);
   const out = {
     v: BUILD, now: Date.now(), market: market(), user: APP_USER,
-    wallet: w, wallets, pos, ord, lims, trd: trd.map(tradeJson), watch: watch.map(x => x.sym), alerts: alerts.map(alertJson),
+    wallet: w, wallets, pos, ord, lims, account, xfers, rules: rulesJson(wr), broker: brokerJson(), trd: trd.map(tradeJson), watch: watch.map(x => x.sym), alerts: alerts.map(alertJson),
     preds: preds.map(p => ({ id: p.id, sym: p.sym, dir: p.dir, start: +p.start_px, startTs: tsMs(p.start_ts), end: tsMs(p.end_ts) })),
     assets: assetsJson(syms), prices: pricesJson(), spark: sp, eq1d: eq,
     lists: { stocks: STOCK_DEFAULT, indexes: INDEXES, crypto: CRYPTO_DEFAULT, extra: [...userSyms.extra] },
@@ -1707,6 +2730,12 @@ GET('/api/candles/:sym', auth, async req => {
   return candles(sym, RANGES[r] ? r : '1D');
 });
 GET('/api/asset/:sym', auth, async req => { const sym = cleanSym(req.params.sym); if (!sym) fail('Bad symbol'); return assetDetails(sym); });
+GET('/api/quote/:sym', auth, async req => {
+  const sym = cleanSym(req.params.sym); if (!sym) fail('Bad symbol');
+  const w = walletMeta.get(await activeWalletId(req)), prof = profOf(w), sess = isCrypto(sym) ? 'regular' : sessionAt(prof);
+  focus.set(sym, Date.now());
+  return { quote: quoteOf(sym, sess), session: sess, label: SESSION_LABEL[sess], real: isReal(w) };
+});
 GET('/api/asset/:sym/insights', auth, async req => { const sym = cleanSym(req.params.sym); if (!sym) fail('Bad symbol'); return assetInsights(sym); });
 GET('/api/asset/:sym/news', auth, async req => { const sym = cleanSym(req.params.sym); if (!sym) fail('Bad symbol'); return assetNews(sym); });
 GET('/api/asset/:sym/book', auth, async req => { const sym = cleanSym(req.params.sym); if (!sym) fail('Bad symbol'); return orderBook(sym); });
@@ -1739,20 +2768,85 @@ GET('/api/earnings', auth, async () => {
 // =====================================================================
 // Trading
 // =====================================================================
+const OTYPES = ['market', 'limit', 'stop', 'stoplimit', 'trail'];
+function orderInput(b) {
+  const side = b.side === 'sell' ? 'sell' : 'buy', otype = OTYPES.includes(b.otype) ? b.otype : 'market';
+  const mode = b.mode || (b.usd ? 'usd' : b.pct ? 'pct' : 'qty'), amount = num(b.amount ?? b.usd ?? b.pct ?? b.qty);
+  const o = { note: b.note, why: 'manual', otype, tif: otype === 'market' ? 'day' : (b.tif === 'day' ? 'day' : 'gtc') };
+  if (mode === 'usd') o.usd = amount; else if (mode === 'pct') o.pct = amount; else o.qty = amount;
+  return { side, otype, mode, amount, o, units: mode === 'qty' ? 'qty' : mode === 'pct' ? 'pct' : 'usd' };
+}
+// Live estimate for the trade screen: price, quantity, every fee, buying power after, settlement.
+POST('/api/preview', auth, async req => {
+  const wid = await activeWalletId(req), b = req.body, sym = cleanSym(b.sym); if (!sym) fail('Pick something');
+  const w = await walletRow(wid), pos = await positions(wid), acct = await accountInfo(wid, { w, pos });
+  const { side, otype, mode, amount, o } = orderInput(b);
+  const crypto = isCrypto(sym), prof = profOf(w), sess = crypto ? 'regular' : sessionAt(prof), real = isReal(w);
+  const out = { sym, side, otype, session: sess, sessionLabel: SESSION_LABEL[sess], real, profile: prof.key, acct: w.acct, broker: !!w.broker, bp: crypto || !marginable(sym, priceOf(sym) || 0) ? acct.bpCrypto : acct.bp, account: acct, warn: [] };
+  out.quote = quoteOf(sym, sess);
+  const p = pos.find(x => x.sym === sym);
+  out.held = acct.holdsShares[sym] || 0; out.owned = p ? p.qty : 0;
+  if (!(amount > 0)) return out;
+  // Orders that wait: price them at their limit or stop, not at the market.
+  const plan = { ...o, auto: false };
+  if (otype === 'limit') { plan.px = num(b.price) || null; plan.liq = out.quote && (side === 'buy' ? out.quote.ask <= num(b.price) : out.quote.bid >= num(b.price)) ? 'taker' : 'maker'; }
+  if (otype === 'stop') plan.px = null;
+  if (otype === 'stoplimit') { plan.px = num(b.lpx) || null; plan.liq = 'maker'; }
+  if (otype === 'limit' && plan.px && out.quote) plan.px = side === 'buy' ? Math.min(plan.px, out.quote.ask) : Math.max(plan.px, out.quote.bid);
+  if (otype === 'stop' && num(b.price) > 0 && out.quote) { const q = out.quote.ask - out.quote.bid; plan.px = side === 'buy' ? num(b.price) + q / 2 : Math.max(0.0001, num(b.price) - q / 2); }
+  if (!real || w.broker) { if (!plan.px && !w.broker) plan.px = (priceOf(sym) || 0) * (side === 'buy' ? 1 + S.slippage / 100 : 1 - S.slippage / 100); }
+  try {
+    if (!real) {
+      if (side === 'sell' && !p) throw new Error(`You don't own any ${sym} in this wallet`);
+      const px = plan.px, qty = side === 'sell' && o.pct ? p.qty * Math.min(100, o.pct) / 100 : o.qty || (o.usd || 0) / px;
+      const notional = qty * px, fee = notional > 0 ? round(S.feeFlat + notional * S.feePct / 100, 6) : 0;
+      Object.assign(out, { px, qty, notional, fees: { lines: fee ? [{ k: 'custom', label: 'Fee', amt: fee, note: 'From your settings' }] : [], total: fee }, total: side === 'buy' ? notional + fee : notional - fee, cashAfter: side === 'buy' ? acct.cash - notional - fee : acct.cash + notional - fee, pnl: side === 'sell' && p ? (px - p.avg) * qty - fee : null });
+      if (side === 'buy' && notional + fee > acct.cash + 0.005) out.err = `That's more than your ${money(acct.cash)} of cash`;
+      if (side === 'sell' && p && qty > p.qty + 1e-9) out.err = `You only have ${+p.qty.toFixed(6)} ${crypto ? sym : 'shares'}`;
+    } else {
+      const pl = await planOrder(pool, w, pos, w.broker ? { ...acct, holdsShares: {} } : acct, sym, side, plan);
+      Object.assign(out, { px: pl.px, qty: pl.qty, notional: pl.notional, fees: pl.fees, total: side === 'buy' ? pl.notional + pl.fees.total : pl.notional - pl.fees.total, cashAfter: pl.cashAfter, pnl: pl.pnl, settle: pl.settle, via: pl.via, deep: pl.deep, borrow: pl.borrow, liq: pl.liq, whole: !crypto && sess === 'overnight' });
+      if (side === 'sell' && p && !crypto) {
+        const lotsL = await rows(`select * from lots where wid=$1 and sym=$2 and qty>0 order by ${{ lifo: 'ts desc, id desc', hifo: 'basis desc, ts' }[w.lot_method] || 'ts, id'}`, [wid, sym]);
+        let left = pl.qty, st = 0, lt = 0, washRisk = false; const net = pl.notional - pl.fees.total;
+        for (const l of lotsL) { if (left <= 1e-12) break; const t = Math.min(+l.qty, left); const g = net * t / pl.qty - +l.basis * t; if (isLongTerm(l.ts, new Date())) lt += g; else st += g; left -= t; }
+        if (st + lt < 0) washRisk = !!(await row("select 1 from lots where wid=$1 and sym=$2 and ts > now() - interval '30 days' limit 1", [wid, sym]));
+        out.tax = { short: st, long: lt, washRisk };
+      }
+    }
+  } catch (e) { out.err = e.message; }
+  if (real && !crypto && otype === 'market' && sess !== 'regular') { out.queued = true; out.opensAt = market().opensAt; out.warn.push(`Market orders wait for the regular session. This will be placed at the open (${new Date(market().opensAt).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: '2-digit' })} ET) at whatever the price is then.`); }
+  if (real && !crypto && (otype === 'stop' || otype === 'stoplimit' || otype === 'trail') && sess !== 'regular') out.warn.push('Stop orders only trigger during regular hours (9:30 AM to 4:00 PM ET).');
+  if (real && !crypto && out.quote && !out.quote.live) out.warn.push('Bid and ask are estimated from the last trade. Connect Alpaca in Settings for live stock quotes.');
+  if (out.deep) out.warn.push('This order is bigger than the visible order book, so the price is an estimate.');
+  if (w.broker && BROKER?.env === 'live') out.warn.unshift('This is a real-money order on your live Alpaca account.');
+  return out;
+});
 POST('/api/trade', auth, async req => {
-  const wid = await activeWalletId(req), b = req.body;
+  const wid = await activeWalletId(req), b = req.body, w = await walletRow(wid);
   const sym = cleanSym(b.sym); if (!sym) fail('Pick something to trade');
   if (!assets.has(sym)) await trackAsset(sym, b.kind);
-  const side = b.side === 'sell' ? 'sell' : 'buy';
-  const o = { note: b.note, why: 'manual' };
-  const mode = b.mode || (b.usd ? 'usd' : b.pct ? 'pct' : 'qty'), amount = num(b.amount ?? b.usd ?? b.pct ?? b.qty);
+  if (w.broker) return brokerTrade(w, b);
+  const { side, otype, mode, amount, o, units } = orderInput(b);
   if (!(amount > 0)) fail('Enter an amount');
-  if (mode === 'usd') o.usd = amount; else if (mode === 'pct') o.pct = amount; else o.qty = amount;
-  if (!isCrypto(sym) && market().state !== 'open') {
-    if (S.closedTrading === 'block') fail(`The stock market is closed. It opens ${new Date(market().opensAt).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: '2-digit' })} New York time.`);
-    if (S.closedTrading === 'queue') {
-      const id = await addLimit(wid, sym, { side, kind: 'moo', amount, units: mode === 'qty' ? 'qty' : mode === 'pct' ? 'pct' : 'usd', sl: b.sl, tp: b.tp });
-      return { queued: true, id };
+  const real = isReal(w);
+  if (otype === 'trail') {
+    if (side !== 'sell') fail('Trailing stops sell shares you already own');
+    const p = (await positions(wid)).find(x => x.sym === sym); if (!p) fail(`You don't own any ${sym}`);
+    const pctv = mode === 'pct' ? amount : mode === 'qty' ? amount / p.qty * 100 : amount / (p.qty * priceOf(sym)) * 100;
+    const id = await addCondOrder(wid, sym, 'trail', { trail: num(b.trail), pct: Math.min(100, pctv) }); await refreshUserSyms();
+    return { order: { id, kind: 'trail' } };
+  }
+  if (otype !== 'market') {
+    const r = await addLimit(wid, sym, { side, kind: otype, price: b.price, lpx: b.lpx, amount, units, sl: b.sl, tp: b.tp, tif: b.tif, sess: b.sess });
+    return r.fill ? { fill: r.fill, bracket: r.fill.bracket || [], order: { id: r.id } } : { order: { id: r.id, kind: otype } };
+  }
+  if (!isCrypto(sym)) {
+    if (real) {
+      if (sessionAt(profOf(w)) !== 'regular') { const r = await addLimit(wid, sym, { side, kind: 'moo', amount, units, sl: b.sl, tp: b.tp }); return { queued: true, id: r.id, opensAt: market().opensAt }; }
+    } else if (market().state !== 'open') {
+      if (S.closedTrading === 'block') fail(`The stock market is closed. It opens ${new Date(market().opensAt).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: '2-digit' })} New York time.`);
+      if (S.closedTrading === 'queue') { const r = await addLimit(wid, sym, { side, kind: 'moo', amount, units, sl: b.sl, tp: b.tp }); return { queued: true, id: r.id }; }
     }
   }
   const f = await execTrade(wid, sym, side, o);
@@ -1764,11 +2858,13 @@ POST('/api/trade', auth, async req => {
   return { fill: f, bracket };
 });
 POST('/api/order', auth, async req => {
-  const wid = await activeWalletId(req), b = req.body, sym = cleanSym(b.sym);
+  const wid = await activeWalletId(req), b = req.body, sym = cleanSym(b.sym), w = await walletRow(wid);
+  if (w.broker) return brokerProtect(w, b);
   const id = await addCondOrder(wid, sym, b.kind, { price: num(b.price), pct: b.pct, trail: b.trail });
   await refreshUserSyms(); return { id };
 });
 PATCH('/api/order/:id', auth, async req => {
+  if (String(req.params.id).startsWith('a:')) return brokerReplace(req.params.id, req.body);
   const o = await row('select * from ord where id=$1', [+req.params.id]); if (!o) fail('That order is gone', 404);
   const b = req.body, p = priceOf(o.sym);
   if (o.kind === 'trail') { const t = num(b.trail, +o.trail); if (!(t >= 0.1 && t <= 50)) fail('The trailing distance must be between 0.1% and 50%'); await Q('update ord set trail=$1, pct=$2 where id=$3', [t, clamp(num(b.pct, +o.pct), 1, 100), o.id]); }
@@ -1780,17 +2876,19 @@ PATCH('/api/order/:id', auth, async req => {
   }
   await loadOrders(); return { ok: true };
 });
-DEL('/api/order/:id', auth, async req => { await Q('delete from ord where id=$1', [+req.params.id]); await loadOrders(); await refreshUserSyms(); });
+DEL('/api/order/:id', auth, async req => { if (String(req.params.id).startsWith('a:')) return brokerCancel(req.params.id); await Q('delete from ord where id=$1', [+req.params.id]); await loadOrders(); await refreshUserSyms(); });
 POST('/api/limit', auth, async req => {
   const wid = await activeWalletId(req), sym = cleanSym(req.body.sym); if (!sym) fail('Pick something');
   if (!assets.has(sym)) await trackAsset(sym, req.body.kind_asset);
-  return { id: await addLimit(wid, sym, req.body) };
+  const w = await walletRow(wid);
+  if (w.broker) return brokerTrade(w, { ...req.body, otype: req.body.kind, mode: req.body.units === 'qty' ? 'qty' : req.body.units === 'pct' ? 'pct' : 'usd', tif: req.body.expires === 'day' ? 'day' : 'gtc' });
+  return addLimit(wid, sym, req.body);
 });
-DEL('/api/limit/:id', auth, async req => { await Q('delete from lim where id=$1', [+req.params.id]); await loadOrders(); await refreshUserSyms(); });
+DEL('/api/limit/:id', auth, async req => { if (String(req.params.id).startsWith('a:')) return brokerCancel(req.params.id); await Q('delete from lim where id=$1', [+req.params.id]); await loadOrders(); await refreshUserSyms(); });
 GET('/api/orders', auth, async req => {
   const wid = req.query.all ? null : await activeWalletId(req);
   const ord = [...condOrders.values()].flat().filter(o => !wid || o.wid === wid).map(orderJson);
-  const lims = [...limOrders.values()].flat().filter(l => !wid || l.wid === wid);
+  const lims = [...limOrders.values()].flat().filter(l => !wid || l.wid === wid).concat(BROKER && (!wid || BROKER.wid === wid) ? BROKER.orders : []);
   return { ord, lims };
 });
 
@@ -1838,6 +2936,11 @@ GET('/api/activity', auth, async req => {
   p.push(lim);
   return (await rows(`select * from trd where ${where.join(' and ')} order by id desc limit $${p.length}`, p)).map(tradeJson);
 });
+GET('/api/trade/:id', auth, async req => {
+  const t = await row('select * from trd where id=$1', [+req.params.id]); if (!t) fail('That trade is gone', 404);
+  const lots = (await rows('select * from realized where trd_id=$1 order by id', [t.id])).map(r => ({ qty: +r.qty, proceeds: +r.proceeds, basis: +r.basis, wash: +r.wash, gain: +r.proceeds - +r.basis + +r.wash, acquired: tsMs(r.acquired), term: r.term }));
+  return { trade: tradeJson(t), lots };
+});
 POST('/api/note', auth, async req => {
   const id = +req.body.id; const note = String(req.body.note || '').slice(0, 1000) || null;
   const tags = String(req.body.tags || '').split(',').map(t => t.trim().toLowerCase().replace(/[^a-z0-9 \-]/g, '')).filter(Boolean).slice(0, 8).join(',') || null;
@@ -1860,15 +2963,15 @@ GET('/api/dividends', auth, async req => {
 // =====================================================================
 // Wallets
 // =====================================================================
-const COLORS = ['mango', 'leaf', 'sky', 'grape', 'rose', 'slate'];
+const COLORS = ['mango', 'leaf', 'sky', 'grape', 'rose', 'slate'], PROFILE_KEYS = ['robinhood', 'alpaca', 'practice'], ACCTS = ['cash', 'instant', 'margin'], LOTS = ['fifo', 'lifo', 'hifo'];
 GET('/api/wallets', auth, () => walletsSummary());
 POST('/api/wallets', auth, async req => {
   const b = req.body, name = String(b.name || '').trim().slice(0, 30) || 'New wallet';
   const start = clamp(num(b.start, 10000), 100, 1e9);
   if (+(await row('select count(*) n from wallets')).n >= 25) fail('You can have up to 25 wallets');
-  const r = await row(`insert into wallets(name,emoji,color,cash,start_bal,sort) values($1,$2,$3,$4,$4,(select coalesce(max(sort),0)+1 from wallets)) returning *`,
-    [name, String(b.emoji || '💼').slice(0, 8), COLORS.includes(b.color) ? b.color : 'sky', start]);
-  await snapshot(r.id); checkAchievementsSoon();
+  const r = await row(`insert into wallets(name,emoji,color,cash,start_bal,sort,profile,acct,gold,drip,lot_method,crypto_route,margin_max) values($1,$2,$3,$4,$4,(select coalesce(max(sort),0)+1 from wallets),$5,$6,$7,$8,$9,$10,$11) returning *`,
+    [name, String(b.emoji || '💼').slice(0, 8), COLORS.includes(b.color) ? b.color : 'sky', start, PROFILE_KEYS.includes(b.profile) ? b.profile : 'robinhood', ACCTS.includes(b.acct) ? b.acct : 'instant', !!b.gold, !!b.drip, LOTS.includes(b.lotMethod) ? b.lotMethod : 'fifo', b.cryptoRoute === 'exchange' ? 'exchange' : 'mm', num(b.marginMax) > 0 ? num(b.marginMax) : null]);
+  await loadWalletMeta(); await snapshot(r.id); checkAchievementsSoon();
   return walletJson(r);
 });
 PATCH('/api/wallets/:id', auth, async req => {
@@ -1878,16 +2981,27 @@ PATCH('/api/wallets/:id', auth, async req => {
     b.name !== undefined ? (String(b.name).trim().slice(0, 30) || w.name) : w.name, b.emoji !== undefined ? String(b.emoji).slice(0, 8) : w.emoji,
     COLORS.includes(b.color) ? b.color : w.color, b.archived !== undefined ? !!b.archived : w.archived, b.sort !== undefined ? num(b.sort) : w.sort, w.id]);
   if (b.archived === true && S.defaultWallet === w.id) await saveSettings({ defaultWallet: (await row('select id from wallets where not archived order by sort, id limit 1')).id });
+  // Trading rules for the wallet
+  if (!w.broker) {
+    const acct = ACCTS.includes(b.acct) ? b.acct : w.acct;
+    if (acct !== 'margin' && w.acct === 'margin' && +w.cash < -0.005) fail(`Pay off the ${money(-+w.cash)} margin balance before switching off margin`);
+    await Q('update wallets set profile=$1, acct=$2, gold=$3, drip=$4, lot_method=$5, crypto_route=$6, margin_max=$7 where id=$8', [
+      PROFILE_KEYS.includes(b.profile) ? b.profile : w.profile, acct, b.gold !== undefined ? !!b.gold : w.gold, b.drip !== undefined ? !!b.drip : w.drip,
+      LOTS.includes(b.lotMethod) ? b.lotMethod : w.lot_method, ['mm', 'exchange'].includes(b.cryptoRoute) ? b.cryptoRoute : w.crypto_route,
+      b.marginMax === undefined ? w.margin_max : (num(b.marginMax) > 0 ? num(b.marginMax) : null), w.id]);
+  } else if (b.drip !== undefined) await Q('update wallets set drip=$1 where id=$2', [!!b.drip, w.id]);
+  await loadWalletMeta(); await loadOrders();
   await refreshUserSyms(); return walletJson(await walletRow(w.id));
 });
 async function resetWallet(wid, start) {
   const w = await walletRow(wid);
+  if (w.broker) fail("A broker wallet mirrors your real account, so it can't be reset here.");
   const pos = await positions(wid), v = +w.cash + marketValue(pos);
   const tr = await row("select count(*) n, count(*) filter (where side='sell') closed, count(*) filter (where side='sell' and pnl>0) wins from trd where wid=$1 and side in ('buy','sell')", [wid]);
   await tx(async c => {
     if (+tr.n > 0) await c.query('insert into seasons(wid,started,start_bal,final_bal,trades,wins,closed,name) values($1,$2,$3,$4,$5,$6,$7,$8)', [wid, w.season_start, w.start_bal, v, +tr.n, +tr.wins, +tr.closed, `${w.name} · ${new Date(tsMs(w.season_start)).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`]);
-    for (const t of ['pos', 'ord', 'lim', 'trd', 'snap', 'divpaid']) await c.query(`delete from ${t} where wid=$1`, [wid]);
-    await c.query('update wallets set cash=$1, start_bal=$1, season_start=now() where id=$2', [start, wid]);
+    for (const t of ['pos', 'ord', 'lim', 'trd', 'snap', 'divpaid', 'lots', 'realized', 'settle', 'xfer', 'splits']) await c.query(`delete from ${t} where wid=$1`, [wid]);
+    await c.query('update wallets set cash=$1, start_bal=$1, season_start=now(), margin_accrued=0, call_amt=0, call_since=null where id=$2', [start, wid]);
   });
   lastSnap.delete(wid); await loadOrders(); await snapshot(wid); await refreshUserSyms();
 }
@@ -1896,31 +3010,43 @@ POST('/api/reset', auth, async req => { const wid = await activeWalletId(req); c
 DEL('/api/wallets/:id', auth, async req => {
   const w = await walletRow(+req.params.id);
   if (+(await row('select count(*) n from wallets where id<>$1', [w.id])).n === 0) fail("You can't delete your only wallet");
-  await tx(async c => { for (const t of ['pos', 'ord', 'lim', 'trd', 'snap', 'divpaid', 'seasons']) await c.query(`delete from ${t} where wid=$1`, [w.id]); await c.query('delete from wallets where id=$1', [w.id]); });
+  await tx(async c => { for (const t of ['pos', 'ord', 'lim', 'trd', 'snap', 'divpaid', 'seasons', 'lots', 'realized', 'settle', 'xfer', 'splits']) await c.query(`delete from ${t} where wid=$1`, [w.id]); await c.query('delete from wallets where id=$1', [w.id]); });
+  if (w.broker) await Q("delete from kv where k='alpaca_after'");
   if (S.defaultWallet === w.id) await saveSettings({ defaultWallet: (await row('select id from wallets order by archived, sort, id limit 1')).id });
   await loadOrders(); await refreshUserSyms();
 });
 // Money in and out. Deposits don't count as profit: the starting balance moves with them.
 async function moveCash(c, wid, delta, why) {
   const w = (await c.query('select * from wallets where id=$1 for update', [wid])).rows[0]; if (!w) fail('That wallet does not exist', 404);
-  const next = +w.cash + delta; if (next < -0.005) fail(`${w.name} only has ${money(+w.cash)} in cash`);
-  await c.query('update wallets set cash=$1, start_bal=greatest(start_bal+$2, 1) where id=$3', [Math.max(0, next), delta, wid]);
+  const next = +w.cash + delta; if (delta < 0 && next < -0.005) fail(`${w.name} only has ${money(+w.cash)} in cash`);
+  await c.query('update wallets set cash=$1, start_bal=greatest(start_bal+$2, 1) where id=$3', [delta < 0 ? Math.max(0, next) : next, delta, wid]);
   await c.query("insert into trd(wid,sym,side,qty,price,why) values($1,'','cash',1,$2,$3)", [wid, delta, why]);
 }
 POST('/api/cash', auth, async req => {
-  const wid = await activeWalletId(req), a = num(req.body.amount), act = req.body.action;
+  const wid = await activeWalletId(req), a = num(req.body.amount), act = req.body.action, how = req.body.how === 'practice' ? 'practice' : 'bank';
   if (!(a >= 0) || a > 1e9) fail('Enter a valid amount');
-  await tx(async c => {
-    const w = (await c.query('select cash from wallets where id=$1', [wid])).rows[0];
-    const delta = act === 'add' ? a : act === 'withdraw' ? -a : a - +w.cash;
-    if (Math.abs(delta) < 0.005) return;
-    await moveCash(c, wid, delta, act === 'add' ? 'deposit' : act === 'withdraw' ? 'withdrawal' : 'balance set');
-  });
-  await snapshot(wid);
+  let out = { ok: true };
+  if (act === 'add') out = await deposit(wid, a, how);
+  else if (act === 'withdraw') out = await withdraw(wid, a, how);
+  else {
+    const w = await walletRow(wid); if (w.broker) fail("A broker wallet's cash comes from your real account");
+    await tx(async c => { const cur = (await c.query('select cash from wallets where id=$1', [wid])).rows[0]; const delta = a - +cur.cash; if (Math.abs(delta) >= 0.005) await moveCash(c, wid, delta, 'balance set'); });
+  }
+  await snapshot(wid); return out;
+});
+DEL('/api/xfer/:id', auth, async req => { await cancelXfer(+req.params.id); });
+const xferJson = x => ({ id: x.id, kind: x.kind, amount: +x.amount, instant: +x.instant, status: x.status, created: tsMs(x.created), avail: tsMs(x.avail), done: tsMs(x.done), method: x.method });
+GET('/api/account', auth, async req => {
+  const wid = await activeWalletId(req), w = await walletRow(wid), a = await accountInfo(wid, { w });
+  const [xf, st] = await Promise.all([rows('select * from xfer where wid=$1 order by id desc limit 30', [wid]), rows('select s.*, t.sym from settle s left join trd t on t.id=s.trd_id where s.wid=$1 and s.settles > now() order by s.settles', [wid])]);
+  return { wallet: walletJson(w), account: a, rules: rulesJson(w), xfers: xf.map(xferJson), settling: st.map(x => ({ amount: +x.amount, settles: tsMs(x.settles), sym: x.sym })), broker: w.broker ? { ...brokerJson(), account: BROKER?.account ? { status: BROKER.account.status, number: String(BROKER.account.account_number || '').replace(/.(?=.{4})/g, '•'), multiplier: +BROKER.account.multiplier, pdt: !!BROKER.account.pattern_day_trader, daytrades: +BROKER.account.daytrade_count || 0, blocked: !!(BROKER.account.trading_blocked || BROKER.account.account_blocked), crypto: BROKER.account.crypto_status || null } : null } : null };
 });
 POST('/api/wallets/transfer', auth, async req => {
   const from = +req.body.from, to = +req.body.to, a = num(req.body.amount);
   if (from === to) fail('Pick two different wallets'); if (!(a > 0)) fail('Enter an amount');
+  const fw = await walletRow(from), tw = await walletRow(to);
+  if (fw.broker || tw.broker) fail("Broker wallets mirror a real account. Move that money through the broker.");
+  if (isReal(fw)) { const acc = await accountInfo(from, { w: fw }); if (a > acc.withdrawable + 0.005) fail(`${fw.name} can move up to ${money(acc.withdrawable)} right now (settled cash not held for orders).`); }
   await tx(async c => { await moveCash(c, from, -a, 'transfer out'); await moveCash(c, to, a, 'transfer in'); });
   await snapshot(from); await snapshot(to);
 });
@@ -1950,18 +3076,18 @@ DEL('/api/preds/:id', auth, async req => { await Q('delete from preds where id=$
 GET('/api/status', auth, async () => ({
   version: BUILD, up: Date.now() - BOOT, market: market(), finnhubKey: !!FINNHUB_KEY, wsMax: WS_MAX,
   feeds: { crypto: { ...feeds.crypto, subs: cbSubs.size }, stocks: { ...feeds.stocks, subs: [...fhSubs] } },
-  queue: fhQueue.length, tracked: assets.size, clients: wss.clients.size, db: { schema: +(await kvGet('schema', '0')), snaps: +(await row('select count(*) n from snap')).n },
+  queue: fhQueue.length, tracked: assets.size, broker: brokerJson(), clients: wss.clients.size, db: { schema: +(await kvGet('schema', '0')), snaps: +(await row('select count(*) n from snap')).n },
 }));
 
 // ---------- backup ----------
-const BACKUP_TABLES = ['wallets', 'pos', 'ord', 'lim', 'trd', 'snap', 'extra', 'watch', 'alert', 'divpaid', 'seasons', 'preds', 'achv', 'meta'];
+const BACKUP_TABLES = ['wallets', 'pos', 'ord', 'lim', 'trd', 'snap', 'extra', 'watch', 'alert', 'divpaid', 'seasons', 'preds', 'achv', 'meta', 'lots', 'realized', 'settle', 'xfer', 'splits'];
 GET('/api/export', auth, async (req, res) => {
   const wid = await activeWalletId(req);
   if (req.query.fmt === 'csv') {
     const list = await rows('select * from trd where wid=$1 order by id', [wid]);
     const esc = v => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-    const lines = ['Date,Type,Symbol,Quantity,Price,Total,Fee,Profit/Loss,Reason,Note,Tags'];
-    for (const t of list) lines.push([new Date(tsMs(t.ts)).toISOString(), t.side, t.sym, +t.qty, +t.price, t.side === 'cash' ? +t.price : +t.qty * +t.price, +t.fee || 0, t.pnl == null ? '' : +t.pnl, t.why, t.note, t.tags].map(esc).join(','));
+    const lines = ['Date,Type,Symbol,Quantity,Price,Total,Fee,SEC fee,FINRA TAF,CAT fee,Crypto fee,Order type,Session,Bid,Ask,Settles,Profit/Loss,Reason,Note,Tags'];
+    for (const t of list) { const f = jsonOr(t.fees, {}); lines.push([new Date(tsMs(t.ts)).toISOString(), t.side, t.sym, +t.qty, +t.price, t.side === 'cash' || t.side === 'int' || t.side === 'fee' ? +t.price : +t.qty * +t.price, +t.fee || 0, f.sec ?? '', f.taf ?? '', f.cat ?? '', f.crypto ?? '', t.otype || '', t.sess || '', t.bid ?? '', t.ask ?? '', t.settle ? new Date(tsMs(t.settle)).toISOString().slice(0, 10) : '', t.pnl == null ? '' : +t.pnl, t.why, t.note, t.tags].map(esc).join(',')); }
     return send(req, res, 200, lines.join('\n'), 'text/csv; charset=utf-8', { 'Content-Disposition': `attachment; filename="mango-trades-${etDate()}.csv"` });
   }
   const out = { app: 'mango', version: 2, exported: new Date().toISOString(), settings: S, tables: {} };
@@ -1982,12 +3108,33 @@ POST('/api/import', auth, async req => {
         await c.query(`insert into ${t}(${keys.join(',')}) select ${keys.join(',')} from json_populate_recordset(null::${t}, $1::json)`, [JSON.stringify(chunk)]);
       }
     }
-    for (const t of ['wallets', 'ord', 'lim', 'trd', 'alert', 'seasons', 'preds', 'notifs']) await c.query(`select setval(pg_get_serial_sequence('${t}','id'), greatest((select coalesce(max(id),1) from ${t}),1))`);
+    for (const t of ['wallets', 'ord', 'lim', 'trd', 'alert', 'seasons', 'preds', 'notifs', 'lots', 'realized', 'settle', 'xfer']) await c.query(`select setval(pg_get_serial_sequence('${t}','id'), greatest((select coalesce(max(id),1) from ${t}),1))`);
   });
   if (b.settings) await saveSettings(b.settings);
   lastSnap.clear(); await loadAssets(); await loadOrders(); await loadAlerts(); await refreshUserSyms();
   return { ok: true };
 });
+
+// =====================================================================
+// Taxes, statements, rules and the broker
+// =====================================================================
+GET('/api/taxes', auth, async req => taxYear(await activeWalletId(req), clamp(num(req.query.y, +etDate().slice(0, 4)), 2000, 2100)));
+GET('/api/taxes/csv', auth, async (req, res) => {
+  const wid = await activeWalletId(req), y = clamp(num(req.query.y, +etDate().slice(0, 4)), 2000, 2100), t = await taxYear(wid, y);
+  const d = ms => new Date(ms).toLocaleDateString('en-US', { timeZone: 'America/New_York', month: '2-digit', day: '2-digit', year: 'numeric' });
+  const lines = ['Description,Date acquired,Date sold,Proceeds,Cost basis,Wash sale loss disallowed,Gain or loss,Term,Type'];
+  for (const r of t.rows) lines.push([`${+r.qty.toFixed(8)} ${r.sym}`, d(r.acquired), d(r.sold), r.proceeds.toFixed(2), r.basis.toFixed(2), r.wash ? r.wash.toFixed(2) : '', r.gain.toFixed(2), r.term === 'long' ? 'Long term' : 'Short term', r.crypto ? 'Digital asset' : 'Security'].join(','));
+  return send(req, res, 200, lines.join('\n'), 'text/csv; charset=utf-8', { 'Content-Disposition': `attachment; filename="mango-gains-${y}.csv"` });
+});
+GET('/api/statements', auth, async req => statementMonths(await activeWalletId(req)));
+GET('/api/statements/:m', auth, async req => statement(await activeWalletId(req), req.params.m));
+GET('/api/rules', auth, async req => {
+  const w = await walletRow(await activeWalletId(req)), today = etDate();
+  return { rules: rulesJson(w), sec: REG.sec, taf: REG.taf, cat: REG.cat, secNow: rateAt(REG.sec, today)[1], tafNow: rateAt(REG.taf, today).slice(1), profiles: Object.fromEntries(Object.entries(PROFILES).map(([k, p]) => [k, { name: p.name, pre: p.pre, post: p.post, overnight: p.overnight, gtcDays: p.gtcDays, instant: p.instant, achDays: p.achDays, marginRates: p.marginRates.map(r => [r[0] === Infinity ? null : r[0], r[1]]), cryptoTiers: p.cryptoTiers.map(r => [r[0] === Infinity ? null : r[0], r[1], r[2]]), goldFee: p.goldFee, goldFree: p.goldFree, maintBase: p.maintBase }])), vol30: await cryptoVolume30(w.id) };
+});
+GET('/api/broker', auth, async () => { if (BROKER && Date.now() - BROKER.lastSync > 20e3) await brokerSync().catch(() => {}); return { ...brokerJson(), live: BROKER?.env === 'live', account: BROKER?.account ? { status: BROKER.account.status, equity: +BROKER.account.equity, cash: +BROKER.account.cash, bp: +BROKER.account.buying_power, multiplier: +BROKER.account.multiplier } : null, maxOrder: ALP.maxOrder || null }; });
+POST('/api/broker/link', auth, async req => brokerLink(req.body.confirm));
+POST('/api/broker/sync', auth, async () => { await brokerSync(); return brokerJson(); });
 
 // =====================================================================
 // Background jobs
@@ -2004,7 +3151,7 @@ async function savePeaks() {
 }
 async function divJob() {
   if (!S.f_divs) return;
-  for (const p of await rows('select p.* from pos p join wallets w on w.id=p.wid where not w.archived')) {
+  for (const p of await rows('select p.*, w.drip, w.name wname from pos p join wallets w on w.id=p.wid where not w.archived and w.broker is null')) {
     if (isCrypto(p.sym)) continue;
     let ev; try { ev = Object.values((await yahooChart(p.sym, 'range=3mo&interval=1d&events=div')).events?.dividends || {}); } catch (e) { continue; }
     for (const v of ev) {
@@ -2017,7 +3164,14 @@ async function divJob() {
         await c.query('update wallets set cash=cash+$1 where id=$2', [amt, p.wid]);
         await c.query("insert into trd(wid,sym,side,qty,price,why) values($1,$2,'div',$3,$4,'dividend')", [p.wid, p.sym, +p.qty, v.amount]);
       });
-      await notify('div', `💵 Dividend from ${p.sym}`, `You received ${money(amt)} (${pxStr(v.amount)} a share on ${+(+p.qty).toFixed(4)} shares).`, { sym: p.sym, wid: p.wid });
+      let drip = '';
+      if (p.drip && amt >= 0.01) { // dividend reinvestment buys more of the same stock
+        try {
+          if (market().state === 'open') { const f = await execTrade(p.wid, p.sym, 'buy', { usd: amt, why: 'dividend reinvestment', drip: true, auto: true }); drip = ` It bought ${+f.qty.toFixed(6)} more shares.`; }
+          else { await addLimit(p.wid, p.sym, { side: 'buy', kind: 'moo', amount: amt, units: 'usd', why: 'dividend reinvestment' }); drip = ' It will buy more shares when the market opens.'; }
+        } catch (e) { drip = ` Reinvesting didn't work: ${e.message}`; }
+      }
+      await notify('div', `💵 Dividend from ${p.sym}`, `You received ${money(amt)} (${pxStr(v.amount)} a share on ${+(+p.qty).toFixed(4)} shares).${drip}`, { sym: p.sym, wid: p.wid });
       checkAchievementsSoon();
     }
   }
@@ -2027,7 +3181,7 @@ async function daily() {
   // interest on cash, once a day
   if (S.cashAPY > 0 && mins >= 5 && (await kvGet('job_interest')) !== today) {
     await kvSet('job_interest', today);
-    for (const w of await rows('select * from wallets where not archived and cash > 0')) {
+    for (const w of await rows('select * from wallets where not archived and cash > 0 and broker is null')) {
       const amt = round(+w.cash * S.cashAPY / 100 / 365, 4); if (amt < 0.0001) continue;
       await tx(async c => { await c.query('update wallets set cash=cash+$1 where id=$2', [amt, w.id]); await c.query("insert into trd(wid,sym,side,qty,price,why) values($1,'','int',1,$2,'interest')", [w.id, amt]); });
     }
@@ -2062,6 +3216,7 @@ async function daily() {
 }
 let lastMarketState = null;
 function startJobs() {
+  const fast = !!ENV.MANGO_FAST_JOBS; // for tests: run the slow jobs sooner
   const every = (ms, fn, name) => setInterval(() => Promise.resolve().then(fn).catch(e => warn(name, e.message)), ms);
   every(60e3, snapshotAll, 'snapshots'); setTimeout(() => snapshotAll().catch(() => {}), 15e3);
   every(30e3, savePeaks, 'peaks');
@@ -2072,7 +3227,14 @@ function startJobs() {
   every(60e3, daily, 'daily');
   every(30e3, () => { fhSync(); const st = market().state; if (st !== lastMarketState) { lastMarketState = st; broadcast({ t: 'evt', e: 'market', market: market() }); } }, 'market');
   every(5 * 60e3, refreshUserSyms, 'symbols');
-  every(6 * 3600e3, divJob, 'dividends'); setTimeout(() => divJob().catch(() => {}), 90e3);
+  every(6 * 3600e3, divJob, 'dividends'); setTimeout(() => divJob().catch(() => {}), fast ? 20e3 : 90e3);
+  every(6 * 3600e3, splitJob, 'splits'); setTimeout(() => splitJob().catch(() => {}), fast ? 25e3 : 120e3);
+  every(fast ? 5e3 : 60e3, xferJob, 'transfers');
+  every(60e3, marginDaily, 'margin interest');
+  every(fast ? 5e3 : 60e3, marginWatch, 'margin');
+  every(fast ? 3000 : 5000, pollExtended, 'extended hours');
+  every(3600e3, () => Q("delete from settle where settles < now() - interval '7 days'"), 'settlement cleanup');
+  if (BROKER) { every(15e3, () => brokerSync(), 'broker'); every(30e3, () => { adSync(); if (BROKER.wid) tuConnect(); }, 'broker streams'); setTimeout(() => brokerSync().then(() => { if (BROKER.wid) tuConnect(); }).catch(() => {}), 3000); }
   every(3600e3, async () => { await thinSnapshots(); await Q('delete from notifs where id not in (select id from notifs order by id desc limit 500)'); }, 'cleanup');
   every(10 * 60e3, checkAchievements, 'achievements'); setTimeout(() => checkAchievements().catch(e => warn('achievements', e.message)), 20e3);
   // Feed watchdogs: reconnect if a stream goes quiet.
@@ -2268,6 +3430,6 @@ process.on('unhandledRejection', e => warn('unhandled', e && (e.stack || e.messa
   tokenSalt = (await kvGet('token_salt', '')) || '';
   await loadSettings(); await loadAssets(); await loadPriceCache(); await loadOrders(); await loadAlerts(); await initPush();
   await refreshUserSyms(); await walletsSummary();
-  server.listen(PORT, () => log(`🥭 Mango is running on port ${PORT} · build ${BUILD} · ${FINNHUB_KEY ? 'stocks on' : 'stocks off (no FINNHUB_KEY)'}`));
-  cbConnect(); fhConnect(); startJobs();
+  server.listen(PORT, () => log(`🥭 Mango is running on port ${PORT} · build ${BUILD} · ${FINNHUB_KEY ? 'stocks on' : 'stocks off (no FINNHUB_KEY)'}${BROKER ? ` · Alpaca ${BROKER.env}` : ''}`));
+  cbConnect(); fhConnect(); if (BROKER) adConnect(); startJobs();
 })().catch(e => { console.error('Mango could not start:', e); process.exit(1); });

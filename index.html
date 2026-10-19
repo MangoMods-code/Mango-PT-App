@@ -348,7 +348,7 @@ button.tile:active { transform: scale(.98); }
 /* ---------- toasts ---------- */
 #toasts { position: fixed; left: 0; right: 0; top: calc(var(--safe-t) + 10px); z-index: 100; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; padding: 0 12px; }
 .toast {
-  pointer-events: auto; display: flex; align-items: center; gap: 10px; max-width: 460px; width: max-content; min-height: 46px; padding: 10px 16px 10px 12px;
+  pointer-events: auto; display: flex; align-items: center; gap: 10px; max-width: min(460px, calc(100vw - 24px)); width: max-content; min-height: 46px; padding: 10px 16px 10px 12px;
   border-radius: 16px; background: var(--card3); color: var(--tx); box-shadow: var(--shadow); font-weight: 600; font-size: 15px;
   transform: translateY(-20px) scale(.96); opacity: 0; transition: transform .45s var(--spring), opacity .25s;
   -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
@@ -669,6 +669,55 @@ button.tile:active { transform: scale(.98); }
 .theme-pick .pv { height: 56px; border-radius: 9px; margin-bottom: 6px; position: relative; overflow: hidden; }
 .theme-pick .pv i { position: absolute; left: 8px; right: 8px; height: 6px; border-radius: 3px; }
 .diag { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--tx2); white-space: pre-wrap; word-break: break-word; }
+
+/* ---------- real-market trading ---------- */
+.otypes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+.otypes::-webkit-scrollbar { display: none; }
+.otypes button { flex: none; height: 34px; padding: 0 11px; border-radius: 17px; font-size: 13.5px; font-weight: 650; color: var(--tx2); background: var(--card2); transition: background .25s var(--ease), color .25s; }
+.otypes button.on { background: var(--tx); color: var(--bg); }
+.quote-strip { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; margin-top: 12px; padding: 10px 14px; border-radius: var(--r-sm); background: var(--card); }
+.quote-strip > div { display: flex; flex-direction: column; gap: 1px; }
+.quote-strip .r { align-items: flex-end; text-align: right; }
+.quote-strip .k { font-size: 11.5px; color: var(--mu); font-weight: 600; }
+.quote-strip b { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.quote-strip > div:first-child b { color: var(--dn); } .quote-strip .r b { color: var(--up); }
+.quote-strip .mid { align-items: center; text-align: center; }
+.quote-strip .src { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 650; color: var(--mu); }
+.quote-strip .src.live { color: var(--up); }
+.kv.fee .k { display: flex; flex-direction: column; gap: 1px; }
+.kv.fee small { font-size: 12px; color: var(--mu2); line-height: 1.3; }
+.kv.total { font-weight: 700; } .kv.total .k { color: var(--tx); }
+.money-banner { display: flex; gap: 10px; align-items: center; padding: 11px 14px; border-radius: 14px; background: color-mix(in srgb, var(--dn) 16%, var(--card)); border: 1px solid color-mix(in srgb, var(--dn) 45%, transparent); font-size: 14px; line-height: 1.35; margin-bottom: 4px; }
+.money-banner svg { width: 18px; height: 18px; color: var(--dn); flex: none; }
+.money-banner b { color: var(--dn); }
+.real-badge { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 5px; background: var(--dn); color: #fff; font-size: 10.5px; font-weight: 800; letter-spacing: .02em; }
+/* buying power breakdown */
+.bp-card { padding: 18px 16px 14px; }
+.bp-card .big { font-family: var(--font-num); font-size: 34px; font-weight: 750; letter-spacing: -.03em; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.stack { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--card2); margin: 14px 0 6px; gap: 2px; }
+.stack i { display: block; height: 100%; min-width: 3px; }
+.stack-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--mu); }
+.stack-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+.meter { position: relative; height: 12px; border-radius: 6px; background: var(--card2); margin: 12px 0 4px; overflow: visible; }
+.meter > i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 6px; }
+.meter > b { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--tx); border-radius: 1px; }
+.rule-pick { display: grid; gap: 8px; }
+.rule-pick button { display: flex; gap: 12px; align-items: flex-start; text-align: left; padding: 13px 14px; border-radius: var(--r-sm); background: var(--card2); border: 1.5px solid transparent; transition: border-color .2s, background .2s; }
+.rule-pick button.on { border-color: var(--ac); background: var(--ac-soft); }
+.rule-pick .t { font-weight: 700; font-size: 15px; }
+.rule-pick .d { font-size: 13px; color: var(--mu); margin-top: 2px; line-height: 1.35; }
+.rule-pick .dot { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line2); flex: none; margin-top: 2px; }
+.rule-pick button.on .dot { border-color: var(--ac); background: radial-gradient(circle, var(--ac) 45%, transparent 50%); }
+.xfer-st { font-size: 12px; font-weight: 700; }
+.lot-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 10px 0; }
+.lot-row + .lot-row { border-top: 1px solid var(--line); }
+.tax-big { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.tax-big .tile .v { font-size: 22px; }
+
+.steps { display: grid; gap: 12px; }
+.step { display: flex; gap: 12px; align-items: flex-start; }
+.step .n { width: 26px; height: 26px; border-radius: 50%; background: var(--ac-soft); color: var(--ac); font-weight: 750; font-size: 13.5px; display: grid; place-items: center; flex: none; }
+.step b { font-size: 15px; }
 
 /* ---------- motion ---------- */
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -1322,8 +1371,8 @@ function ring(pctv, size = 34, color) {
   return `<svg class="ring" viewBox="0 0 34 34" style="width:${size}px;height:${size}px"><circle class="bgc" cx="17" cy="17" r="${r}"/><circle class="fg" cx="17" cy="17" r="${r}" stroke-dasharray="${c.toFixed(2)}" stroke-dashoffset="${off.toFixed(2)}" ${color ? `style="stroke:${color}"` : ''}/></svg>`;
 }
 // hold-to-confirm buttons
-function holdButton(el, fn, ms = 650) {
-  if (SET().confirmStyle !== 'hold') { el.addEventListener('click', () => fn()); return; }
+function holdButton(el, fn, ms = 650, style = SET().confirmStyle) {
+  if (style !== 'hold') { el.addEventListener('click', () => fn()); return; }
   el.classList.add('hold'); el.style.setProperty('--hold-ms', ms + 'ms');
   if (!$('.hold-fill', el)) { el.innerHTML = `<i class="hold-fill"></i><span class="hold-label">${el.innerHTML}</span>`; }
   let t = null;
@@ -1645,12 +1694,13 @@ function gaugeSvg(v) {
 const RANGES = [['1D', '1D'], ['1W', '1W'], ['1M', '1M'], ['3M', '3M'], ['1Y', '1Y'], ['ALL', 'All']];
 const RANGE_WORD = { '1D': 'Past day', '1W': 'Past week', '1M': 'Past month', '3M': 'Past 3 months', '1Y': 'Past year', 'ALL': 'All time' };
 const W = () => App.S?.wallet || { name: 'Wallet', emoji: '🥭', color: 'mango', cash: 0, start: 10000 };
-const walletPill = () => `<button class="wallet-pill" data-act="wallets" aria-label="Switch wallet"><span class="we" data-wc="${h(W().color)}" style="background:linear-gradient(140deg,var(--w1),var(--w2))">${h(W().emoji)}</span><span class="ellip">${h(W().name)}</span>${icon('down')}</button>`;
+const walletPill = () => `<button class="wallet-pill" data-act="wallets" aria-label="Switch wallet"><span class="we" data-wc="${h(W().color)}" style="background:linear-gradient(140deg,var(--w1),var(--w2))">${h(W().emoji)}</span><span class="ellip">${h(W().name)}</span>${W().broker && W().brokerEnv === 'live' ? '<span class="real-badge">REAL</span>' : ''}${icon('down')}</button>`;
 function marketChip() {
   const m = App.S?.market; if (!m) return '';
   const now = Date.now();
   if (m.state === 'open') return `<span class="mstate open"><span class="dot-live"></span>Market open · closes in ${countdown(m.closesAt - now)}</span>`;
-  const label = m.state === 'pre' ? 'Pre-market' : m.state === 'post' ? 'After hours' : (m.holiday ? m.holiday : 'Market closed');
+  const ses = App.S?.rules?.session;
+  const label = ses === 'overnight' ? '24 Hour Market' : (ses === 'pre' || m.state === 'pre') ? 'Pre-market' : (ses === 'post' || m.state === 'post') ? 'After hours' : (m.holiday ? m.holiday : 'Market closed');
   return `<span class="mstate">${h(label)}${m.opensAt ? ' · opens in ' + countdown(m.opensAt - now) : ''}</span>`;
 }
 function assetRow(sym, o = {}) {
@@ -1709,7 +1759,7 @@ VIEWS.portfolio = {
   renderStrip() {
     const S = App.S, st = S.stats || {};
     $('#pf-strip').innerHTML = `
-      <button class="tile" data-act="cash"><div class="k">${icon('dollar')}Buying power</div><div class="v priv">${money(S.wallet.cash)}</div><div class="s">Cash ready to trade</div></button>
+      <button class="tile" data-act="go" data-to="account"><div class="k">${icon('dollar')}Buying power</div><div class="v priv">${money(S.account?.bp ?? S.wallet.cash)}</div><div class="s">${bpSub(S)}</div></button>
       <div class="tile"><div class="k">${icon('activity')}Today</div><div class="v priv" id="pf-today">–</div><div class="s" id="pf-today-p">–</div></div>
       <button class="tile" data-act="go" data-to="performance"><div class="k">${icon('pie')}Diversity</div><div class="row" style="gap:8px;margin-top:3px">${ring(st.diversity || 0, 30)}<div class="v" style="margin:0">${pct0(st.diversity || 0, 0)}</div></div><div class="s">${S.pos.length} position${S.pos.length === 1 ? '' : 's'}</div></button>
       <button class="tile" data-act="go" data-to="orders"><div class="k">${icon('shield')}Protected</div><div class="row" style="gap:8px;margin-top:3px">${ring(st.protected || 0, 30, 'var(--up)')}<div class="v" style="margin:0">${pct0(st.protected || 0, 0)}</div></div><div class="s">Has a stop loss</div></button>
@@ -1726,7 +1776,10 @@ VIEWS.portfolio = {
     const side = [];
     if (feature('watch') && S.watch?.length) side.push(`<div class="section-h"><h2>Watchlist<span class="count">${S.watch.length}</span></h2><button class="more" data-act="tab" data-tab="market">See all ${icon('right')}</button></div><div class="group">${S.watch.slice(0, 5).map(x => assetRow(x)).join('')}</div>`);
     side.push(`<div class="section-h"><h2>More</h2></div><div class="group">
+      ${menuCell('dollar', 'Account and transfers', accountSub(S), 'account')}
       ${menuCell('chart', 'Performance', 'Returns, win rate, best and worst trades', 'performance')}
+      ${feature('taxes') ? menuCell('note', 'Taxes', 'Gains, losses, wash sales and a 1099-style summary', 'taxes') : ''}
+      ${feature('statements') ? menuCell('calendar', 'Statements', 'Monthly account statements', 'statements') : ''}
       ${feature('divs') ? menuCell('gift', 'Dividends', 'Income from the stocks you hold', 'dividends') : ''}
       ${menuCell('target', 'Orders and alerts', `${nOrd} order${nOrd === 1 ? '' : 's'} · ${(S.alerts || []).filter(a => !a.fired).length} alert${(S.alerts || []).filter(a => !a.fired).length === 1 ? '' : 's'}`, 'orders')}
       ${menuCell('wallet', 'Wallets', `${(S.wallets || []).filter(w => !w.archived).length} wallet${(S.wallets || []).filter(w => !w.archived).length === 1 ? '' : 's'}, no limits`, 'wallets')}
@@ -1787,6 +1840,15 @@ VIEWS.portfolio = {
     this.tick();
   },
 };
+function bpSub(S) {
+  const a = S.account; if (!a) return 'Cash ready to trade';
+  if (a.call > 0) return `<span class="dn">Margin call ${money(a.call)}</span>`;
+  if (a.acct === 'cash' && a.unsettled > 0.005) return `${money(a.unsettled)} settling`;
+  if (a.marginOn) return a.debit > 0 ? `${money(a.debit)} borrowed` : 'Includes margin';
+  if (a.holdsCash > 0.005) return `${money(a.holdsCash)} held for orders`;
+  if (a.pendingDeposits > 0.005) return `${money(a.pendingDeposits)} deposit on the way`;
+  return 'Ready to trade';
+}
 function orderSummary() {
   const S = App.S, parts = [];
   const c = k => (S.ord || []).filter(o => o.kind === k).length;
@@ -1796,6 +1858,9 @@ function orderSummary() {
   if ((S.lims || []).length) parts.push(S.lims.length + ' limit/stop');
   return parts.join(' · ') || 'Waiting to trigger';
 }
+const ACCT_NAME = { cash: 'Cash account', instant: 'Instant account', margin: 'Margin account' };
+const PROF_NAME = { robinhood: 'Robinhood rules', alpaca: 'Alpaca rules', practice: 'Practice rules' };
+const accountSub = S => S.wallet?.broker ? `Alpaca ${S.wallet.brokerEnv === 'live' ? 'live, real money' : 'paper'}` : `${PROF_NAME[S.wallet?.profile] || ''}${S.wallet?.profile === 'practice' ? '' : ' · ' + (ACCT_NAME[S.wallet?.acct] || '')}`;
 const menuCell = (ic, t, sub, to) => `<button class="cell" data-act="go" data-to="${to}"><div class="lead">${icon(ic)}</div><div class="main"><div class="title">${h(t)}</div><div class="sub ellip">${h(sub)}</div></div>${icon('right', 'chev')}</button>`;
 ACT.tab = el => { if (Router.layers.length) { Router.closeAll(); setTimeout(() => setTab(el.dataset.tab), 30); } else setTab(el.dataset.tab); };
 ACT.pfBench = el => { const v = !store.get('bench'); store.set('bench', v); el.classList.toggle('on', v); $('#pf-compare').classList.toggle('hidden', !v); VIEWS.portfolio.loadEq(); };
@@ -2037,7 +2102,7 @@ PAGES.asset = {
     p.body.innerHTML = `
       <div class="a-head">${logo(sym, 'logo-lg')}<div class="grow"><div class="nm ellip" id="a-name">${h(nameOf(sym))}</div><h1>${h(sym)}</h1></div><div class="col" style="align-items:flex-end;gap:6px" id="a-tags"></div></div>
       <div class="a-price n" id="a-price"></div>
-      <div class="a-chg" id="a-chg"></div><div class="a-ext" id="a-ext"></div>
+      <div class="a-chg" id="a-chg"></div><div class="a-ext" id="a-ext"></div><div id="a-quote"></div>
       <div class="chart-wrap tall no-drag" id="a-chart"></div>
       <div class="range-bar">${seg('ar', A_RANGES, st.range, 'ranges')}<button class="icon-btn" data-act="aType" aria-label="Chart style">${icon(st.type === 'candle' ? 'line' : 'candles')}</button>${feature('insights') !== false ? `<button class="icon-btn ${st.ind.length ? 'on' : ''}" data-act="aInd" aria-label="Indicators">${icon('sliders')}</button>` : ''}</div>
       <div id="a-ohlc" class="t-foot n" style="min-height:18px;margin:8px 2px 0"></div>
@@ -2052,6 +2117,9 @@ PAGES.asset = {
     p.on('state', () => this.refresh(p));
     this.refresh(p); this.loadChart(p); this.loadInfo(p);
     p.timer(() => { if (st.range === '1D' && !st.scrub) this.loadChart(p, true); }, 60e3);
+    const q = () => { if (document.hidden || Router.top()?.page !== p) return; api('quote/' + encodeURIComponent(sym)).then(d => { p.quote = d.quote; drawQ(); }).catch(() => {}); };
+    const drawQ = () => { const el = $('#a-quote', p.body); if (el && p.quote && isRealW()) el.innerHTML = quoteStrip(liveQuote(sym, p.quote)); };
+    q(); p.timer(q, 3000); p.hook(drawQ);
   },
   acts(p) {
     const sym = p.sym, w = App.S?.watch?.includes(sym);
@@ -2069,7 +2137,7 @@ PAGES.asset = {
     let state;
     if (crypto) state = stale ? '<span class="tag"><span class="dot-off"></span>Delayed</span>' : '<span class="tag up"><span class="dot-live"></span>Live</span>';
     else if (m?.state === 'open') state = stale ? '<span class="tag"><span class="dot-off"></span>Delayed</span>' : '<span class="tag up"><span class="dot-live"></span>Live</span>';
-    else state = `<span class="tag">${m?.state === 'pre' ? 'Pre-market' : m?.state === 'post' ? 'After hours' : 'Market closed'}</span>`;
+    else { const ses = App.S?.rules?.session; state = `<span class="tag">${ses === 'overnight' ? '24 Hour Market' : (ses === 'pre' || m?.state === 'pre') ? 'Pre-market' : (ses === 'post' || m?.state === 'post') ? 'After hours' : 'Market closed'}</span>`; }
     $('#a-tags', p.body).innerHTML = state + `<span class="tag">${crypto ? 'Crypto' : (A(sym)?.i || 'Stock')}</span>`;
   },
   tick(p) {
@@ -2129,6 +2197,7 @@ PAGES.asset = {
         <div><div class="k">Share of wallet</div><div class="v" id="ap-share"></div></div>
         <div><div class="k">Cost basis</div><div class="v priv">${money(pos.qty * pos.avg)}</div></div>
         <div><div class="k">Holding since</div><div class="v">${pos.since ? fmtDate(pos.since) : '–'}</div></div>
+        ${App.S.account?.holdsShares?.[sym] ? `<div><div class="k">Held for sell orders</div><div class="v">${qtyStr(sym, App.S.account.holdsShares[sym])}</div></div><div><div class="k">Free to sell</div><div class="v">${qtyStr(sym, Math.max(0, pos.qty - App.S.account.holdsShares[sym]))}</div></div>` : ''}
       </div>
       <div class="btns mt16"><button class="btn btn-quiet btn-sm" data-act="orderNew" data-kind="stop" data-sym="${h(sym)}">${icon('shield')}Stop loss</button><button class="btn btn-quiet btn-sm" data-act="orderNew" data-kind="take" data-sym="${h(sym)}">${icon('target')}Take profit</button></div></div>`;
     this.tickPos(p);
@@ -2222,7 +2291,7 @@ ACT.aMore = el => {
     title: sym,
     html: `<div class="group">
       ${feature('alerts') ? `<button class="cell" data-x="alert"><div class="lead">${icon('bell')}</div><div class="main"><div class="title">Price alert</div><div class="sub">Get notified when ${h(sym)} hits a price</div></div>${icon('right', 'chev')}</button>` : ''}
-      <button class="cell" data-x="limit"><div class="lead">${icon('target')}</div><div class="main"><div class="title">Limit or stop order</div><div class="sub">Buy or sell automatically at your price</div></div>${icon('right', 'chev')}</button>
+      <button class="cell" data-x="limit"><div class="lead">${icon('target')}</div><div class="main"><div class="title">Limit, stop or trailing order</div><div class="sub">Buy or sell automatically at your price</div></div>${icon('right', 'chev')}</button>
       ${pos ? `<button class="cell" data-x="stop"><div class="lead">${icon('shield')}</div><div class="main"><div class="title">Stop loss or take profit</div><div class="sub">Protect your ${h(sym)} position</div></div>${icon('right', 'chev')}</button>` : ''}
       ${feature('games') && feature('preds') ? `<button class="cell" data-x="pred"><div class="lead">${icon('bull')}</div><div class="main"><div class="title">Bull vs Bear</div><div class="sub">Guess if it goes up or down</div></div>${icon('right', 'chev')}</button>` : ''}
       <button class="cell" data-x="copy"><div class="lead">${icon('copy')}</div><div class="main"><div class="title">Copy symbol</div></div></button></div>`,
@@ -2239,152 +2308,216 @@ ACT.aMore = el => {
 // Trading: the trade ticket, stop loss / take profit, limit orders, alerts
 // ===================================================================
 const unitShort = sym => isCrypto(sym) ? sym : 'shares';
-function fillPrice(sym, side) { const s = SET(), v = live(sym) || 0, slip = (s.slippage || 0) / 100; return side === 'buy' ? v * (1 + slip) : v * (1 - slip); }
-const feeFor = total => { const s = SET(); return total > 0 ? (s.feeFlat || 0) + total * (s.feePct || 0) / 100 : 0; };
-function maxBuyUsd(sym) {
-  const s = SET(), cash = App.S.wallet.cash, px = fillPrice(sym, 'buy'); if (!px) return 0;
-  let usd = (cash - (s.feeFlat || 0)) / (1 + (s.feePct || 0) / 100);
-  if (s.wholeShares && !isCrypto(sym)) usd = Math.floor(usd / px) * px;
-  return Math.max(0, Math.floor(usd * 100) / 100);
-}
-function marketNote(sym) {
-  if (isCrypto(sym)) return '';
-  const m = App.S.market; if (m.state === 'open') return '';
-  const mode = SET().closedTrading;
-  const when = m.opensAt ? new Date(m.opensAt).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' }) : 'soon';
-  if (mode === 'block') return `<div class="callout warn mt12">${icon('clock')}<div>The stock market is closed. It opens ${when}. You can change this in Settings → Trading.</div></div>`;
-  if (mode === 'queue') return `<div class="callout mt12">${icon('clock')}<div>The market is closed, so this will be queued and fill when it opens (${when}).</div></div>`;
-  return `<div class="callout mt12">${icon('clock')}<div>The market is closed. This fills right away at the last price, like a practice run.</div></div>`;
-}
-
 // ---------- the trade ticket ----------
+const OT_LABEL = { market: 'Market', limit: 'Limit', stop: 'Stop', stoplimit: 'Stop limit', trail: 'Trailing stop' };
+const OT_CHIP = { ...OT_LABEL, trail: 'Trailing' };
+const spreadStr = v => v >= 0.01 ? '$' + v.toFixed(2) : price(v);
+const SESS_SHORT = { regular: 'Regular hours', pre: 'Pre-market', post: 'After hours', overnight: '24 Hour Market', closed: 'Market closed' };
+const isRealW = () => App.S?.rules?.real !== false;
+const liveMoney = () => W().broker && W().brokerEnv === 'live';
+const fmtDay = t => new Date(t).toLocaleDateString('en-US', { timeZone: ET_TZ, weekday: 'short', month: 'short', day: 'numeric' });
+function feeRows(lines, o = {}) {
+  if (!lines || !lines.length) return '';
+  return lines.filter(l => o.all || l.amt > 0 || l.k === 'comm' || l.k === 'crypto' || l.k === 'custom').map(l => `<div class="kv fee"><span class="k">${h(l.label)}${l.note && o.notes !== false && l.note !== 'Free' ? `<small>${h(l.note)}</small>` : ''}</span><span class="v">${l.amt > 0 ? money(l.amt, { dp: l.amt < 0.1 ? 2 : 2 }) : 'Free'}</span></div>`).join('');
+}
+// Estimated quotes follow the live price between server updates; real quotes are shown as they are.
+function liveQuote(sym, q) {
+  if (!q || q.live) return q; const v = live(sym); if (!v || !q.last) return q;
+  const d = v - q.last, t = v >= 1 ? 0.01 : 0.0001, r = x => Math.round(x / t) * t;
+  return { ...q, bid: r(q.bid + d), ask: r(q.ask + d), mid: q.mid + d, last: v };
+}
+function quoteStrip(q, sess) {
+  if (!q) return '';
+  const spread = q.ask - q.bid, bps = q.mid ? spread / q.mid * 1e4 : 0;
+  return `<div class="quote-strip"><div><span class="k">Bid</span><b class="n">${price(q.bid)}</b></div><div class="mid"><span class="${q.live ? 'src live' : 'src'}">${q.live ? '<span class="dot-live"></span>' + h(q.src) : 'Estimated'}</span><span class="t-cap">Spread ${spreadStr(spread)}${bps >= 0.5 ? ' · ' + bps.toFixed(bps < 10 ? 1 : 0) + ' bps' : ''}</span></div><div class="r"><span class="k">Ask</span><b class="n">${price(q.ask)}</b></div></div>`;
+}
 ACT.trade = el => tradeSheet(el.dataset.sym, el.dataset.side || 'buy');
 function tradeSheet(sym, side = 'buy', preset = {}) {
   if (!live(sym)) return toast(`No live price for ${sym} yet. Try again in a moment.`, { kind: 'err' });
-  const s = SET(), st = { side, unit: preset.unit || 'usd', amount: preset.amount ?? (side === 'buy' && s.defaultBuy ? String(s.defaultBuy) : ''), sl: s.autoSL ? String(s.autoSL) : '', tp: s.autoTP ? String(s.autoTP) : '', trail: '', slType: 'pct', note: '', adv: !!(s.autoSL || s.autoTP) };
+  const s = SET(), crypto = isCrypto(sym), real = isRealW(), broker = !!W().broker;
+  const st = { side, otype: preset.otype || 'market', unit: preset.unit || 'usd', amount: preset.amount ?? (side === 'buy' && s.defaultBuy ? String(s.defaultBuy) : ''), price: preset.price || '', lpx: '', trail: '', tif: crypto ? 'gtc' : 'day', sess: 'regular', sl: s.autoSL ? String(s.autoSL) : '', tp: s.autoTP ? String(s.autoTP) : '', slType: 'pct', note: '', adv: !!(s.autoSL || s.autoTP), pv: null, seq: 0 };
+  if (st.otype === 'trail' && st.side === 'buy') st.side = 'sell';
   const sh = sheet({ title: '', cls: 'ticket' });
-  function pos() { return posOf(sym); }
-  function calc() {
-    const px = fillPrice(sym, st.side), a = num(st.amount), p = pos();
-    let qty = 0;
-    if (st.side === 'sell' && st.unit === 'pct') qty = p ? p.qty * Math.min(100, a) / 100 : 0;
-    else if (st.unit === 'qty') qty = a;
-    else qty = px ? a / px : 0;
-    if (st.side === 'buy' && SET().wholeShares && !isCrypto(sym)) qty = Math.floor(qty + 1e-9);
-    if (st.side === 'sell' && p && qty > p.qty) qty = p.qty;
-    const total = qty * px, fee = feeFor(total);
-    const cash = App.S.wallet.cash;
-    let err = '';
-    if (st.side === 'buy' && total + fee > cash + 0.005) err = `That's more than your ${money(cash)} buying power`;
-    if (st.side === 'sell' && !p) err = `You don't own any ${sym}`;
-    if (st.side === 'sell' && p && st.unit !== 'pct' && qty > p.qty + 1e-9) err = `You only have ${qtyStr(sym, p.qty)} ${unitShort(sym)}`;
-    if (!(a > 0)) err = err || '';
-    const pnl = st.side === 'sell' && p ? (px - p.avg) * qty - fee : null;
-    const closedBlock = !isCrypto(sym) && App.S.market.state !== 'open' && SET().closedTrading === 'block';
-    return { px, qty, total, fee, err, pnl, cashAfter: st.side === 'buy' ? cash - total - fee : cash + total - fee, ok: a > 0 && qty > 0 && !err && !closedBlock };
+  const pos = () => posOf(sym);
+  const types = () => (st.side === 'sell' ? ['market', 'limit', 'stop', 'stoplimit', 'trail'] : ['market', 'limit', 'stop', 'stoplimit']).filter(t => t !== 'trail' || pos());
+  function body() {
+    const b = { sym, side: st.side, otype: st.otype, mode: st.unit, amount: num(st.amount), tif: st.tif, sess: st.sess, kind: crypto ? 'crypto' : 'stock' };
+    if (st.otype === 'limit' || st.otype === 'stop' || st.otype === 'stoplimit') b.price = num(st.price);
+    if (st.otype === 'stoplimit') b.lpx = num(st.lpx);
+    if (st.otype === 'trail') b.trail = num(st.trail);
+    return b;
+  }
+  let pvTimer = null, pvAt = 0;
+  function preview(delay = 160) {
+    clearTimeout(pvTimer);
+    pvTimer = setTimeout(async () => {
+      const my = ++st.seq; pvAt = Date.now();
+      try { const r = await post('preview', body()); if (my === st.seq && !st.done) { st.pv = r; update(); } }
+      catch (e) { if (my === st.seq && !st.done) { st.pv = { err: e.message, warn: [] }; update(); } }
+    }, delay);
   }
   function draw() {
-    const p = pos(), c = calc(), buy = st.side === 'buy';
+    const p = pos(), buy = st.side === 'buy', ot = st.otype, waits = ot !== 'market';
+    if (!types().includes(ot)) st.otype = 'market';
     sh.title(`${buy ? 'Buy' : 'Sell'} ${sym}`);
-    const unitOpts = buy ? [['usd', 'Dollars'], ['qty', isCrypto(sym) ? sym : 'Shares']] : [['usd', 'Dollars'], ['qty', isCrypto(sym) ? sym : 'Shares'], ['pct', '% of position']];
+    const unitOpts = ot === 'trail' ? [['pct', '% of position'], ['qty', crypto ? sym : 'Shares']] : buy ? [['usd', 'Dollars'], ['qty', crypto ? sym : 'Shares']] : [['usd', 'Dollars'], ['qty', crypto ? sym : 'Shares'], ['pct', '% of position']];
+    if (!unitOpts.some(u => u[0] === st.unit)) st.unit = unitOpts[0][0];
     const quick = buy
       ? [[0.1, '10%'], [0.25, '25%'], [0.5, '50%'], [1, 'Max']].map(([f, l]) => `<button class="chip" data-q="${f}">${l}</button>`).join('')
       : [[25, '25%'], [50, '50%'], [75, '75%'], [100, 'All']].map(([f, l]) => `<button class="chip" data-qp="${f}">${l}</button>`).join('');
+    const cur = live(sym), dpx = v => String(+(v).toFixed(v < 1 ? 4 : 2));
+    const chips = (field, list) => `<div class="chips mt8" style="margin:8px 0 0;padding:0">${list.map(x => `<button class="chip" data-pf="${field}" data-pp="${x}">${x > 0 ? '+' : ''}${x}%</button>`).join('')}</div>`;
+    const priceField = (field, label, val, list) => `<label class="field"><span>${label}</span><div class="money-in has-pre"><span class="pre">$</span><input id="tk-${field}" inputmode="decimal" value="${h(val)}" placeholder="${dpx(cur * (1 + list[1] / 100))}"></div></label>${chips(field, list)}`;
+    const dn = [-1, -2, -5, -10], upL = [1, 2, 5, 10];
+    let prices_ = '';
+    if (ot === 'limit') prices_ = priceField('price', buy ? 'Limit price: buy at this price or lower' : 'Limit price: sell at this price or higher', st.price, buy ? dn : upL);
+    if (ot === 'stop') prices_ = priceField('price', buy ? 'Stop price: buy at market once it rises here' : 'Stop price: sell at market once it falls here', st.price, buy ? upL : dn);
+    if (ot === 'stoplimit') prices_ = priceField('price', buy ? 'Stop price: wakes up when it rises here' : 'Stop price: wakes up when it falls here', st.price, buy ? upL : dn) + priceField('lpx', buy ? 'Then a limit price: pay no more than' : 'Then a limit price: take no less than', st.lpx, buy ? [1, 2, 3, 5] : [-1, -2, -3, -5]);
+    if (ot === 'trail') prices_ = `<label class="field"><span>Trail by</span><div class="money-in has-post"><input id="tk-trail" inputmode="decimal" value="${h(st.trail)}" placeholder="5"><span class="post">% below the high</span></div></label><div class="chips mt8" style="margin:8px 0 0;padding:0">${[2, 5, 8, 10, 15].map(x => `<button class="chip" data-tr="${x}">${x}%</button>`).join('')}</div>`;
+    const sessOpts = [['regular', 'Regular hours'], ['extended', 'Extended hours']].concat(App.S.rules?.overnight ? [['24h', '24 hours']] : []);
+    const opts = waits && ot !== 'trail' ? `<div class="field"><span>Good for</span>${seg('tkt', [['day', crypto ? '24 hours' : 'Today only'], ['gtc', `Until cancelled${real && App.S.rules?.gtcDays ? ` (${App.S.rules.gtcDays} days)` : ''}`]], st.tif)}</div>${!crypto && ot === 'limit' && real ? `<div class="field"><span>Trading session</span>${seg('tks2', sessOpts, st.sess)}</div>` : ''}` : '';
     sh.html(`
+      ${liveMoney() ? `<div class="money-banner">${icon('lock')}<div><b>Real money</b> · Your live Alpaca account. Orders are final once they fill.</div></div>` : broker ? `<div class="callout mt8">${icon('link')}<div>Goes to your Alpaca paper account, Alpaca's real trading engine with fake money.</div></div>` : ''}
       ${p ? `<div class="side-toggle ${st.side}"><i class="thumb"></i><button class="b" data-side="buy">Buy</button><button class="s" data-side="sell">Sell</button></div>` : ''}
-      <div class="between mt12"><div class="row">${logo(sym, 'logo-sm')}<div><div class="t-head">${h(nameOf(sym))}</div><div class="t-foot">1 ${isCrypto(sym) ? sym : 'share'} = <span data-px="${h(sym)}">${price(live(sym))}</span></div></div></div><span class="pill ${cls(chgOf(sym) || 0)}" data-chg="${h(sym)}">${pct(chgOf(sym))}</span></div>
+      <div class="between mt12"><div class="row">${logo(sym, 'logo-sm')}<div><div class="t-head">${h(nameOf(sym))}</div><div class="t-foot">Last <span data-px="${h(sym)}">${price(cur)}</span> · <span id="tk-sess">${crypto ? 'Trades 24/7' : h(SESS_SHORT[App.S.rules?.session] || '')}</span></div></div></div><span class="pill ${cls(chgOf(sym) || 0)}" data-chg="${h(sym)}">${pct(chgOf(sym))}</span></div>
+      <div id="tk-quote"></div>
+      <div class="otypes" role="tablist">${types().map(t => `<button class="${t === ot ? 'on' : ''}" data-ot="${t}">${OT_CHIP[t]}</button>`).join('')}</div>
       <div class="amount-box">
         <div class="money-in" style="justify-content:center">${st.unit === 'usd' ? '<span class="pre" style="position:static;font-size:40px;font-weight:750;margin-right:2px">$</span>' : ''}<input class="amount-big" id="tk-amt" inputmode="decimal" placeholder="0" value="${h(st.amount)}" aria-label="Amount" style="width:calc(${Math.max(1, (st.amount || '0').length)}ch + 6px);max-width:78%">${st.unit !== 'usd' ? `<span class="post" style="position:static;font-size:20px;margin-left:6px">${st.unit === 'pct' ? '%' : h(unitShort(sym))}</span>` : ''}</div>
         <div class="eq" id="tk-eq"></div>
         <div class="mt8">${seg('tku', unitOpts, st.unit)}</div>
       </div>
       <div class="quick-amts">${quick}</div>
-      <div class="t-foot center mt8" id="tk-avail">${buy ? `${money(App.S.wallet.cash)} buying power` : p ? `You own ${qtyStr(sym, p.qty)} ${h(unitShort(sym))} (${money(p.qty * live(sym))})` : ''}</div>
-      ${marketNote(sym)}
-      <div class="est" id="tk-est"></div>
-      ${buy ? `<button class="adv-toggle ${st.adv ? 'open' : ''}" id="tk-advt"><span>Stop loss and take profit</span>${icon('down')}</button>
+      <div class="t-foot center mt8" id="tk-avail"></div>
+      ${prices_}${opts}
+      <div id="tk-warn"></div>
+      <div class="est" id="tk-est"><div class="kv"><span class="k">Estimate</span><span class="v mu">Enter an amount</span></div></div>
+      ${buy && (ot === 'market' || ot === 'limit') ? `<button class="adv-toggle ${st.adv ? 'open' : ''}" id="tk-advt"><span>Stop loss and take profit</span>${icon('down')}</button>
       <div class="adv ${st.adv ? 'open' : ''}" id="tk-adv"><div>
-        <p class="t-foot" style="margin:0 2px 8px">Set them now and they're attached the moment you buy. They sell automatically, even when the app is closed.</p>
-        ${seg('tks', [['pct', 'Stop loss %'], ['trail', 'Trailing stop']], st.slType)}
+        <p class="t-foot" style="margin:0 2px 8px">Attached the moment your buy fills. They sell automatically, even when the app is closed${real && !crypto ? ', during regular market hours' : ''}.</p>
+        ${broker ? '' : seg('tks', [['pct', 'Stop loss %'], ['trail', 'Trailing stop']], st.slType)}
         <div class="two-in mt12"><label class="field" style="margin:0"><span>${st.slType === 'trail' ? 'Trail by' : 'Stop loss'}</span><div class="money-in has-post"><input id="tk-sl" inputmode="decimal" placeholder="Off" value="${h(st.slType === 'trail' ? st.trail : st.sl)}"><span class="post">% ${st.slType === 'trail' ? 'off peak' : 'below'}</span></div></label>
         <label class="field" style="margin:0"><span>Take profit</span><div class="money-in has-post"><input id="tk-tp" inputmode="decimal" placeholder="Off" value="${h(st.tp)}"><span class="post">% above</span></div></label></div>
         <div class="t-foot mt8" id="tk-br"></div></div></div>` : ''}
-      ${feature('journal') ? `<label class="field"><span>Note for your journal (optional)</span><input id="tk-note" placeholder="Why are you making this trade?" value="${h(st.note)}" maxlength="500"></label>` : ''}
+      ${feature('journal') && !broker ? `<label class="field"><span>Note for your journal (optional)</span><input id="tk-note" placeholder="Why are you making this trade?" value="${h(st.note)}" maxlength="500"></label>` : ''}
       <p class="t-err dn center mt8" id="tk-err" style="font-weight:600;min-height:20px;margin-bottom:0"></p>`);
-    const cs = SET().confirmStyle;
-    sh.foot(`<button class="btn ${buy ? 'btn-buy' : 'btn-sell'} btn-lg btn-block" id="tk-go">${cs === 'hold' ? 'Hold to ' : ''}${buy ? 'buy' : 'sell'}${cs === 'hold' ? '' : ' ' + sym}</button>`);
-    if (cs !== 'hold') $('#tk-go', sh.footEl).textContent = (buy ? 'Buy ' : 'Sell ') + sym;
-    holdButton($('#tk-go', sh.footEl), submit);
+    const cs = liveMoney() ? 'hold' : SET().confirmStyle;
+    sh.foot(`<button class="btn ${buy ? 'btn-buy' : 'btn-sell'} btn-lg btn-block" id="tk-go">${buttonLabel(cs)}</button>`);
+    holdButton($('#tk-go', sh.footEl), submit, liveMoney() ? 1100 : 650, cs);
     raf(() => placeThumbs(sh.body));
-    bind(); update();
+    bind(); update(); preview(20);
+  }
+  function buttonLabel(cs) {
+    const buy = st.side === 'buy', verb = buy ? 'buy' : 'sell', pv = st.pv;
+    if (st.otype !== 'market') return `${cs === 'hold' ? 'Hold to place' : 'Place'} ${OT_LABEL[st.otype].toLowerCase()} order`;
+    if (pv?.queued) return `${cs === 'hold' ? 'Hold to queue' : 'Queue'} ${verb} for the open`;
+    return cs === 'hold' ? `Hold to ${verb}${liveMoney() ? ' with real money' : ''}` : `${buy ? 'Buy' : 'Sell'} ${sym}`;
   }
   function update() {
     if (st.done || !$('#tk-err', sh.body)) return;
-    const c = calc(), buy = st.side === 'buy', a = num(st.amount);
+    const buy = st.side === 'buy', a = num(st.amount), pv = st.pv, p = pos();
+    $('#tk-quote', sh.body).innerHTML = pv?.quote ? quoteStrip(liveQuote(sym, pv.quote)) : '';
+    const sess = $('#tk-sess', sh.body); if (sess && pv?.sessionLabel && !crypto) sess.textContent = SESS_SHORT[pv.session] || pv.sessionLabel;
+    const av = $('#tk-avail', sh.body);
+    if (av) av.innerHTML = buy ? `<span class="priv">${money(pv?.bp ?? App.S.account?.bp ?? App.S.wallet.cash)}</span> buying power${pv?.account?.marginOn && !crypto ? ' with margin' : ''}` : p ? `You own ${qtyStr(sym, p.qty)} ${h(unitShort(sym))}${pv?.held ? ` · ${qtyStr(sym, pv.held)} held for orders` : ''}` : '';
     const eq = $('#tk-eq', sh.body);
-    if (eq) eq.textContent = !(a > 0) ? (buy ? 'Enter an amount to buy' : 'Enter an amount to sell') : st.unit === 'usd' ? `≈ ${qtyStr(sym, c.qty)} ${unitShort(sym)}` : `≈ ${money(c.total)}`;
+    if (eq) eq.textContent = !(a > 0) ? (buy ? 'Enter an amount to buy' : 'Enter an amount to sell') : pv?.qty ? (st.unit === 'usd' ? `≈ ${qtyStr(sym, pv.qty)} ${unitShort(sym)}` : `≈ ${money(pv.notional)}`) : pv?.err ? '' : '…';
     const est = $('#tk-est', sh.body);
-    if (est) est.innerHTML = `<div class="kv"><span class="k">Price${SET().slippage ? ' (with slippage)' : ''}</span><span class="v">${price(c.px)}</span></div>
-      <div class="kv"><span class="k">${isCrypto(sym) ? 'Amount' : 'Shares'}</span><span class="v">${qtyStr(sym, c.qty)}</span></div>
-      ${c.fee ? `<div class="kv"><span class="k">Fee</span><span class="v">${money(c.fee)}</span></div>` : ''}
-      <div class="kv"><span class="k">${buy ? 'Total cost' : "You'll get"}</span><span class="v">${money(buy ? c.total + c.fee : c.total - c.fee)}</span></div>
-      ${c.pnl != null && c.qty > 0 ? `<div class="kv"><span class="k">Profit / loss on this sale</span><span class="v ${cls(c.pnl)}">${money(c.pnl, { sign: true })}</span></div>` : ''}
-      <div class="kv"><span class="k">Cash after</span><span class="v priv">${money(c.cashAfter)}</span></div>`;
+    if (est) {
+      if (!(a > 0) || !pv || pv.qty == null) est.innerHTML = `<div class="kv"><span class="k">Estimate</span><span class="v mu">${!(a > 0) ? 'Enter an amount' : pv?.err ? 'Fix the issue below' : 'Working it out…'}</span></div>`;
+      else {
+        const ot = st.otype, pxLabel = ot === 'market' ? (pv.queued ? 'Price now (fills at the open)' : buy ? (pv.via === 'book' ? 'Average fill from the order book' : 'Fills at about the ask') : (pv.via === 'book' ? 'Average fill from the order book' : 'Fills at about the bid')) : ot === 'stop' ? 'If it triggers, fills near' : ot === 'trail' ? 'If it fired now, near' : 'Fills at your limit or better';
+        est.innerHTML = `<div class="kv"><span class="k">${pxLabel}</span><span class="v">${price(pv.px)}</span></div>
+          <div class="kv"><span class="k">${crypto ? 'Amount' : 'Shares'}${pv.whole ? ' (whole shares)' : ''}</span><span class="v">${qtyStr(sym, pv.qty)}</span></div>
+          <div class="kv"><span class="k">${buy ? 'Order value' : 'Sale value'}</span><span class="v">${money(pv.notional)}</span></div>
+          ${feeRows(pv.fees?.lines, { all: true })}
+          <div class="kv total"><span class="k">${buy ? 'Estimated total' : "You'll receive about"}</span><span class="v">${money(pv.total)}</span></div>
+          ${pv.pnl != null ? `<div class="kv"><span class="k">Profit / loss on this sale</span><span class="v ${cls(pv.pnl)}">${money(pv.pnl, { sign: true })}</span></div>` : ''}
+          ${pv.tax && (pv.tax.short || pv.tax.long) ? `<div class="kv"><span class="k">Taxable gain</span><span class="v">${pv.tax.short ? `<span class="${cls(pv.tax.short)}">${money(pv.tax.short, { sign: true })}</span> short term` : ''}${pv.tax.short && pv.tax.long ? ' · ' : ''}${pv.tax.long ? `<span class="${cls(pv.tax.long)}">${money(pv.tax.long, { sign: true })}</span> long term` : ''}</span></div>` : ''}
+          ${pv.settle ? `<div class="kv"><span class="k">Cash settles</span><span class="v">${fmtDay(pv.settle)}${App.S.wallet.acct === 'cash' ? '' : ' · usable now'}</span></div>` : ''}
+          ${pv.borrow > 0 ? `<div class="kv"><span class="k">Borrowed on margin</span><span class="v dn">${money(pv.borrow)}</span></div>` : ''}
+          ${pv.cashAfter != null ? `<div class="kv"><span class="k">Cash after</span><span class="v priv ${pv.cashAfter < 0 ? 'dn' : ''}">${money(pv.cashAfter)}</span></div>` : ''}`;
+      }
+    }
+    const warns = [...(pv?.warn || [])]; if (pv?.tax?.washRisk) warns.push('Selling at a loss and buying again within 30 days is a wash sale: the loss is pushed into the new shares.');
+    $('#tk-warn', sh.body).innerHTML = warns.map((w, i) => `<div class="callout ${/real-money/.test(w) ? 'warn' : ''} mt12">${icon(i === 0 && pv?.queued ? 'clock' : 'info')}<div>${h(w)}</div></div>`).join('');
     const br = $('#tk-br', sh.body);
-    if (br) { const sl = num(st.slType === 'trail' ? st.trail : st.sl), tp = num(st.tp), px = c.px; br.textContent = [sl ? (st.slType === 'trail' ? `Trailing stop ${sl}% below the highest price` : `Stop loss at about ${price(px * (1 - sl / 100))}`) : '', tp ? `take profit at about ${price(px * (1 + tp / 100))}` : ''].filter(Boolean).join(', ') || 'Leave empty for none.'; }
-    $('#tk-err', sh.body).textContent = c.err;
-    const go = $('#tk-go', sh.footEl); if (go) go.disabled = !c.ok;
+    if (br) { const sl = num(st.slType === 'trail' ? st.trail : st.sl), tp = num(st.tp), px = pv?.px || live(sym); br.textContent = [sl ? (st.slType === 'trail' ? `Trailing stop ${sl}% below the highest price` : `Stop loss at about ${price(px * (1 - sl / 100))}`) : '', tp ? `take profit at about ${price(px * (1 + tp / 100))}` : ''].filter(Boolean).join(', ') || 'Leave empty for none.'; }
+    let err = pv?.err || '';
+    if (a > 0 && st.otype !== 'market' && st.otype !== 'trail' && !(num(st.price) > 0)) err = 'Enter the ' + (st.otype === 'limit' ? 'limit' : 'stop') + ' price';
+    if (a > 0 && st.otype === 'stoplimit' && !(num(st.lpx) > 0)) err = err || 'Enter the limit price';
+    if (a > 0 && st.otype === 'trail' && !(num(st.trail) > 0)) err = 'Enter how far to trail';
+    $('#tk-err', sh.body).textContent = a > 0 ? err : '';
+    const go = $('#tk-go', sh.footEl);
+    if (go) { go.disabled = !(a > 0) || !!err || !pv || pv.qty == null; const lab = $('.hold-label', go) || go; const cs = liveMoney() ? 'hold' : SET().confirmStyle; const t = buttonLabel(cs); if (lab.textContent !== t) lab.textContent = t; }
     const inp = $('#tk-amt', sh.body); if (inp) inp.style.width = `calc(${Math.max(1, (inp.value || '0').length)}ch + 6px)`;
   }
   function bind() {
     const b = sh.body;
     const inp = $('#tk-amt', b);
-    inp.addEventListener('input', () => { inp.value = inp.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1'); st.amount = inp.value; update(); });
+    inp.addEventListener('input', () => { inp.value = inp.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1'); st.amount = inp.value; update(); preview(); });
     if (!st.amount && !isTouch) setTimeout(() => inp.focus(), 380);
-    b.querySelectorAll('[data-side]').forEach(x => x.addEventListener('click', () => { if (st.side === x.dataset.side) return; st.side = x.dataset.side; if (st.side === 'buy' && st.unit === 'pct') st.unit = 'usd'; st.amount = ''; draw(); }));
+    b.querySelectorAll('[data-side]').forEach(x => x.addEventListener('click', () => { if (st.side === x.dataset.side) return; st.side = x.dataset.side; if (st.side === 'buy' && st.unit === 'pct') st.unit = 'usd'; st.amount = ''; st.pv = null; draw(); }));
+    b.querySelectorAll('[data-ot]').forEach(x => x.addEventListener('click', () => { if (st.otype === x.dataset.ot) return; st.otype = x.dataset.ot; st.price = ''; st.lpx = ''; if (st.otype === 'trail' && st.unit === 'usd') st.unit = 'pct'; if (st.otype !== 'market') st.tif = crypto ? 'gtc' : 'day'; st.pv = null; buzz(4); draw(); }));
     onSeg(b, 'tku', u => {
-      const c = calc(); st.unit = u;
-      if (num(st.amount) > 0) st.amount = u === 'usd' ? (Math.floor(c.total * 100) / 100).toString() : u === 'qty' ? String(+c.qty.toFixed(isCrypto(sym) ? 8 : 6)) : String(Math.min(100, +(c.qty / (pos()?.qty || 1) * 100).toFixed(2)));
+      const pv = st.pv; st.unit = u;
+      if (num(st.amount) > 0 && pv?.qty) st.amount = u === 'usd' ? (Math.floor(pv.notional * 100) / 100).toString() : u === 'qty' ? String(+pv.qty.toFixed(crypto ? 8 : 6)) : String(Math.min(100, +(pv.qty / (pos()?.qty || 1) * 100).toFixed(2)));
       draw();
     });
     onSeg(b, 'tks', v => { st.slType = v; draw(); });
-    b.querySelectorAll('[data-q]').forEach(x => x.addEventListener('click', () => { const f = +x.dataset.q, mx = maxBuyUsd(sym); const usd = f >= 1 ? mx : Math.floor(App.S.wallet.cash * f * 100) / 100; if (st.unit === 'usd') st.amount = String(usd); else st.unit = 'usd', st.amount = String(usd); draw(); }));
+    onSeg(b, 'tkt', v => { st.tif = v; preview(); });
+    onSeg(b, 'tks2', v => { st.sess = v; preview(); });
+    b.querySelectorAll('[data-q]').forEach(x => x.addEventListener('click', () => { const f = +x.dataset.q, bp = st.pv?.bp ?? App.S.account?.bp ?? App.S.wallet.cash; const usd = Math.floor(bp * (f >= 1 ? 0.999 : f) * 100) / 100; st.unit = 'usd'; st.amount = String(Math.max(0, usd)); draw(); }));
     b.querySelectorAll('[data-qp]').forEach(x => x.addEventListener('click', () => { st.unit = 'pct'; st.amount = x.dataset.qp; draw(); }));
+    for (const f of ['price', 'lpx', 'trail']) { const i = $('#tk-' + f, b); if (i) i.addEventListener('input', () => { st[f] = i.value.replace(/[^0-9.]/g, ''); update(); preview(); }); }
+    b.querySelectorAll('[data-pp]').forEach(x => x.addEventListener('click', () => { const f = x.dataset.pf, base = f === 'lpx' && num(st.price) > 0 ? num(st.price) : live(sym), v = base * (1 + +x.dataset.pp / 100); st[f] = String(+v.toFixed(v < 1 ? 4 : 2)); const i = $('#tk-' + f, b); if (i) i.value = st[f]; update(); preview(60); }));
+    b.querySelectorAll('[data-tr]').forEach(x => x.addEventListener('click', () => { st.trail = x.dataset.tr; $('#tk-trail', b).value = st.trail; update(); preview(60); }));
     const at = $('#tk-advt', b); if (at) at.addEventListener('click', () => { st.adv = !st.adv; at.classList.toggle('open', st.adv); $('#tk-adv', b).classList.toggle('open', st.adv); });
     const sl = $('#tk-sl', b); if (sl) sl.addEventListener('input', () => { if (st.slType === 'trail') st.trail = sl.value; else st.sl = sl.value; update(); });
     const tp = $('#tk-tp', b); if (tp) tp.addEventListener('input', () => { st.tp = tp.value; update(); });
     const nt = $('#tk-note', b); if (nt) nt.addEventListener('input', () => { st.note = nt.value; });
   }
-  sh.hook(() => update());
+  sh.hook(() => { if (st.done) return; if (num(st.amount) > 0 && Date.now() - pvAt > 2500) preview(0); const qe = $('#tk-quote', sh.body); if (qe && st.pv?.quote) qe.innerHTML = quoteStrip(liveQuote(sym, st.pv.quote)); });
   draw();
   async function submit() {
-    const c = calc(); if (!c.ok) return;
-    if (SET().confirmStyle === 'tap' && !(await confirmBox({ title: `${st.side === 'buy' ? 'Buy' : 'Sell'} ${sym}?`, msg: `${st.side === 'buy' ? 'Buy' : 'Sell'} ${qtyStr(sym, c.qty)} ${unitShort(sym)} for about ${money(c.total)} at the market price.`, ok: st.side === 'buy' ? 'Buy' : 'Sell', danger: st.side === 'sell' }))) return;
+    const pv = st.pv; if (!pv || pv.err) return;
+    const cs = liveMoney() ? 'hold' : SET().confirmStyle;
+    if (cs === 'tap' && !(await confirmBox({ title: `${st.side === 'buy' ? 'Buy' : 'Sell'} ${sym}?`, msg: `${OT_LABEL[st.otype]} order: ${st.side} ${qtyStr(sym, pv.qty)} ${unitShort(sym)} for about ${money(pv.total)}${pv.fees?.total ? ` including ${money(pv.fees.total)} in fees` : ''}.`, ok: st.side === 'buy' ? 'Buy' : 'Sell', danger: st.side === 'sell' }))) return;
     const go = $('#tk-go', sh.footEl); busy(go, true);
-    const body = { sym, side: st.side, mode: st.unit, amount: num(st.amount), note: st.note || undefined, kind: isCrypto(sym) ? 'crypto' : 'stock' };
-    if (st.side === 'buy') { body.sl = st.slType === 'trail' ? 0 : num(st.sl); body.tp = num(st.tp); body.trail = st.slType === 'trail' ? num(st.trail) : 0; }
+    const b = { ...body(), note: st.note || undefined };
+    if (st.side === 'buy' && (st.otype === 'market' || st.otype === 'limit')) { b.sl = st.slType === 'trail' ? 0 : num(st.sl); b.tp = num(st.tp); if (st.otype === 'market') b.trail = st.slType === 'trail' ? num(st.trail) : 0; }
+    if (liveMoney()) b.live = true;
     try {
-      const r = await post('trade', body);
+      const r = await post('trade', b);
       busy(go, false);
-      if (r.queued) { success({ queued: true }); } else success(r.fill, r.bracket || []);
+      if (r.fill) success(r.fill, r.bracket || []);
+      else if (r.queued) placed({ queued: true, opensAt: r.opensAt });
+      else if (r.broker) placed({ broker: true, status: r.status, env: r.env });
+      else placed({ order: r.order });
       loadState().catch(() => {});
     } catch (e) { busy(go, false); $('#tk-err', sh.body).textContent = e.message; buzz(30); }
   }
+  function placed(o) {
+    buzz(20); st.done = true; clearTimeout(pvTimer);
+    const pv = st.pv;
+    const what = `${st.side === 'buy' ? 'Buy' : 'Sell'} ${qtyStr(sym, pv?.qty || 0)} ${h(unitShort(sym))}${st.otype === 'limit' ? ` at ${price(num(st.price))} or better` : st.otype === 'stop' ? ` if it reaches ${price(num(st.price))}` : st.otype === 'stoplimit' ? ` at ${price(num(st.lpx))} once it reaches ${price(num(st.price))}` : st.otype === 'trail' ? `, trailing ${num(st.trail)}% below the high` : ''}`;
+    if (o.queued) { sh.title('Order queued'); sh.html(`<div class="success"><div class="check">${icon('clock')}</div><h3>Queued for the open</h3><p>${what} when the stock market opens${o.opensAt ? ' ' + new Date(o.opensAt).toLocaleString('en-US', { timeZone: ET_TZ, weekday: 'short', hour: 'numeric', minute: '2-digit' }) + ' ET' : ''}. Market orders fill at whatever the price is then, which can gap from tonight's price. You'll get a notification.</p></div>`); }
+    else if (o.broker) { sh.title('Sent to Alpaca'); sh.html(`<div class="success"><div class="check">${icon('check')}</div><h3>${o.status === 'filled' ? 'Filled' : 'Order sent'}</h3><p>${what}. Alpaca ${o.status === 'accepted' || o.status === 'new' ? 'accepted it' : 'says: ' + h(o.status)}. You'll get a notification when it fills${o.env === 'live' ? '. This is real money.' : ' on your paper account.'}</p></div>`); }
+    else { sh.title('Order placed'); sh.html(`<div class="success"><div class="check">${icon('target')}</div><h3>${OT_LABEL[st.otype]} order placed</h3><p>${what}. ${st.tif === 'day' ? (crypto ? 'It lasts 24 hours.' : 'It ends with today\'s session if it doesn\'t fill.') : `It stays open until it fills or you cancel it${App.S.rules?.gtcDays && isRealW() ? `, up to ${App.S.rules.gtcDays} days` : ''}.`}${st.side === 'buy' && isRealW() && st.otype !== 'trail' ? ' The money is held for it so it can always fill.' : ''}</p></div>`); }
+    sh.foot(`<div class="btns"><button class="btn btn-quiet btn-lg" data-act="go" data-to="orders">${icon('list')}Orders</button><button class="btn btn-primary btn-lg" data-act="back">Done</button></div>`);
+  }
   function success(f, bracket = []) {
-    buzz(20); st.done = true;
-    if (f.queued) {
-      sh.title('Order queued');
-      sh.html(`<div class="success"><div class="check">${icon('clock')}</div><h3>Queued for the open</h3><p>Your ${st.side} order for ${h(sym)} will fill when the stock market opens. You'll get a notification.</p></div>`);
-      sh.foot(`<button class="btn btn-primary btn-lg btn-block" data-act="back">Done</button>`); return;
-    }
+    buzz(20); st.done = true; clearTimeout(pvTimer);
     const buy = f.side === 'buy';
     sh.title(buy ? 'Bought' : 'Sold');
+    const tax = f.tax && (f.tax.short || f.tax.long || f.tax.wash) ? `<div class="kv"><span class="k">For taxes</span><span class="v">${[f.tax.short ? `${money(f.tax.short, { sign: true })} short term` : '', f.tax.long ? `${money(f.tax.long, { sign: true })} long term` : '', f.tax.wash ? `${money(f.tax.wash)} wash sale` : ''].filter(Boolean).join(' · ')}</span></div>` : '';
     sh.html(`<div class="success"><div class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
       <h3>${buy ? 'Bought' : 'Sold'} ${qtyStr(sym, f.qty)} ${h(unitShort(sym))}</h3>
-      <p>at ${price(f.price)} for ${money(f.qty * f.price)}${f.fee ? ` plus a ${money(f.fee)} fee` : ''}.</p>
-      ${f.pnl != null ? `<p style="font-weight:700;font-size:18px;margin-top:10px"><span class="${cls(f.pnl)}">${f.pnl >= 0 ? 'Profit' : 'Loss'}: ${money(f.pnl, { sign: true })} (${pct(f.pnlPct)})</span></p>` : ''}
-      ${bracket.length ? `<p class="t-foot" style="margin-top:12px">${bracket.length === 2 ? 'Stop loss and take profit are set.' : 'Your automatic order is set.'}</p>` : ''}
-      ${f.stale ? `<p class="t-foot">This used the last known price because live prices weren't coming in.</p>` : ''}</div>`);
+      <p>at ${price(f.price)} for ${money(f.qty * f.price)}${f.fee ? ` plus ${money(f.fee)} in fees` : ''}.</p>
+      ${f.pnl != null ? `<p style="font-weight:700;font-size:18px;margin-top:10px"><span class="${cls(f.pnl)}">${f.pnl >= 0 ? 'Profit' : 'Loss'}: ${money(f.pnl, { sign: true })} (${pct(f.pnlPct)})</span></p>` : ''}</div>
+      <div class="est">${f.bid ? `<div class="kv"><span class="k">Bid / ask when it filled</span><span class="v">${price(f.bid)} / ${price(f.ask)}</span></div>` : ''}${feeRows(f.fees)}${f.settle ? `<div class="kv"><span class="k">Cash settles</span><span class="v">${fmtDay(f.settle)}</span></div>` : ''}${f.borrow > 0 ? `<div class="kv"><span class="k">Borrowed on margin</span><span class="v dn">${money(f.borrow)}</span></div>` : ''}${tax}<div class="kv"><span class="k">Cash now</span><span class="v priv">${money(f.cash)}</span></div></div>
+      ${bracket.length ? `<p class="t-foot center" style="margin-top:12px">${bracket.length === 2 ? 'Stop loss and take profit are set.' : 'Your automatic order is set.'}</p>` : ''}
+      ${f.stale ? `<p class="t-foot center">This used the last known price because live prices weren't coming in.</p>` : ''}`);
     sh.foot(`<div class="btns">${buy && !bracket.length ? `<button class="btn btn-quiet btn-lg" id="sc-protect">${icon('shield')}Add stop loss</button>` : ''}<button class="btn btn-primary btn-lg" data-act="back">Done</button></div>`);
     const pr = $('#sc-protect', sh.footEl); if (pr) pr.addEventListener('click', async () => { sh.close(); await sleep(300); orderSheet(sym, 'stop'); });
     if (f.pnl > 0) celebrate();
@@ -2394,7 +2527,7 @@ function tradeSheet(sym, side = 'buy', preset = {}) {
 
 // ---------- stop loss / take profit / trailing ----------
 ACT.orderNew = el => orderSheet(el.dataset.sym, el.dataset.kind);
-ACT.orderEdit = el => { const o = App.S.ord.find(x => x.id === +el.dataset.id); if (o) orderSheet(o.sym, o.kind === 'take' ? 'take' : 'stop', o); };
+ACT.orderEdit = el => { const o = App.S.ord.find(x => String(x.id) === el.dataset.id); if (o) orderSheet(o.sym, o.kind === 'take' ? 'take' : 'stop', o); };
 function orderSheet(sym, kind = 'stop', existing = null) {
   const p = posOf(sym); if (!p) return toast(`Buy ${sym} first, then protect it with a stop loss`, { kind: 'info' });
   const st = { kind, mode: existing?.kind === 'trail' ? 'trail' : 'px', val: existing ? (existing.kind === 'trail' ? String(existing.trail) : String(+existing.price.toFixed(existing.price < 1 ? 6 : 2))) : '', pct: existing?.pct || 100 };
@@ -2411,7 +2544,7 @@ function orderSheet(sym, kind = 'stop', existing = null) {
     const now = live(sym);
     if (existing && existing.kind === 'trail') st.mode = 'trail';
     sh.html(`<div class="row">${logo(sym, 'logo-sm')}<div class="grow"><div class="t-head">${h(sym)} · you own ${qtyStr(sym, p.qty)}</div><div class="t-foot">Now <span data-px="${h(sym)}">${price(now)}</span> · cost ${price(p.avg)}</div></div></div>
-      <p class="t-foot" style="margin:12px 2px">${kind === 'stop' ? 'Sells automatically if the price drops to your level. It runs on the server, so it works even when your phone is off.' : 'Sells automatically when the price rises to your target, locking in the profit.'}</p>
+      <p class="t-foot" style="margin:12px 2px">${kind === 'stop' ? 'Sells at market if the price drops to your level. It runs on the server, so it works even when your phone is off.' : 'Sells when the bid rises to your target, locking in the profit.'}${isRealW() && !isCrypto(sym) ? ' Like a real broker, it only triggers during regular market hours, so a gap at the open can fill below your stop.' : ''}${isRealW() && App.S.rules?.gtcDays ? ` Good till canceled, up to ${App.S.rules.gtcDays} days.` : ''}</p>
       ${existing ? '' : `<div class="chips" style="flex-wrap:wrap;overflow:visible;margin:0;padding:0">${modes().map(([m, l]) => `<button class="chip ${st.mode === m ? 'on' : ''}" data-m="${m}">${l}</button>`).join('')}</div>`}
       <label class="field"><span>${st.mode === 'trail' ? 'Distance from the highest price' : st.mode === 'px' ? 'Trigger price' : st.mode === 'usd' ? (kind === 'stop' ? 'Most you want to lose' : 'Profit to lock in') : 'Percent'}</span>
         <div class="money-in ${st.mode === 'px' || st.mode === 'usd' ? 'has-pre' : 'has-post'}">${st.mode === 'px' || st.mode === 'usd' ? '<span class="pre">$</span>' : ''}<input id="os-v" inputmode="decimal" value="${h(st.val)}" placeholder="${st.mode === 'px' ? (+(now * (kind === 'stop' ? 0.95 : 1.1)).toFixed(now < 1 ? 6 : 2)) : st.mode === 'usd' ? '100' : st.mode === 'trail' ? '5' : kind === 'stop' ? '5' : '10'}">${st.mode === 'px' || st.mode === 'usd' ? '' : '<span class="post">%</span>'}</div></label>
@@ -2452,65 +2585,9 @@ function orderSheet(sym, kind = 'stop', existing = null) {
   draw();
 }
 
-// ---------- limit and stop orders ----------
+// ---------- limit and stop orders now live in the trade ticket ----------
 ACT.limitNew = el => limitSheet(el.dataset.sym);
-function limitSheet(sym) {
-  const p = posOf(sym), now = live(sym); if (!now) return toast('No live price yet', { kind: 'err' });
-  const st = { side: 'buy', type: 'limit', price: '', amount: '', units: 'usd', exp: 'gtc', sl: '', tp: '' };
-  const sh = sheet({ title: 'Limit or stop order' });
-  function desc() {
-    const pr = num(st.price), cur = live(sym); if (!(pr > 0)) return '';
-    const away = (pr / cur - 1) * 100, amt = num(st.amount);
-    const what = st.side === 'buy' ? (st.units === 'qty' ? `${amt || '…'} ${unitShort(sym)}` : money(amt || 0)) : (st.units === 'qty' ? `${amt || '…'} ${unitShort(sym)}` : `${amt || '…'}% of your ${sym}`);
-    const cond = (st.side === 'buy') === (st.type === 'limit') ? `drops to ${price(pr)} or lower` : `rises to ${price(pr)} or higher`;
-    return `${st.side === 'buy' ? 'Buys' : 'Sells'} ${what} if ${sym} ${cond}, which is ${pct(away)} from now. ${st.exp === 'day' ? 'Expires at the end of the day.' : 'Stays open until it fills or you cancel it.'}`;
-  }
-  function err() {
-    const pr = num(st.price), cur = live(sym);
-    if (!(pr > 0)) return 'Enter a trigger price'; if (!(num(st.amount) > 0)) return 'Enter an amount';
-    if (st.type === 'limit' && st.side === 'buy' && pr >= cur) return 'A buy limit has to be below the current price. Use a stop order to buy higher.';
-    if (st.type === 'limit' && st.side === 'sell' && pr <= cur) return 'A sell limit has to be above the current price';
-    if (st.type === 'stop' && st.side === 'buy' && pr <= cur) return 'A buy stop has to be above the current price';
-    if (st.type === 'stop' && st.side === 'sell' && pr >= cur) return 'A sell stop has to be below the current price';
-    return '';
-  }
-  function draw() {
-    const cur = live(sym), sideOpts = p ? [['buy', 'Buy'], ['sell', 'Sell']] : [['buy', 'Buy']];
-    const chips = (st.side === 'buy') === (st.type === 'limit') ? [-1, -3, -5, -10] : [1, 3, 5, 10];
-    sh.html(`<div class="row">${logo(sym, 'logo-sm')}<div class="grow"><div class="t-head">${h(sym)}</div><div class="t-foot">Now <span data-px="${h(sym)}">${price(cur)}</span></div></div></div>
-      ${p ? `<div class="mt12">${seg('ls', sideOpts, st.side)}</div>` : ''}
-      <div class="mt12">${seg('lt', [['limit', st.side === 'buy' ? 'Buy the dip (limit)' : 'Sell higher (limit)'], ['stop', st.side === 'buy' ? 'Buy a breakout (stop)' : 'Sell lower (stop)']], st.type)}</div>
-      <label class="field"><span>Trigger price</span><div class="money-in has-pre"><span class="pre">$</span><input id="lo-p" inputmode="decimal" value="${h(st.price)}" placeholder="${(+(cur * (1 + chips[1] / 100)).toFixed(cur < 1 ? 6 : 2))}"></div></label>
-      <div class="chips mt8" style="margin:8px 0 0;padding:0">${chips.map(x => `<button class="chip" data-pp="${x}">${x > 0 ? '+' : ''}${x}%</button>`).join('')}</div>
-      <label class="field"><span>Amount</span><div class="money-in ${st.units === 'usd' ? 'has-pre' : 'has-post'}">${st.units === 'usd' ? '<span class="pre">$</span>' : ''}<input id="lo-a" inputmode="decimal" value="${h(st.amount)}" placeholder="${st.side === 'buy' ? '500' : '100'}">${st.units !== 'usd' ? `<span class="post">${st.units === 'pct' ? '%' : h(unitShort(sym))}</span>` : ''}</div></label>
-      <div class="mt8">${seg('lu', st.side === 'buy' ? [['usd', 'Dollars'], ['qty', isCrypto(sym) ? sym : 'Shares']] : [['pct', '% of position'], ['qty', isCrypto(sym) ? sym : 'Shares']], st.units)}</div>
-      <div class="field"><span>How long it lasts</span>${seg('le', [['gtc', 'Until cancelled'], ['day', isCrypto(sym) ? '24 hours' : 'Today only']], st.exp)}</div>
-      ${st.side === 'buy' ? `<div class="two-in mt12"><label class="field" style="margin:0"><span>Then a stop loss</span><div class="money-in has-post"><input id="lo-sl" inputmode="decimal" placeholder="Off" value="${h(st.sl)}"><span class="post">% below</span></div></label><label class="field" style="margin:0"><span>And take profit</span><div class="money-in has-post"><input id="lo-tp" inputmode="decimal" placeholder="Off" value="${h(st.tp)}"><span class="post">% above</span></div></label></div>` : ''}
-      <div class="callout mt16" id="lo-d">${icon('info')}<div></div></div>
-      <p class="dn center mt8" id="lo-e" style="font-weight:600;min-height:20px;margin-bottom:0"></p>`);
-    sh.foot(`<button class="btn btn-primary btn-lg btn-block" id="lo-go">Place order</button>`);
-    raf(() => placeThumbs(sh.body));
-    onSeg(sh.body, 'ls', v => { st.side = v; st.units = v === 'buy' ? 'usd' : 'pct'; st.price = ''; draw(); });
-    onSeg(sh.body, 'lt', v => { st.type = v; st.price = ''; draw(); });
-    onSeg(sh.body, 'lu', v => { st.units = v; st.amount = ''; draw(); });
-    onSeg(sh.body, 'le', v => { st.exp = v; upd(); });
-    const pi = $('#lo-p', sh.body), ai = $('#lo-a', sh.body);
-    pi.addEventListener('input', () => { st.price = pi.value; upd(); }); ai.addEventListener('input', () => { st.amount = ai.value; upd(); });
-    const sl = $('#lo-sl', sh.body); if (sl) sl.addEventListener('input', () => { st.sl = sl.value; });
-    const tp = $('#lo-tp', sh.body); if (tp) tp.addEventListener('input', () => { st.tp = tp.value; });
-    sh.body.querySelectorAll('[data-pp]').forEach(b => b.addEventListener('click', () => { st.price = String(+(live(sym) * (1 + +b.dataset.pp / 100)).toFixed(live(sym) < 1 ? 6 : 2)); pi.value = st.price; upd(); }));
-    $('#lo-go', sh.footEl).addEventListener('click', async () => {
-      const e = err(); if (e) { $('#lo-e', sh.body).textContent = e; return; }
-      const go = $('#lo-go', sh.footEl); busy(go, true);
-      try { await post('limit', { sym, side: st.side, kind: st.type, price: num(st.price), amount: num(st.amount), units: st.units, expires: st.exp, sl: num(st.sl) || undefined, tp: num(st.tp) || undefined }); busy(go, false); toast('Order placed for ' + sym); sh.close(); reload(); }
-      catch (x) { busy(go, false); $('#lo-e', sh.body).textContent = x.message; }
-    });
-    upd();
-  }
-  function upd() { const d = $('#lo-d div', sh.body); if (d) { const t = desc(); d.textContent = t || 'Pick a trigger price and an amount.'; } $('#lo-e', sh.body).textContent = num(st.price) > 0 && num(st.amount) > 0 ? err() : ''; }
-  sh.hook(upd);
-  draw();
-}
+function limitSheet(sym, side = 'buy') { return tradeSheet(sym, side, { otype: 'limit' }); }
 
 // ---------- price alerts ----------
 ACT.alertNew = el => alertSheet(el.dataset.sym);
@@ -2593,14 +2670,17 @@ Live.hooks.add(() => {
 function orderCell(o) {
   const kindName = { stop: 'Stop loss', take: 'Take profit', trail: 'Trailing stop' }[o.kind] || o.kind;
   const trig = o.kind === 'trail' ? o.peak * (1 - o.trail / 100) : o.price;
-  const sub = o.kind === 'trail' ? `Sells ${o.pct >= 100 ? 'all' : o.pct + '%'} on a ${o.trail}% drop · now ${price(trig)}, peak ${price(o.peak)}` : `Sells ${o.pct >= 100 ? 'all' : o.pct + '%'} at ${price(o.price)}`;
+  const sub = (o.kind === 'trail' ? `Sells ${o.pct >= 100 ? 'all' : o.pct + '%'} on a ${o.trail}% drop · now ${price(trig)}, peak ${price(o.peak)}` : `Sells ${o.pct >= 100 ? 'all' : o.pct + '%'} at ${price(o.price)}`) + (o.expires ? ` · until ${fmtDate(o.expires)}` : '');
   return `<button class="cell" data-act="orderEdit" data-id="${o.id}"><div class="lead" style="color:${o.kind === 'take' ? 'var(--up)' : 'var(--dn)'}">${icon(o.kind === 'take' ? 'target' : o.kind === 'trail' ? 'trail' : 'shield')}</div><div class="main"><div class="title">${kindName} · ${h(o.sym)}</div><div class="sub">${sub} · <span data-away></span></div>${distHtml(o.sym, trig, o.kind === 'take' ? 'up' : 'dn')}</div>${icon('right', 'chev')}</button>`;
 }
 function limCell(l) {
-  const name = l.kind === 'moo' ? 'Queued' : l.kind === 'stop' ? (l.side === 'buy' ? 'Buy stop' : 'Sell stop') : (l.side === 'buy' ? 'Limit buy' : 'Limit sell');
-  const amt = l.side === 'buy' ? (l.units === 'qty' ? `${qtyStr(l.sym, l.amt)} ${unitShort(l.sym)}` : money(l.amt)) : (l.units === 'qty' ? `${qtyStr(l.sym, l.amt)} ${unitShort(l.sym)}` : `${l.amt}%`);
-  const cond = l.kind === 'moo' ? 'when the market opens' : ((l.side === 'buy') === (l.kind === 'limit') ? `at ${price(l.price)} or lower` : `at ${price(l.price)} or higher`);
-  return `<button class="cell" data-act="limDel" data-id="${l.id}"><div class="lead" style="color:var(--ac)">${icon(l.kind === 'moo' ? 'clock' : 'target')}</div><div class="main"><div class="title">${name} · ${h(l.sym)}</div><div class="sub">${l.side === 'buy' ? 'Buys' : 'Sells'} ${amt} ${cond}${l.expires ? ' · ends ' + fmtDT(l.expires) : ''}${l.kind !== 'moo' ? ' · <span data-away></span>' : ''}${l.sl || l.tp ? ` · then ${[l.sl ? 'SL ' + l.sl + '%' : '', l.tp ? 'TP ' + l.tp + '%' : ''].filter(Boolean).join(' / ')}` : ''}</div>${l.kind !== 'moo' ? distHtml(l.sym, l.price, l.side === 'buy' ? 'dn' : 'up') : ''}</div>${icon('x', 'chev')}</button>`;
+  const name = l.kind === 'moo' ? (l.broker ? 'Market order' : 'Queued for the open') : l.kind === 'trail' ? 'Trailing stop' : l.kind === 'stoplimit' ? (l.trig ? 'Stop limit (triggered)' : (l.side === 'buy' ? 'Buy stop limit' : 'Sell stop limit')) : l.kind === 'stop' ? (l.side === 'buy' ? 'Buy stop' : 'Sell stop') : (l.side === 'buy' ? 'Limit buy' : 'Limit sell');
+  const amt = l.side === 'buy' ? (l.units === 'qty' ? `${qtyStr(l.sym, l.amt)} ${unitShort(l.sym)}` : money(l.amt)) : (l.units === 'qty' ? `${qtyStr(l.sym, l.amt)} ${unitShort(l.sym)}` : l.units === 'usd' ? money(l.amt) : `${l.amt}%`);
+  const trig = l.kind === 'stoplimit' && l.trig ? l.lpx : l.kind === 'trail' ? l.stop : l.price;
+  const cond = l.kind === 'moo' ? 'when the market opens' : l.kind === 'trail' ? `${l.trail}% below the high${l.stop ? ', now ' + price(l.stop) : ''}` : l.kind === 'stoplimit' ? `at ${price(l.lpx)} ${l.side === 'buy' ? 'or lower' : 'or higher'} once it ${l.side === 'buy' ? 'rises' : 'falls'} to ${price(l.price)}` : ((l.side === 'buy') === (l.kind === 'limit') ? `at ${price(l.price)} or lower` : `at ${price(l.price)} or higher`);
+  const tags = [l.tif === 'day' && l.kind !== 'moo' ? 'Day' : '', l.sess === 'extended' ? 'Extended hours' : l.sess === '24h' ? '24 hours' : '', l.broker ? 'Alpaca' : ''].filter(Boolean);
+  const move = l.kind !== 'moo' && trig;
+  return `<button class="cell" data-act="limDel" data-id="${h(l.id)}"><div class="lead" style="color:var(--ac)">${icon(l.kind === 'moo' ? 'clock' : l.kind === 'trail' ? 'trail' : 'target')}</div><div class="main"><div class="title">${name} · ${h(l.sym)}</div><div class="sub">${l.side === 'buy' ? 'Buys' : 'Sells'} ${amt} ${cond}${l.expires ? (l.tif === 'day' ? ' · ends ' + (isToday(l.expires) ? fmtTime(l.expires) : fmtDT(l.expires)) : ' · until ' + fmtDate(l.expires)) : ''}${move ? ' · <span data-away></span>' : ''}${l.sl || l.tp ? ` · then ${[l.sl ? 'SL ' + l.sl + '%' : '', l.tp ? 'TP ' + l.tp + '%' : ''].filter(Boolean).join(' / ')}` : ''}${l.why === 'dividend reinvestment' ? ' · dividend reinvestment' : ''}</div>${tags.length ? `<div class="row mt8" style="gap:5px">${tags.map(t => `<span class="tag">${h(t)}</span>`).join('')}</div>` : ''}${move ? distHtml(l.sym, trig, l.side === 'buy' ? 'dn' : 'up') : ''}</div>${icon('x', 'chev')}</button>`;
 }
 function alertCell(a) {
   const t = a.kind === 'daymove' ? `${h(a.sym)} moves ${a.pct}% in a day` : `${h(a.sym)} ${a.dir === 'above' ? 'rises to' : 'falls to'} ${price(a.price)}`;
@@ -2615,35 +2695,46 @@ ACT.alertOpts = el => {
   return s;
 };
 function tradeCell(t, o = {}) {
-  const map = { buy: ['Bought', 'arrowUp', 'buy'], sell: ['Sold', 'arrowDn', 'sell'], div: ['Dividend', 'gift', 'div'], int: ['Interest', 'coin', 'int'], cash: [t.price >= 0 ? (t.why === 'transfer in' ? 'Transfer in' : 'Deposit') : (t.why === 'transfer out' ? 'Transfer out' : 'Withdrawal'), 'dollar', 'cash'] };
+  const map = { buy: ['Bought', 'arrowUp', 'buy'], sell: ['Sold', 'arrowDn', 'sell'], div: ['Dividend', 'gift', 'div'], int: [t.price < 0 ? 'Margin interest' : 'Interest', 'coin', t.price < 0 ? 'sell' : 'int'], split: ['Stock split', 'layers', 'cash'], fee: [t.why || 'Fee', 'coin', 'sell'], cash: [t.price >= 0 ? (t.why === 'transfer in' ? 'Transfer in' : 'Deposit') : (t.why === 'transfer out' ? 'Transfer out' : 'Withdrawal'), 'dollar', 'cash'] };
   const [verb, ic, k] = map[t.side] || ['Trade', 'swap', 'cash'];
-  const total = t.side === 'cash' || t.side === 'int' ? t.price : t.qty * t.price;
-  const why = t.why && t.why !== 'manual' && t.side !== 'cash' && t.side !== 'div' && t.side !== 'int' ? `<span class="tag ${t.why.includes('stop') ? 'dn' : t.why.includes('profit') ? 'up' : 'ac'}">${h(t.why)}</span> ` : '';
-  const sub = t.side === 'buy' || t.side === 'sell' ? `${qtyStr(t.sym, t.qty)} ${unitShort(t.sym)} at ${price(t.price)}` : t.side === 'div' ? `${price(t.price)} a share on ${qtyStr(t.sym, t.qty)}` : ({ 'balance set': 'Cash balance set by you', deposit: 'Added to buying power', withdrawal: 'Taken out of buying power', 'transfer in': 'From another wallet', 'transfer out': 'To another wallet', interest: 'Interest on your cash' }[t.why] || t.why || '');
-  return `<button class="cell" data-act="tradeOpen" data-id="${t.id}"><div class="act-ic ${k}">${icon(ic)}</div><div class="main"><div class="title">${verb}${t.sym ? ' ' + h(t.sym) : ''}</div><div class="sub">${why}${h(sub)}${o.time !== false ? ' · ' + (o.day ? fmtTime(t.ts) : fmtDT(t.ts)) : ''}</div>${t.note && feature('journal') ? `<div class="note-line">${icon('note')}<span class="ellip">${h(t.note)}</span></div>` : ''}</div><div class="trail col" style="align-items:flex-end;gap:2px"><span class="val n priv" style="font-weight:650">${t.side === 'sell' || t.side === 'div' || t.side === 'int' || (t.side === 'cash' && t.price > 0) ? '+' : t.side === 'buy' || t.side === 'cash' ? '−' : ''}${money(Math.abs(total))}</span>${t.pnl != null ? `<span class="n ${cls(t.pnl)}" style="font-size:13px;font-weight:650">${money(t.pnl, { sign: true })}</span>` : ''}</div></button>`;
+  const total = t.side === 'cash' || t.side === 'int' || t.side === 'fee' ? t.price : t.side === 'split' ? 0 : t.qty * t.price;
+  const why = t.why && t.why !== 'manual' && t.why !== 'broker' && !['cash', 'div', 'int', 'split', 'fee'].includes(t.side) ? `<span class="tag ${t.why.includes('stop') ? 'dn' : t.why.includes('profit') ? 'up' : 'ac'}">${h(t.why)}</span> ` : '';
+  const sub = t.side === 'buy' || t.side === 'sell' ? `${qtyStr(t.sym, t.qty)} ${unitShort(t.sym)} at ${price(t.price)}${t.otype && t.otype !== 'market' ? ' · ' + (OT_LABEL[t.otype] || t.otype).toLowerCase() : ''}${t.fee ? ' · ' + money(t.fee) + ' fees' : ''}` : t.side === 'div' ? `${price(t.price)} a share on ${qtyStr(t.sym, t.qty)}` : t.side === 'split' ? `${h(t.why)} · now ${qtyStr(t.sym, t.qty)} shares` : ({ 'balance set': 'Cash balance set by you', deposit: 'Bank deposit', 'instant deposit': 'Instant part of a bank deposit', 'deposit cancelled': 'Cancelled deposit', withdrawal: 'Sent to your bank', 'transfer in': 'From another wallet', 'transfer out': 'To another wallet', interest: 'Interest on your cash', 'margin interest': 'On what you borrowed', 'Robinhood Gold': 'Monthly subscription' }[t.why] || t.why || '');
+  return `<button class="cell" data-act="tradeOpen" data-id="${t.id}"><div class="act-ic ${k}">${icon(ic)}</div><div class="main"><div class="title">${verb}${t.sym ? ' ' + h(t.sym) : ''}</div><div class="sub">${why}${h(sub)}${o.time !== false ? ' · ' + (o.day ? fmtTime(t.ts) : fmtDT(t.ts)) : ''}</div>${t.note && feature('journal') ? `<div class="note-line">${icon('note')}<span class="ellip">${h(t.note)}</span></div>` : ''}</div><div class="trail col" style="align-items:flex-end;gap:2px"><span class="val n priv" style="font-weight:650">${t.side === 'split' ? '' : t.side === 'sell' || t.side === 'div' || ((t.side === 'int' || t.side === 'cash') && t.price > 0) ? '+' : t.side === 'buy' || t.side === 'cash' || t.side === 'fee' || t.side === 'int' ? '−' : ''}${t.side === 'split' ? '' : money(Math.abs(total))}</span>${t.pnl != null ? `<span class="n ${cls(t.pnl)}" style="font-size:13px;font-weight:650">${money(t.pnl, { sign: true })}</span>` : ''}</div></button>`;
 }
 ACT.tradeOpen = el => tradeDetail(+el.dataset.id);
 async function tradeDetail(id) {
-  let t = [...(App.S.trd || []), ...(VIEWS.activity.items || [])].find(x => x.id === id);
-  if (!t) return;
-  const s = sheet({ title: { buy: 'Buy', sell: 'Sale', div: 'Dividend', int: 'Interest', cash: 'Cash' }[t.side] || 'Trade' });
+  let t = [...(App.S.trd || []), ...(VIEWS.activity.items || []), ...(tradeDetail.extra || [])].find(x => x.id === id);
+  if (!t) { try { const r = await api('trade/' + id); t = r.trade; } catch (e) { return toastErr(e); } }
+  const s = sheet({ title: { buy: 'Trade confirmation', sell: 'Trade confirmation', div: 'Dividend', int: 'Interest', cash: 'Cash', split: 'Stock split', fee: 'Fee' }[t.side] || 'Trade' });
+  let lots = null;
+  const kv = (k, v) => v == null || v === '' ? '' : `<div class="kv"><span class="k">${k}</span><span class="v">${v}</span></div>`;
   const draw = () => {
+    const trade = t.side === 'buy' || t.side === 'sell', gross = t.qty * t.price;
     s.html(`${t.sym ? `<button class="cell arow" style="padding:0 0 12px" data-act="asset" data-sym="${h(t.sym)}">${logo(t.sym)}<div class="main"><div class="sym">${h(t.sym)}</div><div class="name">${h(nameOf(t.sym))}</div></div>${icon('right', 'chev')}</button>` : ''}
       <div class="card" style="background:var(--card2)">
-        <div class="kv"><span class="k">When</span><span class="v">${fmtDT(t.ts)}</span></div>
-        ${t.side === 'buy' || t.side === 'sell' ? `<div class="kv"><span class="k">${isCrypto(t.sym) ? 'Amount' : 'Shares'}</span><span class="v">${qtyStr(t.sym, t.qty)}</span></div><div class="kv"><span class="k">Price</span><span class="v">${price(t.price)}</span></div>` : ''}
-        <div class="kv"><span class="k">Total</span><span class="v">${money(t.side === 'cash' || t.side === 'int' ? t.price : t.qty * t.price)}</span></div>
-        ${t.fee ? `<div class="kv"><span class="k">Fee</span><span class="v">${money(t.fee)}</span></div>` : ''}
-        ${t.pnl != null ? `<div class="kv"><span class="k">Profit / loss</span><span class="v ${cls(t.pnl)}">${money(t.pnl, { sign: true })}</span></div>` : ''}
-        ${t.why ? `<div class="kv"><span class="k">How</span><span class="v">${h(t.why === 'manual' ? 'You placed it' : t.why)}</span></div>` : ''}
-        ${t.sym && (t.side === 'buy' || t.side === 'sell') && live(t.sym) ? `<div class="kv"><span class="k">Price now</span><span class="v"><span data-px="${h(t.sym)}">${price(live(t.sym))}</span> <span class="${cls(live(t.sym) - t.price)}">${pct((live(t.sym) / t.price - 1) * 100)}</span></span></div>` : ''}
+        ${kv('When', fmtDT(t.ts) + (t.sess && t.sess !== 'regular' ? ' · ' + h(SESS_SHORT[t.sess] || t.sess) : ''))}
+        ${trade ? kv('Action', `${t.side === 'buy' ? 'Buy' : 'Sell'} · ${h(OT_LABEL[t.otype] || 'Market')} order${t.tif ? ' · ' + (t.tif === 'day' ? 'day' : 'good till canceled') : ''}`) : ''}
+        ${trade ? kv(isCrypto(t.sym) ? 'Amount' : 'Shares', qtyStr(t.sym, t.qty)) + kv('Price', price(t.price)) + kv('Principal', money(gross)) : ''}
+        ${trade && t.bid ? kv('Bid / ask at the fill', `${price(t.bid)} / ${price(t.ask)}`) : ''}
+        ${trade && t.fees ? Object.entries(t.fees).map(([k, v]) => kv({ sec: 'SEC fee', taf: 'FINRA trading activity fee', cat: 'CAT fee', comm: 'Commission', crypto: 'Crypto fee', custom: 'Fee' }[k] || k, v > 0 ? money(v) : 'Free')).join('') : t.fee ? kv('Fee', money(t.fee)) : ''}
+        ${trade ? kv(t.side === 'buy' ? 'Total cost' : 'Net proceeds', `<b>${money(t.side === 'buy' ? gross + t.fee : gross - t.fee)}</b>`) : kv('Amount', money(t.side === 'cash' || t.side === 'int' || t.side === 'fee' ? t.price : gross))}
+        ${t.settle ? kv('Settlement date', fmtDay(t.settle)) : ''}
+        ${t.liq && isCrypto(t.sym) ? kv('Liquidity', t.liq === 'maker' ? 'Maker (your order rested on the book)' : 'Taker (filled against the book)') : ''}
+        ${t.via ? kv('Priced from', { book: 'Coinbase order book', quote: 'The quote at the time', 'quote+impact': 'The quote, plus size impact', limit: 'Your limit price' }[t.via] || h(t.via)) : ''}
+        ${t.pnl != null ? kv('Profit / loss vs. average cost', `<span class="${cls(t.pnl)}">${money(t.pnl, { sign: true })}</span>`) : ''}
+        ${t.side === 'div' ? kv('Per share', price(t.price)) + kv('Shares you held', qtyStr(t.sym, t.qty)) : ''}
+        ${trade && t.why ? kv('Placed by', h(t.why === 'manual' ? 'You' : t.why === 'broker' ? 'Your broker account' : t.why[0].toUpperCase() + t.why.slice(1))) : ''}
+        ${trade && live(t.sym) ? kv('Price now', `<span data-px="${h(t.sym)}">${price(live(t.sym))}</span> <span class="${cls(live(t.sym) - t.price)}">${pct((live(t.sym) / t.price - 1) * 100)}</span>`) : ''}
       </div>
+      <div id="td-lots">${lots && lots.length ? `<div class="section-h"><h2>Tax lots sold</h2></div><div class="card">${lots.map(l => `<div class="lot-row"><span>${qtyStr(t.sym, l.qty)} bought ${fmtDate(l.acquired)}</span><b class="n ${cls(l.gain)}">${money(l.gain, { sign: true })}</b><span class="t-cap">${l.term === 'long' ? 'Long term' : 'Short term'} · cost ${money(l.basis)}</span><span class="t-cap" style="text-align:right">${l.wash ? money(l.wash) + ' wash sale' : ''}</span></div>`).join('')}</div>` : ''}</div>
       ${feature('journal') ? `<label class="field"><span>Journal note</span><textarea id="td-n" placeholder="What were you thinking? What did you learn?" maxlength="1000">${h(t.note || '')}</textarea></label><label class="field"><span>Tags, separated by commas</span><input id="td-t" placeholder="earnings, dip buy" value="${h(t.tags || '')}"></label>` : ''}`);
     if (feature('journal')) s.foot(`<button class="btn btn-primary btn-lg btn-block" id="td-s">Save note</button>`);
     const sv = s.footEl && $('#td-s', s.footEl);
     if (sv) sv.addEventListener('click', async () => { busy(sv, true); try { await post('note', { id: t.id, note: $('#td-n', s.body).value, tags: $('#td-t', s.body).value }); busy(sv, false); toast('Note saved'); s.close(); reload(); VIEWS.activity.reloadList?.(); } catch (e) { busy(sv, false); toastErr(e); } });
   };
   draw();
+  if (t.side === 'sell') api('trade/' + t.id).then(r => { lots = r.lots; t = { ...t, ...r.trade }; if (!s.closed) { const n = $('#td-n', s.body)?.value; draw(); if (n != null) $('#td-n', s.body).value = n; } }).catch(() => {});
 }
 
 // ===================================================================
@@ -2698,7 +2789,7 @@ VIEWS.activity = {
 function ordersHtml() {
   const S = App.S, ord = S.ord || [], lims = S.lims || [];
   const unprotected = (S.pos || []).filter(p => !ord.some(o => o.sym === p.sym && (o.kind === 'stop' || o.kind === 'trail')));
-  return `${ord.length || lims.length ? `<div class="section-h"><h2>Waiting to trigger<span class="count">${ord.length + lims.length}</span></h2></div><div class="group">${ord.map(orderCell).join('')}${lims.map(limCell).join('')}</div><p class="note">These run on the server around the clock. Stock orders only trigger while the market is open${SET().rthOrders === false ? ' (you turned this off in Settings)' : ''}.</p>`
+  return `${ord.length || lims.length ? `<div class="section-h"><h2>Waiting to trigger<span class="count">${ord.length + lims.length}</span></h2></div><div class="group">${ord.map(orderCell).join('')}${lims.map(limCell).join('')}</div><p class="note">${W().broker ? 'These orders live at Alpaca and run there, even when Mango is closed.' : isRealW() ? 'These run on the server around the clock. Stop orders and market orders on stocks only trigger in regular hours; limit orders can also use extended hours if you picked that.' : `These run on the server around the clock. Stock orders only trigger while the market is open${SET().rthOrders === false ? ' (you turned this off in Settings)' : ''}.`}</p>`
     : `<div class="group mt16"><div class="empty"><div class="art">${icon('target')}</div><h3>No open orders</h3><p>Stop losses, take profits and limit orders you set will wait here until they trigger.</p></div></div>`}
     ${unprotected.length ? `<div class="section-h"><h2>Not protected</h2><span class="t-foot">No stop loss</span></div><div class="group">${unprotected.map(p => `<button class="cell arow" data-act="orderNew" data-kind="stop" data-sym="${h(p.sym)}">${logo(p.sym)}<div class="main"><div class="sym">${h(p.sym)}</div><div class="name">Add a stop loss</div></div><span class="val priv" data-pos="${h(p.sym)}" data-m="value"></span>${icon('plus', 'chev')}</button>`).join('')}</div>` : ''}
     <button class="btn btn-quiet btn-block mt16" data-act="newOrderPick">${icon('plus')}New limit or stop order</button>`;
@@ -2898,31 +2989,51 @@ async function switchWallet(id) {
   try { await loadState(); rerenderAll(); VIEWS.portfolio.loadEq(); toast(`Switched to ${W().emoji} ${W().name}`); } catch (e) { toastErr(e); }
   if (VIEWS.activity.mounted) VIEWS.activity.reloadList();
 }
-function walletEdit(w = null) {
-  const st = { name: w?.name || '', emoji: w?.emoji || EMOJIS[Math.floor(Math.random() * EMOJIS.length)], color: w?.color || WCOLORS[(App.S.wallets.length + 1) % WCOLORS.length], start: '10000' };
+function walletEdit(w = null, opt = {}) {
+  const brk = !!w?.broker;
+  const st = { name: w?.name || '', emoji: w?.emoji || EMOJIS[Math.floor(Math.random() * EMOJIS.length)], color: w?.color || WCOLORS[(App.S.wallets.length + 1) % WCOLORS.length], start: '10000',
+    profile: w?.profile || 'robinhood', acct: w?.acct || 'instant', gold: !!w?.gold, drip: !!w?.drip, lotMethod: w?.lotMethod || 'fifo', cryptoRoute: w?.cryptoRoute || 'mm', marginMax: w?.marginMax != null ? String(w.marginMax) : '' };
   const s = sheet({ title: w ? 'Edit wallet' : 'New wallet' });
+  const pick = (name, list, val) => `<div class="rule-pick" data-pick="${name}">${list.map(([k, t, d]) => `<button class="${k === val ? 'on' : ''}" data-v="${k}"><span class="dot"></span><div><div class="t">${t}</div><div class="d">${d}</div></div></button>`).join('')}</div>`;
   const draw = () => {
-    s.html(`<div class="wcard" data-wc="${st.color}" style="margin-bottom:6px"><div class="wn"><span style="font-size:20px">${h(st.emoji)}</span>${h(st.name || 'New wallet')}</div><div class="wv">${w ? money(w.value) : money(num(st.start, 0))}</div><div class="wr">${w ? 'All time ' + pct(w.ret) : 'Starting balance'}</div></div>
+    const real = st.profile !== 'practice';
+    s.html(`<div class="wcard" data-wc="${st.color}" style="margin-bottom:6px"><div class="wn"><span style="font-size:20px">${h(st.emoji)}</span>${h(st.name || 'New wallet')}</div><div class="wv">${w ? money(w.value) : money(num(st.start, 0))}</div><div class="wr">${w ? 'All time ' + pct(w.ret) : 'Starting balance'} · ${brk ? 'Alpaca' : PROF_NAME[st.profile]}</div></div>
       <label class="field"><span>Name</span><input id="we-n" maxlength="30" placeholder="e.g. Crypto only, Long term, Risky bets" value="${h(st.name)}"></label>
       ${w ? '' : `<label class="field"><span>Starting balance</span><div class="money-in has-pre"><span class="pre">$</span><input id="we-s" inputmode="decimal" value="${h(st.start)}"></div></label><div class="chips mt8" style="margin:8px 0 0;padding:0">${[1000, 10000, 25000, 100000, 1000000].map(v => `<button class="chip" data-sv="${v}">$${v >= 1e6 ? v / 1e6 + 'M' : v / 1e3 + 'K'}</button>`).join('')}</div>`}
+      ${brk ? '' : `<div class="field" id="we-rules"><span>Trading rules</span>${pick('profile', [['robinhood', 'Robinhood rules', PROF_DESC.robinhood], ['alpaca', 'Alpaca rules', PROF_DESC.alpaca], ['practice', 'Practice rules', PROF_DESC.practice]], st.profile)}</div>
+      ${real ? `<div class="field"><span>Account type</span>${pick('acct', [['cash', 'Cash account', ACCT_DESC.cash], ['instant', 'Instant account', ACCT_DESC.instant], ['margin', 'Margin account', ACCT_DESC.margin]], st.acct)}</div>` : ''}`}
+      <div class="group mt16">
+        <div class="cell"><div class="main"><div class="title">Reinvest dividends</div><div class="sub">Dividends buy more of the same stock, fractional shares included</div></div>${sw(st.drip, 'data-tg="drip"')}</div>
+        ${!brk && st.profile === 'robinhood' && st.acct !== 'cash' ? `<div class="cell"><div class="main"><div class="title">Robinhood Gold</div><div class="sub">First $1,000 of margin free and $5,000 instant deposits, for $5 a month</div></div>${sw(st.gold, 'data-tg="gold"')}</div>` : ''}
+        ${!brk && real && st.acct === 'margin' ? `<div class="cell"><div class="main"><div class="title">Borrowing limit</div><div class="sub">Most you can borrow. Empty means no limit of your own.</div></div><div class="money-in has-pre" style="width:120px"><span class="pre" style="font-size:15px;left:10px">$</span><input class="input" id="we-mm" style="height:40px;font-size:16px;padding-left:22px;text-align:right" inputmode="decimal" value="${h(st.marginMax)}" placeholder="None"></div></div>` : ''}
+      </div>
+      ${!brk && real ? `${st.profile === 'robinhood' ? `<div class="field"><span>Crypto routing</span>${seg('wcr', [['mm', 'Market makers (no fee)'], ['exchange', 'Exchange (tiered fee)']], st.cryptoRoute)}</div>` : ''}
+      <div class="field"><span>Which shares sell first, for taxes</span>${seg('wlm', [['fifo', 'Oldest first'], ['lifo', 'Newest first'], ['hifo', 'Highest cost']], st.lotMethod)}</div>` : ''}
       <div class="field"><span>Icon</span><div class="emoji-pick">${EMOJIS.map(e => `<button class="${e === st.emoji ? 'on' : ''}" data-e="${e}">${e}</button>`).join('')}</div></div>
       <div class="field"><span>Color</span><div class="color-pick">${WCOLORS.map(c => `<button data-wc="${c}" data-c="${c}" class="${c === st.color ? 'on' : ''}" aria-label="${c}"></button>`).join('')}</div></div>`);
     s.foot(`<button class="btn btn-primary btn-lg btn-block" id="we-go">${w ? 'Save' : 'Create wallet'}</button>`);
+    raf(() => placeThumbs(s.body));
     $('#we-n', s.body).addEventListener('input', e => { st.name = e.target.value; $('.wcard .wn', s.body).innerHTML = `<span style="font-size:20px">${h(st.emoji)}</span>${h(st.name || 'New wallet')}`; });
     const si = $('#we-s', s.body); if (si) si.addEventListener('input', e => { st.start = e.target.value; $('.wcard .wv', s.body).textContent = money(num(st.start, 0)); });
+    const mm = $('#we-mm', s.body); if (mm) mm.addEventListener('input', e => { st.marginMax = e.target.value; });
     s.body.querySelectorAll('[data-sv]').forEach(b => b.addEventListener('click', () => { st.start = b.dataset.sv; draw(); }));
     s.body.querySelectorAll('[data-e]').forEach(b => b.addEventListener('click', () => { st.emoji = b.dataset.e; draw(); }));
     s.body.querySelectorAll('[data-c]').forEach(b => b.addEventListener('click', () => { st.color = b.dataset.c; draw(); }));
+    s.body.querySelectorAll('[data-pick] button').forEach(b => b.addEventListener('click', () => { const k = b.parentElement.dataset.pick; st[k] = b.dataset.v; if (k === 'acct' && st.acct === 'cash') st.gold = false; buzz(4); const top = s.body.scrollTop; draw(); s.body.scrollTop = top; }));
+    s.body.querySelectorAll('[data-tg]').forEach(b => b.addEventListener('click', () => { const k = b.dataset.tg; st[k] = !st[k]; b.classList.toggle('on', st[k]); }));
+    onSeg(s.body, 'wcr', v => { st.cryptoRoute = v; }); onSeg(s.body, 'wlm', v => { st.lotMethod = v; });
     $('#we-go', s.footEl).addEventListener('click', async () => {
       const go = $('#we-go', s.footEl); busy(go, true);
+      const rules = brk ? { drip: st.drip } : { profile: st.profile, acct: st.acct, gold: st.gold, drip: st.drip, lotMethod: st.lotMethod, cryptoRoute: st.cryptoRoute, marginMax: st.marginMax === '' ? null : num(st.marginMax) };
       try {
-        if (w) { await patch('wallets/' + w.id, { name: st.name, emoji: st.emoji, color: st.color }); toast('Wallet saved'); await loadState(); }
-        else { const r = await post('wallets', { name: st.name || 'New wallet', emoji: st.emoji, color: st.color, start: num(st.start, 10000) }); toast(`Created ${r.emoji} ${r.name}`); App.W = r.id; store.set('wallet', r.id); await loadState(); VIEWS.portfolio.loadEq(); }
+        if (w) { await patch('wallets/' + w.id, { name: st.name, emoji: st.emoji, color: st.color, ...rules }); toast('Wallet saved'); await loadState(); }
+        else { const r = await post('wallets', { name: st.name || 'New wallet', emoji: st.emoji, color: st.color, start: num(st.start, 10000), ...rules }); toast(`Created ${r.emoji} ${r.name}`); App.W = r.id; store.set('wallet', r.id); await loadState(); VIEWS.portfolio.loadEq(); }
         busy(go, false); s.close(); rerenderAll();
       } catch (e) { busy(go, false); toastErr(e); }
     });
   };
   draw();
+  if (opt.focus === 'rules') setTimeout(() => { const r = $('#we-rules', s.body); if (r) s.body.scrollTo({ top: r.offsetTop - 20, behavior: reduced() ? 'auto' : 'smooth' }); }, 420);
 }
 PAGES.wallets = {
   mount(p) { p.title('Wallets', true); p.draw = () => this.draw(p); p.draw(); p.on('state', p.draw); },
@@ -2970,24 +3081,41 @@ function transferSheet() {
   };
   draw();
 }
-ACT.cash = () => {
-  const st = { action: 'add', amount: '' };
-  const s = sheet({ title: 'Cash' });
+ACT.cash = el => {
+  const real = isRealW(), brk = !!W().broker;
+  if (brk) return sheet({ title: 'Cash', html: `<p class="dialog-msg">${h(W().name)} mirrors your Alpaca account, so its cash is real${W().brokerEnv === 'live' ? ' money' : ' paper money'}. Deposit and withdraw in the Alpaca dashboard; changes show up here within a few seconds.</p><div class="btns"><button class="btn btn-primary" data-act="back">OK</button></div>` });
+  const st = { action: el?.dataset?.a || 'add', amount: '', how: real ? 'bank' : 'practice' };
+  const s = sheet({ title: real ? 'Move money' : 'Cash' });
   const draw = () => {
-    s.html(`<div class="center"><div class="t-cap">${h(W().emoji)} ${h(W().name)} has</div><div class="n priv" style="font-size:34px;font-weight:750;letter-spacing:-.03em">${money(App.S.wallet.cash)}</div><div class="t-foot">in cash</div></div>
-      <div class="mt16">${seg('ca', [['add', 'Add'], ['withdraw', 'Withdraw'], ['set', 'Set exactly']], st.action)}</div>
+    const a = App.S.account || {}, r = App.S.rules || {};
+    const instantLeft = Math.max(0, (r.instant || 0) - 0);
+    const hint = !real ? "It's practice money, so add as much as you like. Deposits and withdrawals don't count as profit or loss."
+      : st.action === 'add' ? (st.how === 'bank' ? `A bank transfer takes about ${r.achDays || 3} business days.${instantLeft && App.S.wallet.acct !== 'cash' ? ` Up to ${money(instantLeft)} of pending deposits can be used right away with Instant Deposits.` : App.S.wallet.acct === 'cash' ? ' Cash accounts wait for the full transfer.' : ''} Deposits don't count as profit.` : 'Practice cash skips the bank and lands right away, like a magic deposit.')
+      : st.action === 'withdraw' ? `You can withdraw ${money(a.withdrawable ?? App.S.wallet.cash)}. ${st.how === 'bank' ? 'It reaches your bank in about 2 business days.' : 'Practice withdrawals leave right away.'}${a.unsettled > 0.005 ? ` ${money(a.unsettled)} from recent sales has to settle first.` : ''}`
+      : 'Sets the cash balance to exactly this, right away. A practice shortcut that skips the bank.';
+    s.html(`<div class="center"><div class="t-cap">${h(W().emoji)} ${h(W().name)} has</div><div class="n priv" style="font-size:34px;font-weight:750;letter-spacing:-.03em">${money(App.S.wallet.cash)}</div><div class="t-foot">in cash${real && a.bp != null ? ` · ${money(a.bp)} buying power` : ''}</div></div>
+      <div class="mt16">${seg('ca', [['add', real ? 'Deposit' : 'Add'], ['withdraw', 'Withdraw'], ['set', 'Set exactly']], st.action)}</div>
+      ${real && st.action !== 'set' ? `<div class="mt8">${seg('cah', [['bank', 'Bank transfer'], ['practice', 'Practice cash']], st.how)}</div>` : ''}
       <label class="field"><div class="money-in has-pre"><span class="pre">$</span><input id="ca-v" inputmode="decimal" placeholder="0.00" value="${h(st.amount)}"></div></label>
       <div class="chips mt8" style="margin:8px 0 0;padding:0">${[100, 1000, 5000, 10000, 50000].map(v => `<button class="chip" data-v="${v}">$${compact(v)}</button>`).join('')}</div>
-      <p class="note">It's practice money, so add as much as you like. Deposits and withdrawals don't count as profit or loss.</p>`);
-    s.foot(`<button class="btn btn-primary btn-lg btn-block" id="ca-go">${st.action === 'add' ? 'Add cash' : st.action === 'withdraw' ? 'Withdraw cash' : 'Set balance'}</button>`);
+      <p class="note">${h(hint)}</p>
+      ${(App.S.xfers || []).filter(x => x.status === 'pending').length ? `<div class="group mt12">${App.S.xfers.filter(x => x.status === 'pending').map(x => `<div class="cell"><div class="lead">${icon(x.kind === 'deposit' ? 'download' : 'upload')}</div><div class="main"><div class="title">${x.kind === 'deposit' ? 'Deposit' : 'Withdrawal'} ${money(x.amount)}</div><div class="sub">${xferLabel(x)}${x.instant > 0 ? ` · ${money(x.instant)} already usable` : ''}</div></div></div>`).join('')}</div>` : ''}`);
+    s.foot(`<button class="btn btn-primary btn-lg btn-block" id="ca-go">${st.action === 'add' ? (real && st.how === 'bank' ? 'Start bank deposit' : 'Add cash') : st.action === 'withdraw' ? 'Withdraw cash' : 'Set balance'}</button>`);
     raf(() => placeThumbs(s.body));
     onSeg(s.body, 'ca', v => { st.action = v; draw(); });
+    onSeg(s.body, 'cah', v => { st.how = v; draw(); });
     $('#ca-v', s.body).addEventListener('input', e => { st.amount = e.target.value; });
     s.body.querySelectorAll('[data-v]').forEach(b => b.addEventListener('click', () => { st.amount = b.dataset.v; $('#ca-v', s.body).value = st.amount; }));
     $('#ca-go', s.footEl).addEventListener('click', async () => {
       const go = $('#ca-go', s.footEl); busy(go, true);
-      try { await post('cash', { action: st.action, amount: num(st.amount) }); busy(go, false); toast(st.action === 'add' ? 'Cash added' : st.action === 'withdraw' ? 'Cash withdrawn' : 'Balance set'); s.close(); await loadState(); rerenderAll(); VIEWS.portfolio.loadEq(true); }
-      catch (e) { busy(go, false); toastErr(e); }
+      try {
+        const r = await post('cash', { action: st.action, amount: num(st.amount), how: st.how });
+        busy(go, false);
+        if (st.action === 'add' && r.done === false) toast(`Deposit started: ${money(num(st.amount))}`, { sub: r.instant > 0 ? `${money(r.instant)} is usable now. The rest arrives ${fmtDay(r.avail)}.` : `It arrives ${fmtDay(r.avail)}.`, ms: 5000 });
+        else if (st.action === 'withdraw' && r.done === false) toast('Withdrawal sent', { sub: `It reaches your bank about ${fmtDay(r.avail)}.` });
+        else toast(st.action === 'add' ? 'Cash added' : st.action === 'withdraw' ? 'Cash withdrawn' : 'Balance set');
+        s.close(); await loadState(); rerenderAll(); VIEWS.portfolio.loadEq(true);
+      } catch (e) { busy(go, false); toastErr(e); }
     });
   };
   draw();
@@ -2995,7 +3123,7 @@ ACT.cash = () => {
 
 // ---------- notifications inbox ----------
 ACT.inbox = () => Router.go('inbox');
-const NOTE_ICON = { order: 'target', alert: 'bell', summary: 'chart', move: 'zap', achv: 'games', game: 'bull', div: 'gift', system: 'info' };
+const NOTE_ICON = { order: 'target', alert: 'bell', summary: 'chart', move: 'zap', achv: 'games', game: 'bull', div: 'gift', system: 'info', cash: 'dollar' };
 PAGES.inbox = {
   mount(p) {
     p.title('Notifications', true);
@@ -3026,6 +3154,217 @@ ACT.inboxMenu = () => {
 };
 
 // ===================================================================
+// Account: buying power, settlement, margin, transfers, rules, taxes, statements, broker
+// ===================================================================
+const ACCT_DESC = {
+  cash: 'Pay in full with settled cash. Money from stock sales settles the next business day (T+1) before you can use it again.',
+  instant: 'Use money from sales right away and up to the instant deposit limit while bank transfers clear. No borrowing.',
+  margin: 'Borrow against your stocks: up to 2x buying power with $2,000 or more. Interest is charged on what you borrow, and a drop can trigger a margin call.',
+};
+const PROF_DESC = {
+  robinhood: 'Commission-free stocks with SEC, FINRA and CAT fees passed through, 7 AM to 8 PM extended hours plus the 24 Hour Market, crypto through market makers or the exchange.',
+  alpaca: 'Commission-free stocks with regulatory fees rounded up, 4 AM to 8 PM extended hours, crypto at 0.15% maker and 0.25% taker to start. The same rules as an Alpaca account.',
+  practice: 'The simple practice engine: trades fill at the last price, fees and slippage come from Settings → Trading, and there are no settlement or margin rules.',
+};
+const fmtHM = m => { const h_ = Math.floor(m / 60), mi = m % 60; return `${h_ % 12 || 12}${mi ? ':' + String(mi).padStart(2, '0') : ''} ${h_ < 12 ? 'AM' : 'PM'}`; };
+const xferLabel = x => x.kind === 'deposit' ? (x.status === 'pending' ? `Arrives ${fmtDay(x.avail)}` : x.status === 'done' ? 'Completed' : 'Cancelled') : (x.status === 'pending' ? `Reaches your bank ${fmtDay(x.avail)}` : x.status === 'done' ? 'Sent' : 'Cancelled');
+
+PAGES.account = {
+  mount(p) {
+    p.title('Account', true);
+    p.body.innerHTML = `<div class="sk sk-block mt16"></div><div class="sk sk-block mt12"></div>`;
+    p.load = async () => { try { p.d = await api('account'); this.draw(p); } catch (e) { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; } };
+    p.load(); p.on('state', debounce(() => p.load(), 500));
+  },
+  refresh(p) { p.load && p.load(); },
+  draw(p) {
+    const { wallet: w, account: a, rules: r, xfers, settling, broker } = p.d;
+    const real = r.real, brk = !!w.broker;
+    const parts = [];
+    if (a.acct === 'cash') parts.push({ v: Math.max(0, a.settled - a.holdsCash), c: 'var(--ac)', l: 'Settled cash' }, { v: a.unsettled, c: 'var(--mu2)', l: 'Settling' });
+    else parts.push({ v: Math.max(0, a.cash - a.holdsCash), c: 'var(--ac)', l: 'Cash' });
+    if (a.holdsCash > 0) parts.push({ v: a.holdsCash, c: 'color-mix(in srgb, var(--dn) 55%, var(--card3))', l: 'Held for orders' });
+    if (a.marginOn) parts.push({ v: Math.max(0, a.bp - Math.max(0, a.cash - a.holdsCash)), c: 'color-mix(in srgb, var(--up) 60%, var(--card3))', l: 'Margin available' });
+    const tot = parts.reduce((t, x) => t + x.v, 0) || 1;
+    const kv = (k, v, cls_ = '') => `<div class="kv"><span class="k">${k}</span><span class="v ${cls_}">${v}</span></div>`;
+    let html = `<h1 class="t-display" style="margin:8px 0 2px">Account</h1>
+      <div class="between" style="margin:0 2px"><div class="t-sub">${h(w.emoji)} ${h(w.name)} · ${brk ? `Alpaca ${w.brokerEnv === 'live' ? 'live' : 'paper'}` : PROF_NAME[w.profile]}${real && !brk ? ' · ' + ACCT_NAME[w.acct] : ''}</div>${brk ? '' : `<button class="link" data-act="walletRules">Change</button>`}</div>
+      ${brk && w.brokerEnv === 'live' ? `<div class="money-banner mt12">${icon('lock')}<div><b>Real money.</b> This wallet mirrors your live Alpaca account.</div></div>` : ''}
+      ${a.call > 0 ? `<div class="callout warn mt12">${icon('info')}<div><b>Margin call: ${money(a.call)}</b>. Your equity is below the maintenance requirement. Deposit cash or sell positions. If it isn't fixed in 2 trading days, or the account keeps falling, positions are sold for you.</div></div>` : ''}
+      <div class="card bp-card mt16"><div class="t-cap">Buying power${a.marginOn ? ' for stocks' : ''}</div><div class="big priv">${money(a.bp)}</div>
+        ${a.marginOn ? `<div class="t-foot">${money(a.bpCrypto)} for crypto, which can't use margin</div>` : ''}
+        <div class="stack">${parts.filter(x => x.v > 0.005).map(x => `<i style="flex:${x.v / tot};background:${x.c}"></i>`).join('')}</div>
+        <div class="stack-legend">${parts.filter(x => x.v > 0.005).map(x => `<span><i style="background:${x.c}"></i>${x.l} ${money(x.v)}</span>`).join('')}</div>
+        <div class="mt12">${kv('Cash', `<span class="priv ${a.cash < 0 ? 'dn' : ''}">${money(a.cash)}</span>`)}${real && a.cash >= 0 && a.unsettled > 0.005 ? kv('Settled cash', `<span class="priv">${money(a.settled)}</span>`) : ''}${a.unsettled > 0.005 ? kv('Settling', `${money(a.unsettled)}${a.nextSettle ? ' · ' + fmtDay(a.nextSettle) : ''}`) : ''}${a.holdsCash > 0.005 ? kv('Held for open buy orders', money(a.holdsCash)) : ''}${a.pendingDeposits > 0.005 ? kv('Deposits on the way', money(a.pendingDeposits)) : ''}${kv('Can withdraw', `<span class="priv">${money(a.withdrawable)}</span>`)}</div>
+        ${brk ? '' : `<div class="btns mt12"><button class="btn btn-quiet" data-act="cash" data-a="withdraw">${icon('upload')}Withdraw</button><button class="btn btn-primary" data-act="cash" data-a="add">${icon('download')}Add money</button></div>`}</div>`;
+    if (a.acct === 'margin' && real && !brk) {
+      const eqPct = a.lmv ? a.equity / a.lmv * 100 : 100, mPct = a.lmv ? a.maint / a.lmv * 100 : 25;
+      html += `<div class="section-h"><h2>Margin</h2><span class="t-foot">${a.marginOn ? 'On' : 'Needs $2,000 equity'}</span></div><div class="card">
+        ${a.lmv > 0 ? `<div class="t-foot">Equity is ${pct0(eqPct, 0)} of what you hold. It needs to stay above ${pct0(mPct, 0)}.</div><div class="meter"><i style="width:${clamp(eqPct, 0, 100)}%;background:${a.equity < a.maint ? 'var(--dn)' : eqPct < mPct * 1.3 ? 'var(--ac)' : 'var(--up)'}"></i><b style="left:${clamp(mPct, 0, 100)}%"></b></div>` : ''}
+        ${kv('Equity', `<span class="priv">${money(a.equity)}</span>`)}${kv('Borrowed', a.debit > 0 ? `<span class="dn">${money(a.debit)}</span>` : '$0.00')}${kv('Maintenance requirement', money(a.maint))}${kv('Cushion before a margin call', `<span class="${a.excess < 0 ? 'dn' : ''}">${money(a.excess)}</span>`)}${kv('Interest rate', pct0(a.marginRate, 2) + ' a year' + (w.gold && w.profile === 'robinhood' ? ' · first $1,000 free with Gold' : ''))}${kv('Interest so far this month', money(a.accrued))}${w.marginMax != null ? kv('Your borrowing limit', money(w.marginMax)) : ''}</div>`;
+    }
+    if (!brk && (xfers.length || real)) html += `<div class="section-h"><h2>Transfers</h2></div><div class="group">${xfers.length ? xfers.map(x => `<div class="cell"><div class="lead">${icon(x.kind === 'deposit' ? 'download' : 'upload')}</div><div class="main"><div class="title">${x.kind === 'deposit' ? 'Deposit' : 'Withdrawal'} ${money(x.amount)}</div><div class="sub">${xferLabel(x)}${x.instant > 0 ? ` · ${money(x.instant)} available instantly` : ''} · started ${fmtDate(x.created)}</div></div>${x.status === 'pending' && x.kind === 'deposit' ? `<button class="btn btn-sm btn-quiet" data-x="cancel" data-id="${x.id}">Cancel</button>` : `<span class="xfer-st ${x.status === 'done' ? 'up' : 'mu'}">${x.status === 'done' ? 'Done' : x.status === 'pending' ? 'Pending' : 'Cancelled'}</span>`}</div>`).join('') : `<div class="cell"><div class="main t-foot">No bank transfers yet. Deposits take about ${r.achDays} business days${r.instant ? `, with up to ${money(r.instant)} usable right away` : ''}.</div></div>`}</div>`;
+    if (settling.length) html += `<div class="section-h"><h2>Settling</h2><span class="t-foot">T+1</span></div><div class="group">${settling.map(x => `<div class="cell"><div class="lead">${icon('hourglass')}</div><div class="main"><div class="title">${money(x.amount)}${x.sym ? ' from selling ' + h(x.sym) : ''}</div><div class="sub">Settles ${fmtDay(x.settles)}${w.acct === 'cash' ? '' : ' · you can already trade with it'}</div></div></div>`).join('')}</div>`;
+    if (brk && broker?.account) html += `<div class="section-h"><h2>Alpaca account</h2></div><div class="card">${kv('Account', h(broker.account.number))}${kv('Status', h(broker.account.status))}${kv('Type', +broker.account.multiplier > 1 ? `Margin (${broker.account.multiplier}x)` : 'Cash')}${kv('Day trades in 5 days', broker.account.daytrades)}${kv('Crypto', h(broker.account.crypto || '–'))}${broker.account.blocked ? '<div class="callout warn mt8">' + icon('info') + '<div>Alpaca has blocked trading on this account.</div></div>' : ''}</div>`;
+    if (real) html += `<div class="section-h"><h2>How this wallet trades</h2></div><div class="group">
+      <div class="cell"><div class="lead">${icon('clock')}</div><div class="main"><div class="title">Market hours, New York time</div><div class="sub">Pre-market ${fmtHM(r.pre)} to 9:30 AM · regular 9:30 AM to 4 PM · after hours to ${fmtHM(r.post)}${r.overnight ? ' · 24 Hour Market 8 PM to 7 AM, Sunday to Thursday nights' : ''}. Right now: ${h(r.sessionLabel)}.</div></div></div>
+      <div class="cell"><div class="lead">${icon('target')}</div><div class="main"><div class="title">Orders</div><div class="sub">Market orders outside regular hours wait for the open. Only limit orders trade in extended hours. Stops trigger in regular hours only. Good-till-canceled orders last ${r.gtcDays} days.${r.minUsd ? ` The smallest dollar order is ${money(r.minUsd)}.` : ''}</div></div></div>
+      <div class="cell"><div class="lead">${icon('hourglass')}</div><div class="main"><div class="title">Settlement</div><div class="sub">Stock sales settle the next business day (T+1). A sale today settles ${fmtDay(r.settleNext)}. Crypto settles right away.</div></div></div>
+      ${rowLink('coin', 'Fees and rules', 'Every fee, with the dates they took effect', 'rules')}</div>`;
+    p.body.innerHTML = html;
+    p.body.onclick = async e => {
+      const b = e.target.closest('[data-x="cancel"]'); if (!b) return;
+      if (!(await confirmBox({ title: 'Cancel this deposit?', msg: 'The instant part comes back out of your cash.', ok: 'Cancel deposit', cancel: 'Keep it', danger: true }))) return;
+      try { await del('xfer/' + b.dataset.id); toast('Deposit cancelled'); await loadState(); p.load(); } catch (err) { toastErr(err); }
+    };
+  },
+};
+ACT.walletRules = () => walletEdit(App.S.wallets.find(x => x.id === App.W), { focus: 'rules' });
+
+PAGES.rules = {
+  mount(p) {
+    p.title('Fees and rules', true);
+    p.body.innerHTML = `<div class="sk sk-block mt16"></div>`;
+    api('rules').then(d => this.draw(p, d)).catch(e => { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; });
+  },
+  draw(p, d) {
+    const r = d.rules, prof = d.profiles[r.profile] || d.profiles.robinhood, today = new Date().toISOString().slice(0, 10);
+    const dt = s => new Date(s + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const curIdx = (tbl) => { let i = 0; tbl.forEach((x, j) => { if (today >= x[0]) i = j; }); return i; };
+    const si = curIdx(d.sec), ti = curIdx(d.taf);
+    const tier = prof.cryptoTiers.findIndex(t => t[0] == null || d.vol30 < t[0]);
+    p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Fees and rules</h1><p class="t-sub" style="margin:0 2px">What ${h(W().emoji)} ${h(W().name)} pays, on ${h(prof.name)}.</p>
+      ${r.real ? '' : `<div class="callout mt12">${icon('info')}<div>This wallet uses practice rules, so none of this applies to it. Its fees come from Settings → Trading. Change the wallet's rules in Account.</div></div>`}
+      <div class="section-h"><h2>Stocks and ETFs</h2></div><div class="card">
+        <div class="kv"><span class="k">Commission</span><span class="v">Free</span></div>
+        <div class="kv fee"><span class="k">SEC fee on sales<small>Per $1M sold, rounded up to the cent${r.profile === 'robinhood' ? '. Sales of $500 or less are free at Robinhood.' : '.'}</small></span><span class="v">$${(d.secNow * 1e6).toFixed(2)}</span></div>
+        <div class="kv fee"><span class="k">FINRA trading activity fee<small>Per share sold, max per trade${r.profile === 'robinhood' ? '. 50 shares or less is free at Robinhood.' : '.'}</small></span><span class="v">${d.tafNow[0] ? `$${d.tafNow[0]} · max $${d.tafNow[1]}` : 'Paused'}</span></div>
+        <div class="kv fee"><span class="k">CAT fee<small>Consolidated Audit Trail, per share on buys and sells${r.profile === 'robinhood' ? '. Under 1¢ is free.' : ', rounded up.'}</small></span><span class="v">$${d.cat}</span></div></div>
+      <div class="section-h"><h2>How those fees changed</h2></div><div class="card">
+        <div class="t-cap" style="margin:2px 0 2px">SEC fee, per $1M sold</div>
+        ${d.sec.map((x, i) => `<div class="kv"><span class="k">From ${dt(x[0])}${i === si ? ' <span class="tag ac">Now</span>' : ''}</span><span class="v ${i === si ? '' : 'mu'}">$${(x[1] * 1e6).toFixed(2)}</span></div>`).join('')}
+        <div class="t-cap" style="margin:14px 0 2px">FINRA trading activity fee, per share sold</div>
+        ${d.taf.map((x, i) => `<div class="kv"><span class="k">From ${dt(x[0])}${i === ti ? ' <span class="tag ac">Now</span>' : i > ti ? ' <span class="tag">Scheduled</span>' : ''}</span><span class="v ${i === ti ? '' : 'mu'}">${x[1] ? `$${x[1]} · max ${money(x[2])}` : 'Paused'}</span></div>`).join('')}
+        <p class="note">The SEC fee went to $0 on May 14, 2025 and came back on April 4, 2026. FINRA paused its trading activity fee for October through December 2026.</p></div>
+      <div class="section-h"><h2>Crypto</h2></div><div class="card">
+        ${r.profile === 'robinhood' ? `<div class="kv fee"><span class="k">Market maker routing<small>The default. No fee; you pay the spread between the buy and sell price.</small></span><span class="v">Free</span></div><div class="t-cap mt12" style="margin-bottom:4px">Exchange routing, by 30-day crypto volume</div>` : `<div class="t-cap" style="margin-bottom:4px">By 30-day crypto volume</div>`}
+        ${prof.cryptoTiers.map((t, i, all) => `<div class="kv"><span class="k">${t[0] == null ? `${money(all[i - 1][0], { compact: true })} and up` : `Under ${money(t[0], { compact: true })}`}${i === tier ? ' <span class="tag ac">You</span>' : ''}</span><span class="v ${i === tier ? '' : 'mu'}">${t[1]}% / ${t[2]}%</span></div>`).join('')}
+        <div class="t-foot mt8">Taker / maker</div>
+        <p class="note">Your 30-day crypto volume in this wallet: ${money(d.vol30)}. Market and stop orders pay the taker rate. Limit orders that wait on the book pay the maker rate.</p></div>
+      <div class="section-h"><h2>Margin</h2></div><div class="card">
+        ${prof.marginRates.map((m, i, all) => `<div class="kv"><span class="k">${all.length === 1 ? 'Any balance' : m[0] == null ? `${money(all[i - 1][0], { compact: true })} and up` : `Borrowing up to ${money(m[0], { compact: true })}`}</span><span class="v">${m[1]}% a year</span></div>`).join('')}
+        <p class="note">Charged daily on what you borrow (rate ÷ 360), billed monthly.${prof.goldFree ? ` With Gold the first ${money(prof.goldFree)} is free; Gold costs ${money(prof.goldFee)} a month.` : ''} You need $2,000 of equity to borrow. Up to 50% of a stock purchase can be borrowed (Reg T). Equity has to stay above about ${prof.maintBase}% of what you hold, more for cheap stocks; crypto can't be bought on margin.</p></div>
+      <div class="section-h"><h2>Day trading</h2></div><div class="card"><p class="t-foot" style="margin:0">The pattern day trader rule and its $25,000 minimum ended on June 4, 2026 (FINRA Regulatory Notice 26-10). Day trades are no longer limited; margin is checked in real time instead.</p></div>
+      <p class="note">Checked October 2026 against the SEC fee rate advisory, FINRA's TAF filing, Robinhood's fee and margin pages and Alpaca's documentation. Brokers can change their fees, so this is a model, not a quote.</p>`;
+  },
+};
+
+PAGES.taxes = {
+  mount(p) {
+    p.title('Taxes', true); p.y = new Date().getFullYear();
+    p.load = async () => { try { p.d = await api('taxes?y=' + p.y); this.draw(p); } catch (e) { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; } };
+    p.body.innerHTML = `<div class="sk sk-block mt16"></div>`; p.load();
+  },
+  draw(p) {
+    const d = p.d, g = (k, x) => x.count ? `<div class="kv"><span class="k">${k}</span><span class="v ${cls(x.gain)}">${money(x.gain, { sign: true })}</span></div>` : '';
+    const rowsOf = list => list.map(r => `<div class="lot-row"><span><b>${h(r.sym)}</b> · ${qtyStr(r.sym, r.qty)} ${r.crypto ? '' : 'shares'}</span><b class="n ${cls(r.gain)}">${money(r.gain, { sign: true })}</b><span class="t-cap">Bought ${fmtDate(r.acquired)} · sold ${fmtDate(r.sold)} · cost ${money(r.basis)}</span><span class="t-cap" style="text-align:right">${r.wash ? `<span class="dn">${money(r.wash)} wash sale</span>` : money(r.proceeds) + ' proceeds'}</span></div>`).join('');
+    const st = d.rows.filter(r => r.term === 'short'), lt = d.rows.filter(r => r.term === 'long');
+    p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Taxes</h1><p class="t-sub" style="margin:0 2px">${h(W().emoji)} ${h(W().name)} · gains and income like a 1099</p>
+      ${d.years.length > 1 ? `<div class="mt12">${seg('ty', d.years.slice(0, 4).map(y => [y, String(y)]), d.y)}</div>` : ''}
+      <div class="tax-big mt16"><div class="tile"><div class="k">Short term</div><div class="v ${cls(d.short.gain + d.cryptoShort.gain)}">${money(d.short.gain + d.cryptoShort.gain, { sign: true })}</div><div class="s">Held a year or less, taxed like pay</div></div><div class="tile"><div class="k">Long term</div><div class="v ${cls(d.long.gain + d.cryptoLong.gain)}">${money(d.long.gain + d.cryptoLong.gain, { sign: true })}</div><div class="s">Held over a year, lower rates</div></div></div>
+      <div class="section-h"><h2>Sales</h2><span class="t-foot">${d.all.count} lot${d.all.count === 1 ? '' : 's'}</span></div><div class="card">
+        <div class="kv"><span class="k">Proceeds</span><span class="v">${money(d.all.proceeds)}</span></div><div class="kv"><span class="k">Cost basis</span><span class="v">${money(d.all.basis)}</span></div>
+        ${d.all.wash ? `<div class="kv"><span class="k">Wash sale losses disallowed</span><span class="v">${money(d.all.wash)}</span></div>` : ''}
+        ${g('Stocks, short term', d.short)}${g('Stocks, long term', d.long)}${g('Crypto, short term', d.cryptoShort)}${g('Crypto, long term', d.cryptoLong)}
+        <div class="kv total"><span class="k">Net gain or loss</span><span class="v ${cls(d.all.gain)}">${money(d.all.gain, { sign: true })}</span></div></div>
+      <div class="section-h"><h2>Income and costs</h2></div><div class="card"><div class="kv"><span class="k">Dividends</span><span class="v">${money(d.dividends)}</span></div><div class="kv"><span class="k">Interest earned</span><span class="v">${money(d.interest)}</span></div>${d.marginInterest ? `<div class="kv"><span class="k">Margin interest paid</span><span class="v">${money(d.marginInterest)}</span></div>` : ''}<div class="kv"><span class="k">Trading fees paid</span><span class="v">${money(d.fees)}</span></div></div>
+      <button class="btn btn-quiet btn-block mt16" data-act="taxCsv" data-y="${d.y}">${icon('download')}Download gains for ${d.y} (Form 8949 style)</button>
+      ${st.length ? `<div class="section-h"><h2>Short-term sales</h2></div><div class="card">${rowsOf(st)}</div>` : ''}
+      ${lt.length ? `<div class="section-h"><h2>Long-term sales</h2></div><div class="card">${rowsOf(lt)}</div>` : ''}
+      ${!d.rows.length ? `<div class="group mt16"><div class="empty"><div class="art">${icon('note')}</div><h3>No sales in ${d.y}</h3><p>When you sell, each lot you sold shows up here with its cost, holding period and any wash sale.</p></div></div>` : ''}
+      <p class="note">Lots are matched ${{ fifo: 'oldest first (FIFO)', lifo: 'newest first (LIFO)', hifo: 'highest cost first' }[W().lotMethod] || 'oldest first'}, set per wallet. Wash sales apply to stocks: a loss is disallowed when you buy the same stock within 30 days before or after, and it's added to the new shares' cost. This is practice data, not tax advice.</p>`;
+    raf(() => placeThumbs(p.body));
+    onSeg(p.body, 'ty', y => { p.y = +y; p.load(); });
+  },
+};
+ACT.taxCsv = async el => {
+  try { const r = await api('taxes/csv?y=' + el.dataset.y, { raw: true }); if (!r.ok) throw new Error('Download failed'); const blob = await r.blob(), url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = `mango-gains-${el.dataset.y}.csv`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000); toast('Gains downloaded'); } catch (e) { toastErr(e); }
+};
+
+PAGES.statements = {
+  mount(p) {
+    p.title('Statements', true);
+    p.body.innerHTML = `<div class="sk sk-block mt16"></div>`;
+    api('statements').then(ms => {
+      p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Statements</h1><p class="t-sub" style="margin:0 2px">${h(W().emoji)} ${h(W().name)} · one per month</p>
+        <div class="group mt16">${ms.map((m, i) => `<button class="cell" data-act="go" data-to="statement/${m}"><div class="lead">${icon('calendar')}</div><div class="main"><div class="title">${new Date(m + '-15T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</div><div class="sub">${i === 0 ? 'This month so far' : 'Monthly statement'}</div></div>${icon('right', 'chev')}</button>`).join('')}</div>`;
+    }).catch(e => { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; });
+  },
+};
+const FEE_NAME = { sec: 'SEC fees', taf: 'FINRA trading activity fees', cat: 'CAT fees', comm: 'Commissions', crypto: 'Crypto fees', custom: 'Practice fees' };
+PAGES.statement = {
+  mount(p, [m]) {
+    const title = new Date(m + '-15T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    p.title(title, true);
+    p.body.innerHTML = `<div class="sk sk-block mt16"></div>`;
+    api('statements/' + m).then(d => {
+      p.d = d;
+      const kv = (k, v, c = '') => `<div class="kv"><span class="k">${k}</span><span class="v ${c}">${v}</span></div>`;
+      const fees = Object.entries(d.fees).filter(([, v]) => v > 0);
+      p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">${h(title)}</h1><p class="t-sub" style="margin:0 2px">${h(d.wallet.emoji)} ${h(d.wallet.name)}${d.live ? ' · so far' : ''}</p>
+        <div class="card mt16">${kv('Opening value', d.opening == null ? '–' : `<span class="priv">${money(d.opening)}</span>`)}${kv('Deposits', money(d.deposits))}${kv('Withdrawals', money(d.withdrawals))}${kv('Change in value', d.change == null ? '–' : money(d.change, { sign: true }), d.change == null ? '' : cls(d.change))}${kv(d.live ? 'Value now' : 'Closing value', d.closing == null ? '–' : `<b class="priv">${money(d.closing)}</b>`)}</div>
+        <div class="section-h"><h2>Activity</h2></div><div class="card">${kv('Buys', `${d.buys} · ${money(d.bought)}`)}${kv('Sells', `${d.sells} · ${money(d.sold)}`)}${kv('Realized profit / loss', money(d.realized, { sign: true }), cls(d.realized))}${kv('Dividends', money(d.dividends))}${kv('Interest earned', money(d.interest))}${d.marginInterest ? kv('Margin interest', money(d.marginInterest)) : ''}${d.otherFees ? kv('Subscriptions and other fees', money(d.otherFees)) : ''}</div>
+        <div class="section-h"><h2>Fees</h2><span class="t-foot">${money(d.feeTotal)}</span></div><div class="card">${fees.length ? fees.map(([k, v]) => kv(FEE_NAME[k] || k, money(v))).join('') : '<div class="t-foot">No fees this month.</div>'}</div>
+        ${d.positions ? `<div class="section-h"><h2>Holdings now</h2></div><div class="group">${d.positions.map(x => `<div class="cell arow">${logo(x.sym, 'logo-sm')}<div class="main"><div class="sym">${h(x.sym)}</div><div class="name">${qtyStr(x.sym, x.qty)} at ${price(x.price)}</div></div><span class="val priv">${money(x.value)}</span></div>`).join('')}<div class="cell"><div class="main"><div class="title">Cash</div></div><span class="val priv">${money(d.cash)}</span></div></div>` : ''}
+        <div class="section-h"><h2>Transactions</h2><span class="t-foot">${d.trades.length}</span></div><div class="group">${d.trades.length ? d.trades.slice().reverse().map(t => tradeCell(t)).join('') : '<div class="cell"><div class="main t-foot">Nothing happened this month.</div></div>'}</div>
+        <button class="btn btn-quiet btn-block mt16" data-act="stmtCsv">${icon('download')}Download as a spreadsheet</button>`;
+      tradeDetail.extra = d.trades;
+    }).catch(e => { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; });
+  },
+};
+ACT.stmtCsv = () => {
+  const d = Router.top()?.page?.d; if (!d) return;
+  const esc = v => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const lines = ['Date,Type,Symbol,Quantity,Price,Amount,Fees,Order type,Settles,Profit/Loss,Note'];
+  for (const t of d.trades) lines.push([new Date(t.ts).toISOString(), t.side, t.sym, t.qty, t.price, ['cash', 'int', 'fee'].includes(t.side) ? t.price : t.qty * t.price, t.fee, t.otype || '', t.settle ? new Date(t.settle).toISOString().slice(0, 10) : '', t.pnl ?? '', t.note || ''].map(esc).join(','));
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv' }), url = URL.createObjectURL(blob), a = document.createElement('a');
+  a.href = url; a.download = `mango-statement-${d.month}.csv`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+};
+
+// ---------- the broker connection (Settings → Broker) ----------
+async function brokerBox(el) {
+  if (!el) return;
+  try {
+    const b = await api('broker');
+    if (!b.on) {
+      el.innerHTML = `<div class="t-head">Not connected</div><p class="t-foot" style="margin:6px 0 12px">Connect an Alpaca account to get live stock bid and ask prices and a wallet that trades on Alpaca's real engine. Paper accounts use fake money and are free. Real money is the same steps with live keys.</p>
+        <div class="steps">${[
+          ['Make an Alpaca account', 'Sign up at alpaca.markets. A paper trading account comes with it.'],
+          ['Create API keys', 'In the Alpaca dashboard, open your paper account and generate an API key and secret.'],
+          ['Add them in Railway', 'Your Mango service → Variables: ALPACA_KEY_ID and ALPACA_SECRET_KEY. Railway redeploys by itself.'],
+          ['Connect here', 'Come back to this screen and tap Connect. A new wallet mirrors the Alpaca account.'],
+        ].map(([t, d], i) => `<div class="step"><span class="n">${i + 1}</span><div><b>${t}</b><div class="t-foot">${d}</div></div></div>`).join('')}</div>
+        <p class="note">Optional variables: ALPACA_FEED=sip if you pay Alpaca for full market data, ALPACA_MAX_ORDER to cap each real-money order. Real money only turns on with ALPACA_ENV=live in Railway, never from the app. Keep the secret in Railway only; never paste it in a chat.</p>`;
+      return;
+    }
+    el.innerHTML = `<div class="between"><div><div class="t-head row gap6">${b.ok ? '<span class="dot-live"></span>' : '<span class="dot-off"></span>'}Alpaca ${b.live ? '<span class="real-badge">LIVE</span>' : 'paper'}</div><div class="t-foot">${b.ok ? `Equity ${money(b.account?.equity || 0)} · buying power ${money(b.account?.bp || 0)}` : h(b.err || 'Connecting…')}</div></div></div>
+      <div class="kv mt8"><span class="k">Live quotes</span><span class="v ${b.dataOk ? 'up' : 'mu'}">${b.dataOk ? `On (${b.feed.toUpperCase()} feed)` : 'Connecting'}</span></div>
+      ${b.maxOrder ? `<div class="kv"><span class="k">Cap per real-money order</span><span class="v">${money(b.maxOrder)}</span></div>` : ''}
+      <div class="btns mt12">${b.wid ? `<button class="btn btn-quiet btn-sm" id="bk-open">${icon('wallet')}Open wallet</button><button class="btn btn-quiet btn-sm" id="bk-sync">${icon('refresh')}Sync now</button>` : `<button class="btn btn-primary btn-sm" id="bk-link">${icon('link')}Connect ${b.live ? 'live account' : 'paper account'}</button>`}</div>
+      ${b.live ? `<p class="note"><b class="dn">Real money.</b> Every order needs a long press to confirm. Fills are final.</p>` : ''}`;
+    const lk = $('#bk-link', el);
+    if (lk) lk.addEventListener('click', async () => {
+      let confirm;
+      if (b.live) { confirm = await askText({ title: 'Connect real money?', msg: 'This links your live Alpaca account. Orders you place in this wallet trade real money. Type REAL MONEY to continue.', placeholder: 'REAL MONEY', ok: 'Connect' }); if (confirm == null) return; }
+      busy(lk, true);
+      try { const w = await post('broker/link', { confirm }); toast(`Connected ${w.name}`); await switchWallet(w.id); brokerBox(el); } catch (e) { busy(lk, false); toastErr(e); }
+    });
+    const op = $('#bk-open', el); if (op) op.addEventListener('click', () => switchWallet(b.wid).then(() => Router.closeAll()));
+    const sy = $('#bk-sync', el); if (sy) sy.addEventListener('click', async () => { busy(sy, true); try { await post('broker/sync'); await loadState(); toast('Synced with Alpaca'); } catch (e) { toastErr(e); } busy(sy, false); });
+  } catch (e) { el.innerHTML = `<div class="t-foot">${h(e.message)}</div>`; }
+}
+
+// ===================================================================
 // Settings
 // ===================================================================
 function applyLook(s) {
@@ -3052,7 +3391,8 @@ function bindSettings(root) {
   root.addEventListener('change', e => { const k = e.target.dataset.num; if (k) saveSetting({ [k]: num(e.target.value) }).then(() => toast('Saved')); });
 }
 const SECTIONS = {
-  trading: { title: 'Trading', icon: 'sliders', sub: 'Fees, rules, confirmations, automatic orders' },
+  trading: { title: 'Trading', icon: 'sliders', sub: 'Confirmations, automatic orders, practice fees, risk rules' },
+  broker: { title: 'Broker connection', icon: 'link', sub: 'Alpaca: live stock quotes, paper or real-money trading' },
   notifications: { title: 'Notifications', icon: 'bell', sub: 'Push on this device, what to hear about, quiet hours' },
   appearance: { title: 'Look and feel', icon: 'palette', sub: 'Theme, colors, numbers, charts, privacy' },
   features: { title: 'Features', icon: 'grid', sub: 'Switch any part of the app on or off' },
@@ -3062,7 +3402,7 @@ const SECTIONS = {
 PAGES.settings = {
   mount(p, [section]) {
     p.section = section;
-    if (section && SECTIONS[section]) { p.title(SECTIONS[section].title, true); p.short = SECTIONS[section].title; }
+    if (section && SECTIONS[section]) { p.title(SECTIONS[section].title, true); p.short = SECTIONS[section].title.length > 12 ? 'Back' : SECTIONS[section].title; }
     else { p.title('Settings', true); p.short = 'Settings'; }
     bindSettings(p.body);
     p.draw = () => { const scroll = p.scroller.scrollTop; p.body.innerHTML = section ? this[section](p) : this.root(p); raf(() => placeThumbs(p.body)); p.scroller.scrollTop = scroll; this.after?.[section]?.(p); };
@@ -3076,20 +3416,24 @@ PAGES.settings = {
       <div class="group mt16">${Object.entries(SECTIONS).map(([k, v]) => rowLink(v.icon, v.title, v.sub, 'settings/' + k)).join('')}</div>
       <div class="group mt16">${rowLink('wallet', 'Wallets', 'Create, rename, reset, move cash', 'wallets')}${rowToggle('hideBalances', 'Hide balances', 'Blur dollar amounts. Press and hold to peek.')}</div>
       <div class="group mt16"><button class="cell" data-act="changePass"><div class="lead">${icon('key')}</div><div class="main"><div class="title">Change password</div></div>${icon('right', 'chev')}</button><button class="cell" data-act="logout"><div class="lead">${icon('logout')}</div><div class="main"><div class="title">Log out of this device</div></div></button><button class="cell" data-act="logoutAll"><div class="lead" style="color:var(--dn)">${icon('lock')}</div><div class="main"><div class="title">Log out everywhere</div><div class="sub">Signs out every phone and computer</div></div></button></div>
-      <p class="note center">Mango · build ${h(BUILD.slice(0, 7))} · practice money only</p>`;
+      <p class="note center">Mango · build ${h(BUILD.slice(0, 7))} · ${S.broker?.on && S.broker.env === 'live' ? 'a live Alpaca account is connected' : 'practice money only'}</p>`;
   },
   trading() {
-    return `<div class="section-h"><h2>Placing trades</h2></div><div class="group">
+    const w = W(), real = isRealW();
+    return `<div class="section-h"><h2>This wallet</h2></div><div class="group">
+        ${rowLink('dollar', `${w.emoji} ${w.name}: ${w.broker ? 'Alpaca' : PROF_NAME[w.profile]}`, w.broker ? 'Mirrors your Alpaca account' : real ? `${ACCT_NAME[w.acct]} · change it in the wallet's settings` : 'Simple practice engine', 'account')}
+        ${rowLink('coin', 'Fees and rules', 'Every fee, session and limit, with sources', 'rules')}</div>
+      <div class="section-h"><h2>Placing trades</h2></div><div class="group">
         ${rowSeg('confirmStyle', 'Confirm trades', 'Hold the button, tap a confirm box, or trade instantly', [['hold', 'Hold'], ['tap', 'Tap to confirm'], ['none', 'Instant']])}
         ${rowNum('defaultBuy', 'Default buy amount', 'Filled in when you open the buy screen', '$')}
         ${rowToggle('wholeShares', 'Whole shares only', 'Round stock buys down to full shares')}</div>
-      <div class="section-h"><h2>When the stock market is closed</h2></div><div class="group">
+      <div class="section-h"><h2>When the stock market is closed</h2><span class="t-foot">Practice rules</span></div><div class="group">
         ${rowSeg('closedTrading', 'Buying or selling stocks', 'What happens to a stock trade outside market hours', [['fill', 'Fill at last price'], ['queue', 'Wait for open'], ['block', "Don't allow"]])}
         ${rowToggle('rthOrders', 'Stock orders only during market hours', 'Stop losses, take profits and limits on stocks wait for the open, like a real broker')}</div>
       <div class="section-h"><h2>Automatic protection</h2></div><div class="group">
         ${rowNum('autoSL', 'Stop loss on every buy', 'Percent below the buy price. 0 is off.', '%')}
         ${rowNum('autoTP', 'Take profit on every buy', 'Percent above the buy price. 0 is off.', '%')}</div>
-      <div class="section-h"><h2>Realism</h2></div><div class="group">
+      <div class="section-h"><h2>Practice fees</h2><span class="t-foot">Practice rules only</span></div><div class="group">
         ${rowNum('feeFlat', 'Fee per trade', 'Like a broker commission. 0 is free.', '$')}
         ${rowNum('feePct', 'Fee as a percent', 'Charged on each trade. 0 is free.', '%')}
         ${rowNum('slippage', 'Slippage', 'Buys fill a little higher and sells a little lower', '%')}
@@ -3097,7 +3441,7 @@ PAGES.settings = {
       <div class="section-h"><h2>Risk rules</h2></div><div class="group">
         ${rowNum('maxPos', 'Max size of one position', 'Percent of the wallet. 0 is off.', '%')}
         ${rowNum('reservePct', 'Always keep this much cash', 'Percent of the wallet. 0 is off.', '%')}</div>
-      <p class="note">These apply to every wallet.</p>`;
+      <p class="note">Wallets on Robinhood or Alpaca rules use the real fees, spreads, hours and settlement instead of the practice fees and closed-market options. Confirmations, automatic protection, interest and risk rules apply to every wallet.</p>`;
   },
   notifications() {
     const S = SET();
@@ -3125,7 +3469,7 @@ PAGES.settings = {
       <div class="section-h"><h2>Start on</h2></div><div class="group">${rowSeg('defaultTab', 'Opening screen', '', [['portfolio', 'Portfolio'], ['market', 'Market'], ['activity', 'Activity'], ['games', 'Games']])}</div>`;
   },
   features() {
-    const F = [['f_watch', 'Watchlist', 'Star things to keep an eye on'], ['f_alerts', 'Price alerts', 'Notifications at your target prices'], ['f_analytics', 'Performance stats', 'Win rate, risk and results'], ['f_journal', 'Trade journal', 'Notes and tags on trades'], ['f_divs', 'Dividends', 'Get paid for holding dividend stocks'], ['f_news', 'News', 'Headlines on Market and asset pages'], ['f_earnings', 'Earnings calendar', 'Upcoming company reports'], ['f_insights', 'Analyst ratings and earnings', 'Extra research on stock pages'], ['f_heatmap', 'Heatmap', "See the whole market's day at a glance"], ['f_movers', 'Top movers', 'Biggest gainers and losers'], ['f_fng', 'Crypto mood', 'Fear and greed index'], ['f_book', 'Order book', 'Live buyers and sellers for crypto'], ['f_ext', 'Pre-market and after-hours prices', 'On stock pages'], ['f_games', 'Games tab', 'Levels, challenges and more'], ['f_preds', 'Bull vs Bear', 'Up or down prediction game'], ['f_leader', 'Leaderboard', 'Wallets vs the market'], ['f_achv', 'Achievements', 'Badges for milestones']];
+    const F = [['f_watch', 'Watchlist', 'Star things to keep an eye on'], ['f_alerts', 'Price alerts', 'Notifications at your target prices'], ['f_analytics', 'Performance stats', 'Win rate, risk and results'], ['f_journal', 'Trade journal', 'Notes and tags on trades'], ['f_divs', 'Dividends', 'Get paid for holding dividend stocks'], ['f_news', 'News', 'Headlines on Market and asset pages'], ['f_earnings', 'Earnings calendar', 'Upcoming company reports'], ['f_insights', 'Analyst ratings and earnings', 'Extra research on stock pages'], ['f_heatmap', 'Heatmap', "See the whole market's day at a glance"], ['f_movers', 'Top movers', 'Biggest gainers and losers'], ['f_fng', 'Crypto mood', 'Fear and greed index'], ['f_book', 'Order book', 'Live buyers and sellers for crypto'], ['f_ext', 'Pre-market and after-hours prices', 'On stock pages'], ['f_taxes', 'Taxes', 'Gains, wash sales and a 1099-style summary'], ['f_statements', 'Statements', 'Monthly account statements'], ['f_games', 'Games tab', 'Levels, challenges and more'], ['f_preds', 'Bull vs Bear', 'Up or down prediction game'], ['f_leader', 'Leaderboard', 'Wallets vs the market'], ['f_achv', 'Achievements', 'Badges for milestones']];
     return `<p class="t-sub" style="margin:8px 2px 0">Everything is on by default. Turning something off only hides it. Nothing is deleted.</p><div class="group mt16">${F.map(([k, t, s]) => rowToggle(k, t, s)).join('')}</div>`;
   },
   data() {
@@ -3137,9 +3481,11 @@ PAGES.settings = {
         <button class="cell" data-act="resetWallet"><div class="lead" style="color:var(--dn)">${icon('refresh')}</div><div class="main"><div class="title">Reset ${h(W().name)}</div><div class="sub">Saves this season to the leaderboard first</div></div></button>
         <button class="cell" data-act="clearLocal"><div class="lead">${icon('phone')}</div><div class="main"><div class="title">Clear this device's cache</div><div class="sub">Fixes a stuck screen. You stay logged in.</div></div></button></div>`;
   },
+  broker() { return `<div class="card mt16" id="broker-box"><div class="sk sk-line"></div><div class="sk sk-line" style="width:70%"></div></div>`; },
   about() { return `<div class="card" id="status-box"><div class="sk sk-line"></div><div class="sk sk-line" style="width:70%"></div></div><button class="btn btn-quiet btn-block mt16" data-act="reloadApp">${icon('refresh')}Reload the app</button><p class="note">Stock prices come from Finnhub (free key) with history from Yahoo Finance. Crypto comes from Coinbase. News and research from Finnhub, crypto details from CoinGecko.</p>`; },
 };
 PAGES.settings.after = {
+  broker(p) { brokerBox($('#broker-box', p.body)); },
   notifications(p) {
     p.body.querySelectorAll('[data-time]').forEach(i => i.addEventListener('change', () => saveSetting({ [i.dataset.time]: i.value }).then(() => toast('Quiet hours saved'))));
     pushBox($('#push-box', p.body));
@@ -3170,6 +3516,7 @@ PAGES.settings.after = {
         <div class="kv"><span class="k">Crypto prices</span><span class="v ${s.feeds.crypto.ok ? 'up' : 'dn'}">${s.feeds.crypto.ok ? 'Live' : 'Reconnecting'} · ${ago(s.feeds.crypto.last)}</span></div>
         <div class="kv"><span class="k">Stock prices</span><span class="v ${s.finnhubKey ? (s.feeds.stocks.ok ? 'up' : 'dn') : 'mu'}">${s.finnhubKey ? (s.feeds.stocks.ok ? 'Connected' : 'Reconnecting') : 'No FINNHUB_KEY'}${s.finnhubKey ? ' · trade ' + ago(s.feeds.stocks.last) : ''}</span></div>
         <div class="kv"><span class="k">Live stock streams</span><span class="v">${s.feeds.stocks.subs.length} of ${s.wsMax}</span></div>
+        <div class="kv"><span class="k">Broker</span><span class="v ${s.broker?.on ? (s.broker.ok ? 'up' : 'dn') : 'mu'}">${s.broker?.on ? `Alpaca ${h(s.broker.env)} · ${s.broker.ok ? 'connected' : 'not reachable'}` : 'Not connected'}</span></div>
         <div class="kv"><span class="k">US market</span><span class="v">${h(s.market.state)}${s.market.holiday ? ' · ' + h(s.market.holiday) : ''}</span></div>
         <div class="kv"><span class="k">Things tracked</span><span class="v">${s.tracked}</span></div>
         <div class="kv"><span class="k">Saved history points</span><span class="v">${s.db.snaps.toLocaleString()}</span></div>
