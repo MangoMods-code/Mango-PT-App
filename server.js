@@ -3057,21 +3057,80 @@ STRATEGIES.drift = {
     return out;
   },
 };
+// Turn of the month: money from paychecks and pension funds flows into stocks around month end.
+const monthPos = (d, dates, i) => { // trading days left in this month after i, and trading days into it
+  const m = d.slice(0, 7); let left = 0, into = 0;
+  for (let k = i + 1; k < dates.length && dates[k].slice(0, 7) === m; k++) left++;
+  for (let k = i; k >= 0 && dates[k].slice(0, 7) === m; k--) into++;
+  return { left, into };
+};
+STRATEGIES.tom = {
+  name: 'Turn of the month', short: 'Turn of month', icon: 'calendar', rebalance: 'none', markets: 'stocks',
+  desc: 'Holds index ETFs only from the last trading day of each month through the first few days of the next, and sits in cash the rest of the time. Paychecks, 401(k) contributions and fund rebalancing push money into stocks then; for decades a big part of the market\'s gains came on these few days.',
+  params: [{ k: 'before', label: 'Buy this many days before month end', def: 1, min: 1, max: 4 }, { k: 'after', label: 'Sell after this many days into the month', def: 3, min: 1, max: 6 }, { k: 'trendLen', label: 'Only above this average (days, 0 = off)', def: 0, min: 0, max: 300 }],
+  grid: { before: [1, 2], after: [2, 3, 4] },
+  need: p => Math.max(25, p.trendLen || 0) + 5,
+  decide(ctx) {
+    const p = ctx.params, out = { weights: {}, stops: {}, notes: {} }, picks = [];
+    for (const s of ctx.syms) {
+      const b = ctx.data[s], i = ctx.idx[s]; if (i == null) continue;
+      const d = b.d[i]; let { left, into } = monthPos(d, b.d, i);
+      // The last bar is today: the calendar, not the data, says how many trading days are left.
+      if (i === b.d.length - 1) { let [y, m, dd] = d.split('-').map(Number), n = 0; left = 0; while (n++ < 10) { [y, m, dd] = nextTradingDay(y, m, dd); if (`${y}-${String(m).padStart(2, '0')}` !== d.slice(0, 7)) break; left++; } }
+      const trendOk = !p.trendLen || b.c[i] > IND.sma(b.c, p.trendLen, i);
+      const inWindow = left < p.before || into < p.after; // sold at the close of day 'after'
+      out.notes[s] = left < p.before ? `${left === 0 ? 'Last trading day' : `${left + 1} trading days left`} of the month: the window is open.` : into <= p.after ? `Day ${into} of the month: still in the window.` : `Day ${into} of the month: outside the window, so cash.`;
+      if (inWindow && !trendOk) out.notes[s] += ` Below its ${p.trendLen}-day average, so it sits this one out.`;
+      if (inWindow && trendOk) picks.push(s);
+    }
+    picks.forEach(s => { out.weights[s] = Math.min(ctx.maxW, 1 / picks.length); });
+    return out;
+  },
+};
+// Snap-back: very stretched below its Bollinger band in an uptrend, sell at the middle.
+STRATEGIES.snapback = {
+  name: 'Snap-back', short: 'Snap-back', icon: 'refresh', rebalance: 'none', markets: 'both',
+  desc: 'Buys when something in a long uptrend closes far below its 20-day Bollinger band (more than 2 standard deviations under its average) and sells when it gets back to the average, or after 10 days. Panics in strong assets usually snap back fast. A disaster stop limits the ones that keep falling.',
+  params: [{ k: 'bands', label: 'Below the band by (std devs)', def: 2, min: 1, max: 3.5, step: 0.25 }, { k: 'len', label: 'Average over (days)', def: 20, min: 10, max: 50 }, { k: 'trendLen', label: 'Trend filter (days)', def: 200, min: 0, max: 300 }, { k: 'maxDays', label: 'Most days to hold', def: 10, min: 3, max: 30 }, { k: 'stopAtr', label: 'Disaster stop (ATRs)', def: 3, min: 1, max: 8, step: 0.5 }, { k: 'maxPositions', label: 'Most positions', def: 4, min: 1, max: 10 }],
+  grid: { bands: [1.75, 2.25], len: [10, 20] },
+  need: p => Math.max(p.trendLen || 0, p.len) + 5,
+  decide(ctx) {
+    const p = ctx.params, out = { weights: {}, stops: {}, notes: {} }, cand = [], slot = Math.min(ctx.maxW, 1 / p.maxPositions);
+    let held = 0;
+    for (const s of ctx.syms) {
+      const b = ctx.data[s], i = ctx.idx[s]; if (i == null || i < Math.max(p.trendLen, p.len)) continue;
+      const c = b.c[i], m = IND.sma(b.c, p.len, i); let v = 0; for (let k = i - p.len + 1; k <= i; k++) v += (b.c[k] - m) ** 2;
+      const sd = Math.sqrt(v / p.len), z = sd > 0 ? (c - m) / sd : 0, h = ctx.held[s], trend = !p.trendLen || c > IND.sma(b.c, p.trendLen, i);
+      if (h) {
+        const exit = c >= m || (h.days || 0) >= p.maxDays;
+        out.notes[s] = `${z.toFixed(1)} std devs from its ${p.len}-day average, day ${h.days || 0}.${exit ? (c >= m ? ' Back to average: sell.' : ' Held too long: sell.') : ' Waiting for the snap-back.'}`;
+        if (!exit) { out.weights[s] = h.weight || slot; out.stops[s] = { trail: false, price: h.stopPx || h.entry - p.stopAtr * (IND.atr(b, 14, i, b.memo) || 0) }; held++; }
+      } else {
+        const ok = z <= -p.bands && trend;
+        out.notes[s] = `${z.toFixed(1)} std devs from its ${p.len}-day average${p.trendLen ? `, ${trend ? 'above' : 'below'} its ${p.trendLen}-day trend` : ''}.${ok ? ' Stretched in an uptrend: buy.' : ''}`;
+        if (ok) cand.push({ s, z, c, atr: IND.atr(b, 14, i, b.memo) || 0 });
+      }
+    }
+    cand.sort((a, b) => a.z - b.z);
+    for (const x of cand.slice(0, Math.max(0, p.maxPositions - held))) { out.weights[x.s] = slot; out.stops[x.s] = { trail: false, price: x.c - p.stopAtr * x.atr }; }
+    return out;
+  },
+};
 // Autopilot is not a strategy of its own: it blends the others (see 09f-autopilot.js).
 STRATEGIES.autopilot = {
   name: 'Autopilot', short: 'Autopilot', icon: 'sparkle', rebalance: 'daily', markets: 'both', auto: true, band: 0.03,
   desc: 'Runs every strategy as a tryout with pretend money on today\'s real prices, and gives this wallet\'s money to the ones that are working: more to steady winners, nothing to the ones that have gone cold. A new plan every month; a strategy that stops working loses its money right away.',
-  params: [{ k: 'markets', label: 'Trades', def: 'both', choices: [['both', 'Stocks and crypto'], ['stocks', 'Stocks only'], ['crypto', 'Crypto only']] }, { k: 'maxSleeve', label: 'Most in one strategy (%)', def: 35, min: 15, max: 100 }, { k: 'volTarget', label: 'Swing target (% a year, 0 = off)', def: 20, min: 0, max: 80 }, { k: 'safety', label: 'Safety switch', def: 'on', choices: [['on', 'On'], ['off', 'Off']] }, { k: 'safetyCut', label: 'Safety switch cuts (%)', def: 50, min: 10, max: 100 }],
+  params: [{ k: 'markets', label: 'Trades', def: 'both', choices: [['both', 'Stocks and crypto'], ['stocks', 'Stocks only'], ['crypto', 'Crypto only']] }, { k: 'maxSleeve', label: 'Most in one strategy (%)', def: 35, min: 15, max: 100 }, { k: 'volTarget', label: 'Swing target (% a year, 0 = off)', def: 20, min: 0, max: 80 }, { k: 'safety', label: 'Safety switch', def: 'on', choices: [['on', 'On'], ['off', 'Off']] }, { k: 'safetyCut', label: 'Safety switch cuts (%)', def: 50, min: 10, max: 100 }, { k: 'brake', label: 'Brake after a drop of (%, 0 = off)', def: 10, min: 0, max: 50 }],
   grid: {}, need: () => 2, decide() { fail('Autopilot decides through its tryouts'); },
 };
 const UNIVERSES = {
-  dual: { name: 'Stocks vs bonds', syms: ['SPY', 'QQQ', 'EFA', 'EEM', 'IEF', 'TLT'] },
-  defensive: { name: 'Calm, steady stocks', syms: ['KO', 'PG', 'JNJ', 'PEP', 'WMT', 'MCD', 'COST', 'MSFT'] },
   megacap: { name: 'Big US stocks', syms: ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'META', 'AVGO', 'TSLA', 'JPM', 'V', 'LLY', 'COST', 'NFLX', 'WMT', 'XOM', 'AMD'] },
   etfs: { name: 'Index and sector ETFs', syms: ['SPY', 'QQQ', 'IWM', 'DIA', 'XLK', 'XLF', 'XLE', 'XLV', 'XLY', 'XLP', 'XLI', 'XLU', 'XLB', 'XLC', 'XLRE'] },
   allweather: { name: 'Stocks, bonds and gold', syms: ['SPY', 'QQQ', 'IWM', 'EFA', 'EEM', 'TLT', 'IEF', 'GLD', 'DBC', 'VNQ'] },
   crypto: { name: 'Top crypto', syms: ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'ADA', 'AVAX', 'LINK', 'LTC', 'DOT'] },
   mixed: { name: 'Stocks and crypto', syms: ['SPY', 'QQQ', 'GLD', 'TLT', 'BTC', 'ETH', 'SOL'] },
+  dual: { name: 'Stocks vs bonds', syms: ['SPY', 'QQQ', 'EFA', 'EEM', 'IEF', 'TLT'] },
+  defensive: { name: 'Calm, steady stocks', syms: ['KO', 'PG', 'JNJ', 'PEP', 'WMT', 'MCD', 'COST', 'MSFT'] },
 };
 function cleanParams(key, p = {}) {
   const st = STRATEGIES[key]; if (!st) fail('Unknown strategy');
@@ -3348,7 +3407,7 @@ async function runBotInner(id, { manual, dry }) {
   const month = today.slice(0, 7), rebalanceDue = st.rebalance === 'none' || !state._lastRebalance || (st.rebalance === 'monthly' ? state._lastRebalance.slice(0, 7) !== month : true) || manual;
   const band = st.band || 0.01;
   const ctx = { syms: tradable, data: series, idx, params: bot.params, held, bench, maxW: m.maxPosPct / 100 };
-  const dec = st.auto ? await autopilotDecide(bot, state, series, today, { dry, manual }) : rebalanceDue ? st.decide(ctx) : { weights: Object.fromEntries(Object.entries(held).map(([s, h]) => [s, h.weight || (h.qty * (priceOf(s) || h.entry)) / capital])), stops: {}, notes: Object.fromEntries(Object.keys(held).map(s => [s, 'Holding until the next monthly rebalance.'])) };
+  const dec = st.auto ? await autopilotDecide(bot, state, series, today, { dry, manual, dd }) : rebalanceDue ? st.decide(ctx) : { weights: Object.fromEntries(Object.entries(held).map(([s, h]) => [s, h.weight || (h.qty * (priceOf(s) || h.entry)) / capital])), stops: {}, notes: Object.fromEntries(Object.keys(held).map(s => [s, 'Holding until the next monthly rebalance.'])) };
   if (st.auto) { ctx.regime = dec.regime; for (const k of Object.keys(dec.weights)) dec.weights[k] = Math.min(dec.weights[k], m.maxPosPct / 100); }
   if (!rebalanceDue) log.risk.push(`${st.name} rebalances monthly; next on the first trading day of next month. Holding as is.`);
   // ---- news and social check before buying ----
@@ -3571,27 +3630,47 @@ const AP_TRYOUTS = [
   { k: 'dual', fam: 'dual', strategy: 'dual', syms: AP_DUAL, label: 'Dual momentum: stocks or bonds', market: 'stocks' },
   { k: 'dual-6m', fam: 'dual', strategy: 'dual', syms: AP_DUAL, label: 'Dual momentum, 6 months', market: 'stocks', params: { lookback: 126 } },
   { k: 'lowvol', fam: 'lowvol', strategy: 'lowvol', syms: AP_DEFENSIVE, label: 'Calm, steady stocks', market: 'stocks' },
+  { k: 'tom-index', fam: 'tom', strategy: 'tom', syms: ['SPY', 'QQQ', 'IWM'], label: 'Turn of the month in index ETFs', market: 'stocks' },
+  { k: 'snap-index', fam: 'snapback', strategy: 'snapback', syms: ['SPY', 'QQQ', 'IWM', 'DIA', 'XLK', 'XLF'], label: 'Snap-backs in index and sector ETFs', market: 'stocks' },
   { k: 'dips-index', fam: 'dips', strategy: 'rsi2', syms: ['SPY', 'QQQ', 'IWM', 'DIA'], label: 'Buying dips in index ETFs', market: 'stocks' },
   { k: 'hold-mix', fam: 'hold', strategy: 'hold', syms: ['SPY', 'QQQ', 'TLT', 'GLD'], label: 'Steady mix of stocks, bonds and gold', market: 'stocks' },
   { k: 'trend-crypto', fam: 'trend-crypto', strategy: 'trend', syms: AP_CRYPTO, label: 'Trend on top crypto', market: 'crypto' },
   { k: 'trend-crypto-fast', fam: 'trend-crypto', strategy: 'trend', syms: AP_CRYPTO, label: 'Trend on top crypto, faster', market: 'crypto', params: { fast: 20, slow: 100, atrMult: 2.5 } },
   { k: 'breakout-crypto', fam: 'breakout-crypto', strategy: 'breakout', syms: AP_CRYPTO, label: 'Breakouts in crypto', market: 'crypto' },
   { k: 'breakout-crypto-fast', fam: 'breakout-crypto', strategy: 'breakout', syms: AP_CRYPTO, label: 'Breakouts in crypto, faster', market: 'crypto', params: { entryLen: 20, exitLen: 10 } },
+  { k: 'snap-crypto', fam: 'snapback-crypto', strategy: 'snapback', syms: AP_CRYPTO, label: 'Snap-backs in crypto', market: 'crypto', params: { bands: 2.25, stopAtr: 2.5 } },
   { k: 'momentum-all', fam: 'momentum-all', strategy: 'momentum', syms: ['SPY', 'QQQ', 'GLD', 'TLT', 'BTC', 'ETH', 'SOL'], label: 'Momentum across stocks and crypto', market: 'both', params: { filterLen: 0 } },
 ];
 const apTryouts = markets => AP_TRYOUTS.filter(t => markets === 'both' || t.market === markets);
 const apSyms = markets => [...new Set(apTryouts(markets).flatMap(t => t.syms))];
 const AP_WINDOW = 126, AP_MIN_LIVE = 20, AP_MIN_SLEEVE = 0.08;
 // How good a track record is: return per unit of risk over the last ~6 months, docked for deep drops.
-function apScore(curve, P) {
-  const c = curve.slice(-AP_WINDOW - 1); if (c.length < 40) return null;
+function apWindowStats(c, P) {
   const rets = []; for (let i = 1; i < c.length; i++) rets.push(c[i][1] / c[i - 1][1] - 1);
   const mean = rets.reduce((a, b) => a + b, 0) / rets.length, sd = Math.sqrt(rets.reduce((a, r) => a + (r - mean) ** 2, 0) / Math.max(1, rets.length - 1));
   let peak = -Infinity, dd = 0; for (const [, v] of c) { peak = Math.max(peak, v); dd = Math.min(dd, v / peak - 1); }
   const sharpe = sd > 0 ? mean / sd * Math.sqrt(P) : 0;
+  return { sharpe, dd, score: sharpe * (1 - Math.min(0.6, Math.abs(dd))) };
+}
+// How good a track record is: return per unit of risk, docked for deep drops. The last 6 months count most,
+// the last year steadies it, and a tryout whose own results are sliding (below their 50-day average) is cooled off.
+function apScore(curve, P) {
+  const c = curve.slice(-AP_WINDOW - 1); if (c.length < 40) return null;
+  const s6 = apWindowStats(c, P), long = curve.slice(-253), s12 = long.length > 180 ? apWindowStats(long, P) : null;
   const q = c.slice(-64), ret3m = q.length > 1 ? q[q.length - 1][1] / q[0][1] - 1 : 0, ret6m = c[c.length - 1][1] / c[0][1] - 1;
-  const score = sharpe * (1 - Math.min(0.6, Math.abs(dd)));
-  return { sharpe, dd, ret3m, ret6m, score, eligible: sharpe > 0.3 && ret3m > -0.03 };
+  const tail = curve.slice(-50), avg50 = tail.reduce((t, x) => t + x[1], 0) / tail.length, cooling = curve[curve.length - 1][1] < avg50 * 0.995;
+  let score = s12 ? 0.65 * s6.score + 0.35 * s12.score : s6.score;
+  if (cooling) score *= 0.5;
+  return { sharpe: s6.sharpe, sharpe12: s12 ? s12.sharpe : null, dd: s6.dd, ret3m, ret6m, score, cooling, eligible: s6.sharpe > 0.3 && ret3m > -0.03 && (!s12 || s12.sharpe > 0) };
+}
+// Daily returns of each tryout over the same dates, to see which ones move together.
+function apCorr(a, b) {
+  const mb = new Map(b.map(x => [x[0], x[1]])), ra = [], rb = [];
+  for (let i = 1; i < a.length; i++) { const d0 = a[i - 1][0], d1 = a[i][0]; if (mb.has(d0) && mb.has(d1)) { ra.push(a[i][1] / a[i - 1][1] - 1); rb.push(mb.get(d1) / mb.get(d0) - 1); } }
+  if (ra.length < 30) return 0;
+  const m = x => x.reduce((t, v) => t + v, 0) / x.length, ma = m(ra), mbb = m(rb);
+  let num = 0, da = 0, db = 0; for (let i = 0; i < ra.length; i++) { num += (ra[i] - ma) * (rb[i] - mbb); da += (ra[i] - ma) ** 2; db += (rb[i] - mbb) ** 2; }
+  return da > 0 && db > 0 ? num / Math.sqrt(da * db) : 0;
 }
 // Split the money: in proportion to score, capped per strategy, small slices dropped, the rest left in cash.
 function apAllocate(board, maxSleeve) {
@@ -3603,12 +3682,21 @@ function apAllocate(board, maxSleeve) {
 const AP_PICK = 6;
 function apAllocateRaw(board, maxSleeve) {
   // The best version of each idea first, so the money spreads across different ideas; second versions only fill empty slots.
-  const ok = board.filter(t => t.eligible && t.score > 0).sort((a, b) => b.score - a.score), seen = new Set(), firsts = [], seconds = [];
+  const ok = board.filter(t => t.eligible && t.score > 0).map(t => ({ ...t })).sort((a, b) => b.score - a.score), seen = new Set(), firsts = [], seconds = [];
   for (const t of ok) (seen.has(t.fam) ? seconds : (seen.add(t.fam), firsts)).push(t);
-  let live = [...firsts, ...seconds].slice(0, AP_PICK);
+  // Skip a tryout that moves almost in lockstep with one already picked: two copies of the same bet aren't diversification.
+  const live = [];
+  for (const t of [...firsts, ...seconds]) {
+    if (live.length >= AP_PICK) break;
+    const c = Math.max(0, ...live.map(x => apCorr(x.curve || [], t.curve || [])));
+    t.corr = round(c, 2);
+    if (c > 0.85) continue;
+    live.push(c > 0.6 ? Object.assign(t, { score: t.score * (1 - (c - 0.6)) }) : t);
+  }
+  let pool = live;
   for (let pass = 0; pass < 4; pass++) {
-    const tot = live.reduce((a, t) => a + t.score, 0); if (!tot) return {};
-    const w = {}; let left = 1, open = live.slice();
+    const tot = pool.reduce((a, t) => a + t.score, 0); if (!tot) return {};
+    const w = {}; let left = 1, open = pool.slice();
     // water-fill so capped strategies hand their extra to the others
     for (let it = 0; it < 6 && open.length; it++) {
       const sum = open.reduce((a, t) => a + t.score, 0), next = [];
@@ -3617,14 +3705,14 @@ function apAllocateRaw(board, maxSleeve) {
       if (next.length === open.length) { for (const t of open) w[t.k] = left * t.score / sum; open = []; break; }
       left -= used; open = next;
     }
-    const small = live.filter(t => (w[t.k] || 0) < AP_MIN_SLEEVE);
+    const small = pool.filter(t => (w[t.k] || 0) < AP_MIN_SLEEVE);
     if (!small.length) return Object.fromEntries(Object.entries(w).map(([k, v]) => [k, round(v, 4)]));
-    live = live.filter(t => !small.includes(t));
+    pool = pool.filter(t => !small.includes(t));
   }
   return {};
 }
-async function autopilotDecide(bot, state, series, today, { dry = false, manual = false } = {}) {
-  const p = bot.params, tryouts = apTryouts(p.markets || 'both'), maxSleeve = (p.maxSleeve || 35) / 100;
+async function autopilotDecide(bot, state, series, today, { dry = false, manual = false, dd = 0 } = {}) {
+  const p = { ...cleanParams('autopilot', {}), ...bot.params }, tryouts = apTryouts(p.markets || 'both'), maxSleeve = (p.maxSleeve || 35) / 100;
   if (!state._since) state._since = today;
   if (!state._histStart) state._histStart = addIso(state._since, -460);
   const board = [], curves = {};
@@ -3643,12 +3731,12 @@ async function autopilotDecide(bot, state, series, today, { dry = false, manual 
     curves[t.k] = r.curve.slice(-90);
     board.push({ k: t.k, fam: t.fam || t.k, label: t.label, strategy: t.strategy, name: st.name, market: t.market, syms, ...Object.fromEntries(Object.entries(sc).map(([a, v]) => [a, typeof v === 'number' ? round(v, 4) : v])),
       live: liveC.length > 1 ? round(liveC[liveC.length - 1][1] / liveC[0][1] - 1, 4) : 0, liveDays, cap: liveDays < AP_MIN_LIVE ? Math.min(maxSleeve, 0.25) : maxSleeve,
-      holding: Object.keys(holds), cash: round(1 - Object.values(holds).reduce((a, h) => a + h.w, 0), 3), spark: downsamplePts(r.curve.slice(-AP_WINDOW), 40).map(x => round(x[1], 2)) });
+      cooling: !!sc.cooling, sharpe12: sc.sharpe12 == null ? null : round(sc.sharpe12, 3), holding: Object.keys(holds), cash: round(1 - Object.values(holds).reduce((a, h) => a + h.w, 0), 3), spark: downsamplePts(r.curve.slice(-AP_WINDOW), 40).map(x => round(x[1], 2)) });
   }
   // A new plan on the first run of each month (or the first run ever, or when asked); in between, a strategy that goes cold loses its money right away.
   const month = today.slice(0, 7), prev = state._alloc || {};
   let alloc = prev, changed = false, why = '';
-  if (!state._allocMonth || state._allocMonth !== month || manual && !Object.keys(prev).length) { alloc = apAllocate(board, maxSleeve); changed = true; why = state._allocMonth ? 'monthly' : 'first'; }
+  if (!state._allocMonth || state._allocMonth !== month || manual && !Object.keys(prev).length) { alloc = apAllocate(board.map(t => ({ ...t, curve: curves[t.k] })), maxSleeve); changed = true; why = state._allocMonth ? 'monthly' : 'first'; }
   else {
     const cold = Object.keys(prev).filter(k => { const t = board.find(x => x.k === k); return !t || !t.eligible; });
     if (cold.length) { alloc = { ...prev }; for (const k of cold) delete alloc[k]; changed = true; why = 'cold:' + cold.join(','); }
@@ -3690,9 +3778,16 @@ async function autopilotDecide(bot, state, series, today, { dry = false, manual 
       if (risk.scale < 0.999) for (const s of Object.keys(out.weights)) out.weights[s] *= risk.scale;
     }
   }
+  // Brake: after a 10% drop from the wallet's high, it holds half until it has climbed back within 5%.
+  const brakeAt = -(p.brake ?? 10) / 100;
+  if (brakeAt < 0) {
+    if (dd <= brakeAt) state._brake = true; else if (dd > brakeAt / 2) state._brake = false;
+    risk.brake = !!state._brake;
+    if (state._brake) for (const s of Object.keys(out.weights)) out.weights[s] *= 0.5;
+  }
   for (const s of Object.keys(out.weights)) out.weights[s] = round(out.weights[s], 4);
   const cash = 1 - Object.values(out.weights).reduce((a, b) => a + b, 0);
-  const riskBits = [risk.vol != null ? `the mix has swung ${Math.round(risk.vol * 100)}% a year${risk.scale < 0.999 ? `, so it holds ${Math.round(risk.scale * 100)}% of the plan to stay near the ${p.volTarget}% target` : ', within the target'}` : '', risk.stocksOff ? 'safety switch on for stocks' : '', risk.cryptoOff ? 'safety switch on for crypto' : ''].filter(Boolean);
+  const riskBits = [risk.vol != null ? `the mix has swung ${Math.round(risk.vol * 100)}% a year${risk.scale < 0.999 ? `, so it holds ${Math.round(risk.scale * 100)}% of the plan to stay near the ${p.volTarget}% target` : ', within the target'}` : '', risk.stocksOff ? 'safety switch on for stocks' : '', risk.cryptoOff ? 'safety switch on for crypto' : '', risk.brake ? `brake on: the wallet is ${Math.round(Math.abs(dd) * 100)}% below its high, so it holds half until it recovers` : ''].filter(Boolean);
   out.regime = (Object.keys(alloc).length ? `Using ${Object.keys(alloc).length} of ${board.length} strategies: ${board.filter(t => t.alloc > 0).sort((a, b) => b.alloc - a.alloc).map(t => `${t.label} ${Math.round(t.alloc * 100)}%`).join(', ')}.` : `Sitting out: none of the ${board.length} strategies has a good enough record right now.`) + (riskBits.length ? ' ' + riskBits.join('; ').replace(/^./, c => c.toUpperCase()) + '.' : '') + ` About ${Math.max(0, Math.round(cash * 100))}% in cash.`;
   out.risk = risk;
   if (!dry) {
@@ -4280,10 +4375,11 @@ function healthOf(bot, state, extra = {}) {
 async function botCard(b) {
   const bot = botJson(b), w = await row('select * from wallets where id=$1', [b.wid]);
   if (!w) return { ...bot, wallet: null };
+  const snaps = (await rows("select ts, eq from snap where wid=$1 and ts > now() - interval '30 days' order by ts", [b.wid])).map(r => [tsMs(r.ts), +r.eq]);
   const pos = await positions(b.wid), value = +w.cash + marketValue(pos);
   const mine = pos.filter(p => bot.syms.includes(p.sym));
   return { ...bot, wallet: { id: w.id, name: w.name, emoji: w.emoji, color: w.color, profile: w.profile, archived: w.archived, broker: w.broker || null }, value, start: +w.start_bal, ret: (value / +w.start_bal - 1) * 100, day: dayChange(pos),
-    holding: mine.map(p => p.sym), next: nextRunOf(bot), health: healthOf(bot, jsonOr(b.state, {}), { lastError: await row("select ts, title, body from bot_log where bot_id=$1 and kind='error' order by id desc limit 1", [b.id]).then(r => r && { ts: tsMs(r.ts), title: r.title, body: r.body }) }), invested: mine.reduce((t, p) => t + p.qty * (priceOf(p.sym) || p.avg), 0), cash: +w.cash, dd: bot.peak ? value / bot.peak - 1 : 0 };
+    holding: mine.map(p => p.sym), next: nextRunOf(bot), health: healthOf(bot, jsonOr(b.state, {}), { lastError: await row("select ts, title, body from bot_log where bot_id=$1 and kind='error' order by id desc limit 1", [b.id]).then(r => r && { ts: tsMs(r.ts), title: r.title, body: r.body }) }), invested: mine.reduce((t, p) => t + p.qty * (priceOf(p.sym) || p.avg), 0), cash: +w.cash, dd: bot.peak ? value / bot.peak - 1 : 0, spark: downsamplePts(snaps.concat([[Date.now(), value]]), 32).map(x => round(x[1], 2)) };
 }
 GET('/api/bots', auth, async () => {
   const list = await rows('select * from bots order by id');
@@ -4391,7 +4487,11 @@ PATCH('/api/bots/:id', auth, async req => {
   const b = await row('select * from bots where id=$1', [+req.params.id]); if (!b) fail('That bot is gone', 404);
   const bot = botJson(b), x = req.body || {}, sets = [], vals = [];
   const set = (k, v) => { vals.push(v); sets.push(`${k}=$${vals.length}`); };
-  if (x.name !== undefined) set('name', String(x.name).trim().slice(0, 30) || bot.name);
+  if (x.name !== undefined) {
+    const nm = String(x.name).trim().slice(0, 30) || bot.name; set('name', nm);
+    // A bot's own wallet is named after it; keep the two in step.
+    if (x.renameWallet !== false) await Q('update wallets set name=$1 where id=$2 and name=$3', [nm, bot.wid, bot.name]).then(r => r.rowCount && loadWalletMeta()).catch(() => {});
+  }
   if (x.params) { const np = cleanParams(bot.strategy, { ...bot.params, ...x.params }); set('params', JSON.stringify(np)); if (STRATEGIES[bot.strategy]?.auto) set('syms', JSON.stringify(apSyms(np.markets))); }
   if (x.mandate) {
     const nm = cleanMandate(x.mandate, bot.mandate), w = await row('select broker from wallets where id=$1', [bot.wid]);

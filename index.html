@@ -872,6 +872,23 @@ button.tile:active { transform: scale(.98); }
 .lb-bar.up { background: var(--up); } .lb-bar.dn { background: var(--dn); } .lb-bar.spy { background: var(--mu2); }
 .bt-legend .ln.spy-ln { background: var(--mu2); }
 
+/* strategy colors, sparklines, rename */
+.bot-ava { --hue: var(--ac); }
+.bot-ava.running { background: color-mix(in srgb, var(--hue) 16%, transparent); color: var(--hue); }
+.bot-ava.paused { background: var(--card3); color: var(--mu); }
+.strat { --hue: var(--ac); }
+.strat.on { box-shadow: var(--hi), inset 0 0 0 2px var(--hue); background: radial-gradient(120% 90% at 0 0, color-mix(in srgb, var(--hue) 16%, transparent), transparent 70%), var(--card); }
+.strat-ic { color: var(--hue); background: color-mix(in srgb, var(--hue) 12%, var(--card2)); }
+.strat.on .strat-ic { background: var(--hue); color: #10091A; }
+.bot-spark { width: 64px; height: 30px; flex: none; opacity: .9; }
+.bot-name { display: inline-flex; align-items: center; gap: 8px; text-align: left; max-width: 100%; }
+.bot-name svg { width: 16px; height: 16px; color: var(--mu); flex: none; }
+.bot-name:active { opacity: .7; }
+.lb-top { background: radial-gradient(120% 140% at 0 50%, color-mix(in srgb, var(--ac) 12%, transparent), transparent 60%); }
+.lb-top .lb-n { font-size: 18px; }
+.bot-meta .tag { flex: none; white-space: nowrap; }
+.bot-meta .next-cap { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ---------- motion ---------- */
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--up) 55%, transparent); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
@@ -3531,6 +3548,9 @@ const BOT_ST = { running: ['Running', 'up'], paused: ['Paused', ''], killed: ['S
 const FLAG_INFO = { earnings_soon: ['Earnings soon', 'ac'], severe_news: ['Serious news', 'dn'], negative_event: ['Bad news', 'dn'], negative_mood: ['Gloomy mood', 'dn'], positive_mood: ['Upbeat mood', 'up'], attention_spike: ['Lots of attention', 'ac'] };
 const flagChips = (flags = []) => flags.length ? `<div class="flag-row">${flags.map(f => FLAG_INFO[f] ? `<span class="tag ${FLAG_INFO[f][1]}">${FLAG_INFO[f][0]}</span>` : '').join('')}</div>` : '';
 let STRATS = null;
+const STRAT_HUE = { trend: '#3DDC97', momentum: '#FFB224', rsi2: '#5AB8FF', breakout: '#FF7A45', hold: '#9C8FBF', dual: '#B48CFF', lowvol: '#2EC4B6', drift: '#FF6F96', tom: '#F5C542', snapback: '#7C83FF', autopilot: '#FFB224' };
+const hueOf = k => STRAT_HUE[k] || '#9C8FBF';
+const STRAT_SYMS = { rsi2: ['SPY', 'QQQ', 'IWM', 'DIA'], tom: ['SPY', 'QQQ', 'IWM'], snapback: ['SPY', 'QQQ', 'IWM', 'DIA', 'XLK', 'XLF'], dual: ['SPY', 'QQQ', 'EFA', 'EEM', 'IEF', 'TLT'], lowvol: ['KO', 'PG', 'JNJ', 'PEP', 'WMT', 'MCD', 'COST', 'MSFT'], momentum: ['SPY', 'QQQ', 'IWM', 'EFA', 'EEM', 'TLT', 'IEF', 'GLD', 'DBC', 'VNQ'] };
 const strats = async () => STRATS || (STRATS = await api('strategies'));
 const pctF = (v, dp = 1) => v == null || !Number.isFinite(v) ? '–' : pct(v * 100, dp);
 const pctA = (v, dp = 1) => v == null || !Number.isFinite(v) ? '–' : pct0(Math.abs(v) * 100, dp);
@@ -3616,9 +3636,9 @@ VIEWS.bots = {
 function botCard(b, st) {
   const s = st[b.strategy] || { name: b.strategy, icon: 'bot' }, [stl, stc] = BOT_ST[b.status] || [b.status, ''];
   return `<button class="bot-card" data-act="go" data-to="bot/${b.id}">
-    <div class="bot-top"><div class="bot-ava ${b.status}">${icon(s.icon)}</div><div class="main"><div class="title">${h(b.name)}</div><div class="sub">${h(s.name)} · ${b.syms.length} symbol${b.syms.length === 1 ? '' : 's'}</div></div>
-      <div class="trail col"><b class="n priv">${money(b.value || 0)}</b><span class="n ${cls(b.ret)}">${pct(b.ret)}</span></div></div>
-    <div class="bot-meta"><span class="bot-st ${stc}"><i></i>${stl}</span>${b.health && !b.health.ok ? `<span class="tag dn">${icon('info')}Needs a look</span>` : ''}${b.wallet?.broker ? '<span class="tag ac">Alpaca</span>' : ''}<span class="ellip">${b.holding.length ? 'Holding ' + b.holding.slice(0, 4).join(', ') + (b.holding.length > 4 ? ` +${b.holding.length - 4}` : '') : 'All cash'}</span><span class="grow"></span><span class="t-cap">${b.status === 'running' ? h(nextRunText(b.next)) : b.lastRun ? 'Last ran ' + timeAgo(b.lastRun) : ''}</span></div></button>`;
+    <div class="bot-top"><div class="bot-ava ${b.status}" style="--hue:${hueOf(b.strategy)}">${icon(s.icon)}</div><div class="main"><div class="title">${h(b.name)}</div><div class="sub">${h(s.name)} · ${b.syms.length} symbol${b.syms.length === 1 ? '' : 's'}</div></div>
+      ${b.spark?.length > 2 ? sparkSvg(b.spark, { w: 64, h: 30, cls: 'spark bot-spark', base: b.start }) : ''}<div class="trail col"><b class="n priv">${money(b.value || 0)}</b><span class="n ${cls(b.ret)}">${pct(b.ret)}</span></div></div>
+    <div class="bot-meta"><span class="bot-st ${stc}"><i></i>${stl}</span>${b.wallet?.broker ? '<span class="tag ac">Alpaca</span>' : ''}${b.health && !b.health.ok ? `<span class="tag dn">${icon('info')}Needs a look</span>` : `<span class="ellip">${b.holding.length ? 'Holding ' + b.holding.slice(0, 4).join(', ') + (b.holding.length > 4 ? ` +${b.holding.length - 4}` : '') : 'All cash'}</span>`}<span class="grow"></span><span class="t-cap next-cap">${b.status === 'running' ? h(nextRunText(b.next).replace(/^Decides /, '').replace(/^./, c => c.toUpperCase())) : b.lastRun ? 'Last ran ' + timeAgo(b.lastRun) : ''}</span></div></button>`;
 }
 function moodBar(v) {
   const w = Math.min(50, Math.abs(v) * 50);
@@ -3650,7 +3670,7 @@ PAGES.bot = {
     const kv = (k, v, c = '') => `<div class="kv"><span class="k">${k}</span><span class="v ${c}">${v}</span></div>`;
     const keepScroll = p.scroller.scrollTop;
     p.body.innerHTML = `
-      <div class="bot-hero"><div class="bot-ava lg ${b.status}">${icon(st.icon)}</div><div class="grow"><h1 class="t-display" style="margin:0">${h(b.name)}</h1><div class="t-sub">${h(st.name)} · ${h(b.wallet?.emoji || '')} ${h(b.wallet?.name || 'wallet')}${b.broker ? ` · ${b.live ? '<span class="real-badge">REAL MONEY</span>' : 'Alpaca paper'}` : ''}</div></div></div>
+      <div class="bot-hero"><div class="bot-ava lg ${b.status}" style="--hue:${hueOf(b.strategy)}">${icon(st.icon)}</div><div class="grow"><button class="bot-name" data-act="botRename" aria-label="Rename this bot"><h1 class="t-display" style="margin:0">${h(b.name)}</h1>${icon('edit')}</button><div class="t-sub">${h(st.name)} · ${h(b.wallet?.emoji || '')} ${h(b.wallet?.name || 'wallet')}${b.broker ? ` · ${b.live ? '<span class="real-badge">REAL MONEY</span>' : 'Alpaca paper'}` : ''}</div></div></div>
       <div class="bot-status mt12"><span class="bot-st ${stc}"><i></i>${stl}</span><span class="t-foot">${b.status === 'running' ? h(nextRunText(b.next)) : b.status === 'killed' ? h(b.killed || '') : 'Paused: no new decisions until you resume it.'}</span></div>
       ${healthCard(b)}
       <div class="a-price mt12"><span class="priv">${money(b.value || 0)}</span></div><div class="a-chg ${cls(b.ret)}">${money((b.value || 0) - (b.start || 0), { sign: true })} (${pct(b.ret)}) since it started</div>
@@ -3860,7 +3880,7 @@ PAGES.lab = {
       <label class="field"><span>Starting money</span><input type="number" inputmode="decimal" id="lab-cap" value="${LAB.capital}"></label>
       <button class="btn btn-primary btn-block btn-lg mt16" id="lab-run">${icon('play')}Run the test</button>
       <div id="lab-out"></div>`;
-    bindFields(p.body); bindPickers(p.body, 'lab', s, () => this.draw(p), LAB);
+    bindFields(p.body); bindPickers(p.body, 'lab', s, () => this.draw(p), LAB); raf(() => showPicked(p.body));
     onSeg(p.body, 'lab-years', v => { LAB.years = +v; });
     $('#lab-run', p.body).addEventListener('click', e => this.run(p, e.currentTarget));
   },
@@ -3881,7 +3901,7 @@ PAGES.lab = {
 ACT.labReset = () => { LAB.params = {}; const p = Router.top()?.page; if (p?.name === 'lab') PAGES.lab.draw(p); };
 ACT.labToBot = () => { App.botDraft = { strategy: LAB.strategy, syms: LAB.syms.slice(), params: { ...LAB.params }, uni: LAB.uni }; Router.go('newbot'); };
 function stratPick(s, cur, pre) {
-  return `<div class="strat-pick" data-pick="${pre}-strat">${Object.entries(s.strategies).filter(([, x]) => !x.auto).map(([k, x]) => `<button type="button" class="strat ${k === cur ? 'on' : ''}" data-k="${k}"><span class="strat-ic">${icon(x.icon)}</span><span class="strat-t">${h(x.name)}</span><span class="strat-d">${h(x.desc)}</span><span class="strat-m">${x.rebalance === 'monthly' ? 'Trades monthly' : 'Checks daily'} · ${x.markets === 'stocks' ? 'Best on stocks and ETFs' : 'Stocks and crypto'}</span></button>`).join('')}</div>`;
+  return `<div class="strat-pick" data-pick="${pre}-strat">${Object.entries(s.strategies).filter(([, x]) => !x.auto).map(([k, x]) => `<button type="button" class="strat ${k === cur ? 'on' : ''}" data-k="${k}" style="--hue:${hueOf(k)}"><span class="strat-ic">${icon(x.icon)}</span><span class="strat-t">${h(x.name)}</span><span class="strat-d">${h(x.desc)}</span><span class="strat-m">${x.rebalance === 'monthly' ? 'Trades monthly' : 'Checks daily'} · ${x.markets === 'stocks' ? 'Best on stocks and ETFs' : 'Stocks and crypto'}</span></button>`).join('')}</div>`;
 }
 function uniPick(s, cur, syms, pre) {
   return `<div class="chips">${Object.entries(s.universes).map(([k, u]) => `<button type="button" class="chip ${k === cur ? 'on' : ''}" data-uni="${k}">${h(u.name)}</button>`).join('')}<button type="button" class="chip ${cur === 'custom' ? 'on' : ''}" data-uni="custom">Your own</button></div>
@@ -3890,7 +3910,7 @@ function uniPick(s, cur, syms, pre) {
 function bindPickers(root, pre, s, redraw, model) {
   root.addEventListener('click', e => {
     const sb = e.target.closest(`[data-pick="${pre}-strat"] .strat`);
-    if (sb) { const st0 = s.strategies[model.strategy]; model.params = {}; model.syms = symList($(`#${pre}-syms`, root).value); if (sb.dataset.k === model.strategy) return; model.strategy = sb.dataset.k; void st0; redraw(); return; }
+    if (sb) { model.params = {}; model.syms = symList($(`#${pre}-syms`, root).value); if (sb.dataset.k === model.strategy) return; model.strategy = sb.dataset.k; if (model.uni !== 'custom' && STRAT_SYMS[model.strategy]) { model.syms = STRAT_SYMS[model.strategy].slice(); model.uni = 'suggested'; const ta = $(`#${pre}-syms`, root); if (ta) ta.value = model.syms.join(', '); } redraw(); return; }
     const u = e.target.closest('[data-uni]');
     if (u) { model.uni = u.dataset.uni; root.querySelectorAll('[data-uni]').forEach(x => x.classList.toggle('on', x === u)); if (u.dataset.uni !== 'custom') { model.syms = s.universes[u.dataset.uni].syms.slice(); $(`#${pre}-syms`, root).value = model.syms.join(', '); } else { const t = $(`#${pre}-syms`, root); t.focus(); } }
   });
@@ -3917,7 +3937,7 @@ PAGES.newbot = {
   },
   draw(p) {
     const s = p.s, m = p.m, st = s.strategies[m.strategy];
-    if (!m.syms) m.syms = (m.strategy === 'momentum' ? s.universes.allweather : m.strategy === 'rsi2' ? { syms: ['SPY', 'QQQ', 'IWM', 'DIA'] } : s.universes[m.uni]).syms.slice();
+    if (!m.syms) m.syms = (STRAT_SYMS[m.strategy] || s.universes[m.uni].syms).slice();
     const wallets = (App.S.wallets || []).filter(w => !w.archived);
     p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">New bot</h1><p class="t-sub" style="margin:0 2px">Pick how it trades, what it trades and the limits it can never cross. Test it before it touches money.</p>
       <div class="section-h"><h2>How it trades</h2></div>${stratPick(s, m.strategy, 'nb')}
@@ -3936,7 +3956,7 @@ PAGES.newbot = {
       <button class="btn btn-primary btn-block btn-lg mt16" id="nb-go">${icon('bot')}Start the bot</button>
       <p class="note">Bots trade practice money in Mango wallets with the same fees, spreads and settlement as a real account, unless you pick your Alpaca wallet. Real money needs ALPACA_ENV=live in Railway, a cap, and typing REAL MONEY. Nothing here is financial advice, and no strategy wins every year.</p>`;
     bindFields(p.body);
-    bindPickers(p.body, 'nb', s, () => { this.save(p); this.draw(p); }, m);
+    bindPickers(p.body, 'nb', s, () => { this.save(p); this.draw(p); }, m); raf(() => showPicked(p.body));
     onSeg(p.body, 'nb-w', v => { this.save(p); m.wallet = v === 'old' ? (wallets[0]?.id || 0) : 0; if (v === 'old' && !wallets.length) { toast('No wallets to pick from', { kind: 'err' }); return; } this.draw(p); });
     onSeg(p.body, 'nb-prof', v => { m.profile = v; });
     onSeg(p.body, 'nb-years', v => { m.years = +v; });
@@ -4016,7 +4036,7 @@ function buzzCard(b) {
 // ---------- Autopilot ----------
 const autoHero = () => `<button class="auto-hero" data-act="autoNew"><div class="auto-hero-ic">${icon('sparkle')}</div><div class="grow"><div class="t">Autopilot</div><div class="d">Set it once. It tries every strategy with pretend money and gives a wallet's money to the ones that are working, moving it every month.</div></div>${icon('right', 'chev')}</button>`;
 ACT.autoNew = async () => {
-  const s = sheet({ title: 'Turn on Autopilot', tall: true, html: `<p class="dialog-msg">Autopilot gets its own new wallet. Every day it runs 18 strategy tryouts on real prices with pretend money, then puts this wallet's money into the ones with the best recent record. New strategies start small until they've proven themselves for 4 weeks, and none can ever hold more than the limit you set.</p>
+  const s = sheet({ title: 'Turn on Autopilot', tall: true, html: `<p class="dialog-msg">Autopilot gets its own new wallet. Every day it runs 21 strategy tryouts on real prices with pretend money, then puts this wallet's money into the ones with the best recent record. New strategies start small until they've proven themselves for 4 weeks, and none can ever hold more than the limit you set.</p>
     <label class="field"><span>Starting money</span><input type="number" inputmode="decimal" id="ap-start" value="10000"></label>
     <div class="field"><span>What it trades</span>${seg('ap-mk', [['both', 'Stocks and crypto'], ['stocks', 'Stocks'], ['crypto', 'Crypto']], 'both')}</div>
     <div class="pf-grid"><label class="field"><span>Stop everything after a drop of (%)</span><input type="number" inputmode="decimal" id="ap-dd" value="20"></label><label class="field"><span>Most in one strategy (%)</span><input type="number" inputmode="decimal" id="ap-max" value="35"></label><label class="field"><span>Swing target (% a year)</span><input type="number" inputmode="decimal" id="ap-vol" value="20"><small class="t-foot">Holds less when markets get wild. 0 = off.</small></label></div>
@@ -4047,11 +4067,11 @@ function autoSections(b) {
   return `<div class="section-h"><h2>The plan</h2><span class="t-foot">${a.month ? 'For ' + new Date(a.month + '-15T12:00').toLocaleDateString('en-US', { month: 'long' }) : 'Not made yet'}</span></div>
     <div class="card">${used.length ? `<div class="stack plan-stack">${used.map((t, i) => `<i style="flex:${t.alloc};background:${COL[i % COL.length]}"></i>`).join('')}${cash > 0.005 ? `<i style="flex:${cash};background:var(--card3)"></i>` : ''}</div>
       <div class="plan-list">${used.map((t, i) => `<div class="plan-row"><i style="background:${COL[i % COL.length]}"></i><span class="grow">${h(t.label)}</span><b class="n">${Math.round(t.alloc * 100)}%</b></div>`).join('')}${cash > 0.005 ? `<div class="plan-row"><i style="background:var(--card3)"></i><span class="grow">Cash</span><b class="n">${Math.round(cash * 100)}%</b></div>` : ''}</div>` : `<p class="t-foot" style="margin:0">${a.board.length ? 'Holding cash: none of the strategies has a good enough record right now. It checks again every day.' : 'Its first plan shows up here after the first decision.'}</p>`}
-      ${a.risk ? `<div class="plan-risk">${a.risk.vol != null ? `<span>${icon('activity')}Swinging ${Math.round(a.risk.vol * 100)}% a year${a.risk.scale < 0.999 ? ` · holding ${Math.round(a.risk.scale * 100)}% of the plan` : ''}</span>` : ''}${a.risk.stocksOff ? `<span class="dn">${icon('shield')}Safety switch on for stocks</span>` : ''}${a.risk.cryptoOff ? `<span class="dn">${icon('shield')}Safety switch on for crypto</span>` : ''}</div>` : ''}
+      ${a.risk ? `<div class="plan-risk">${a.risk.vol != null ? `<span>${icon('activity')}Swinging ${Math.round(a.risk.vol * 100)}% a year${a.risk.scale < 0.999 ? ` · holding ${Math.round(a.risk.scale * 100)}% of the plan` : ''}</span>` : ''}${a.risk.stocksOff ? `<span class="dn">${icon('shield')}Safety switch on for stocks</span>` : ''}${a.risk.cryptoOff ? `<span class="dn">${icon('shield')}Safety switch on for crypto</span>` : ''}${a.risk.brake ? `<span class="dn">${icon('pause')}Brake on: holding half until it recovers</span>` : ''}</div>` : ''}
       ${a.report ? `<button class="link mt12" data-act="botReport" data-id="${a.report.id}">Read the ${h(a.report.title.toLowerCase())}</button>` : ''}</div>
     ${board.length ? `<div class="section-h"><h2>Tryouts</h2><span class="t-foot">${days ? `${days} day${days === 1 ? '' : 's'} live` : 'Live from today'}</span></div>
-    <div class="group">${board.map(t => `<div class="cell tryout ${t.alloc > 0 ? 'on' : ''}"><div class="main"><div class="title">${h(t.label)}</div><div class="sub">${t.alloc > 0 ? `<b class="ac">${Math.round(t.alloc * 100)}% of the money</b> · ` : t.eligible ? 'Not needed this month · ' : '<span class="dn">Not working lately</span> · '}6 months ${pct(t.ret6m * 100, 1)} · Sharpe ${t.sharpe.toFixed(2)} · since start ${pct(t.live * 100, 1)}</div></div>${sparkSvg(t.spark, { w: 64, h: 28 })}</div>`).join('')}</div>
-    <p class="note">Each idea runs in a couple of versions, and one idea never gets more than the per-strategy limit however many versions it has. Each tryout trades its own pretend $10,000 with real fees. Scores use the last 6 months: return per unit of risk, docked for big drops. A strategy needs a Sharpe above 0.3 and no real loss in the last 3 months to get money, and starts at most 25% until it has 4 weeks of live results.</p>` : ''}`;
+    <div class="group">${board.map(t => `<div class="cell tryout ${t.alloc > 0 ? 'on' : ''}"><div class="main"><div class="title">${h(t.label)}</div><div class="sub">${t.alloc > 0 ? `<b class="ac">${Math.round(t.alloc * 100)}% of the money</b> · ` : t.eligible ? 'Not needed this month · ' : '<span class="dn">Not working lately</span> · '}${t.cooling ? '<span class="ac">Cooling off</span> · ' : ''}6 months ${pct(t.ret6m * 100, 1)} · Sharpe ${t.sharpe.toFixed(2)} · since start ${pct(t.live * 100, 1)}</div></div>${sparkSvg(t.spark, { w: 64, h: 28 })}</div>`).join('')}</div>
+    <p class="note">Each idea runs in a couple of versions, and one idea never gets more than the per-strategy limit however many versions it has. Each tryout trades its own pretend $10,000 with real fees. Scores use the last 6 months (and the last year, for stability): return per unit of risk, docked for big drops. A tryout whose own results are sliding is cooled off, and one that moves in lockstep with a pick is skipped. A strategy needs a Sharpe above 0.3 and no real loss in the last 3 months to get money, and starts at most 25% until it has 4 weeks of live results.</p>` : ''}`;
 }
 ACT.botReport = el => {
   const p = curBot(); const l = p?.d?.auto?.report?.id === +el.dataset.id ? p.d.auto.report : (p?.d?.log || []).concat(p?.logAll || []).find(x => x.id === +el.dataset.id); if (!l) return;
@@ -4088,7 +4108,7 @@ PAGES.botboard = {
     p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Leaderboard</h1><p class="t-sub" style="margin:0 2px">Every bot since it started, against simply holding the S&P 500 over the same days.</p><div id="lb"><div class="sk sk-block mt16"></div></div>`;
     api('bots/board').then(list => {
       const max = Math.max(0.0001, ...list.map(x => Math.abs(x.ret)), ...list.map(x => Math.abs(x.spy || 0)));
-      $('#lb', p.body).innerHTML = list.length ? `<div class="group mt16">${list.map((x, i) => `<button class="cell lb-row" data-act="go" data-to="bot/${x.id}"><span class="lb-n">${i + 1}</span><div class="main"><div class="title">${h(x.name)}${x.status !== 'running' ? ` <span class="t-cap">${x.status === 'paused' ? 'paused' : 'stopped'}</span>` : ''}</div>
+      $('#lb', p.body).innerHTML = list.length ? `<div class="group mt16">${list.map((x, i) => `<button class="cell lb-row ${i === 0 && x.ret > 0 ? 'lb-top' : ''}" data-act="go" data-to="bot/${x.id}"><span class="lb-n">${i === 0 && x.ret > 0 ? '👑' : i + 1}</span><div class="main"><div class="title">${h(x.name)}${x.status !== 'running' ? ` <span class="t-cap">${x.status === 'paused' ? 'paused' : 'stopped'}</span>` : ''}</div>
         <div class="lb-bars"><span class="lb-bar ${x.ret >= 0 ? 'up' : 'dn'}" style="width:${Math.abs(x.ret) / max * 100}%"></span>${x.spy != null ? `<span class="lb-bar spy" style="width:${Math.abs(x.spy) / max * 100}%"></span>` : ''}</div>
         <div class="sub">${x.days} day${x.days === 1 ? '' : 's'} · ${x.trades} trade${x.trades === 1 ? '' : 's'}${x.win != null ? ` · ${Math.round(x.win * 100)}% wins` : ''} · biggest drop ${pct0(Math.abs(x.maxDD) * 100, 1)}</div></div>
         <div class="trail col" style="align-items:flex-end"><b class="n ${cls(x.ret)}">${pct(x.ret * 100)}</b>${x.vs != null ? `<span class="t-cap n ${cls(x.vs)}">${x.vs >= 0 ? 'beats' : 'trails'} S&P by ${pct0(Math.abs(x.vs) * 100, 1)}</span>` : ''}</div></button>`).join('')}</div>
@@ -4097,6 +4117,16 @@ PAGES.botboard = {
     }).catch(e => { $('#lb', p.body).innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; });
   },
 };
+
+ACT.botRename = async () => {
+  const p = curBot(); if (!p) return;
+  const name = await askText({ title: 'Rename bot', label: 'Name', value: p.d.name, ok: 'Rename', msg: p.d.wallet?.name === p.d.name ? 'Its wallet gets the same new name.' : '' });
+  if (name == null || !name.trim() || name.trim() === p.d.name) return;
+  try { await patch('bots/' + p.id, { name: name.trim() }); toast('Renamed to ' + name.trim()); await loadState({ quiet: true }); p.load(); VIEWS.bots.load(); } catch (e) { toastErr(e); }
+};
+
+// Keep the chosen strategy card in view after the picker is redrawn.
+function showPicked(root) { const on = $('.strat-pick .strat.on', root); if (on) on.parentElement.scrollLeft = Math.max(0, on.offsetLeft - 16); }
 
 // ===================================================================
 // Settings
