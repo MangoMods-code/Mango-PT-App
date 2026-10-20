@@ -293,7 +293,7 @@ const DEF = {
   confirmStyle: 'hold', confirmBuy: false, confirmSell: true, cashAPY: 0, startBalance: 10000,
   // notifications
   pushAlerts: true, pushOrders: true, notifySummary: true, notifyMoves: true, moveThreshold: 5,
-  notifyAchv: true, notifyGames: true, pushBots: true, botWeekly: true, quietStart: '', quietEnd: '',
+  notifyAchv: true, notifyGames: true, pushBots: true, botWeekly: true, pushReal: true, realDailyLossPct: 3, realHalt: false, quietStart: '', quietEnd: '',
   // look and feel
   hideBalances: false, showCents: true, compactNums: false, defaultRange: '1D', defaultChart: 'Candles',
   theme: 'mango', accent: 'mango', plColors: 'classic', roundedNums: true, reduceMotion: false, celebrate: true,
@@ -305,6 +305,7 @@ const DEF = {
   f_divs: true, f_ext: true, f_movers: true, f_insights: true, f_taxes: true, f_statements: true, f_bots: true, f_buzz: true,
 };
 const LIMITS = {
+  realDailyLossPct: [0, 50],
   feeFlat: [0, 1000], feePct: [0, 10], slippage: [0, 5], maxPos: [0, 100], reservePct: [0, 100], autoSL: [0, 90], autoTP: [0, 1000],
   defaultBuy: [0, 1e9], cashAPY: [0, 100], startBalance: [100, 1e9], moveThreshold: [1, 50], defaultWallet: [1, 1e9],
 };
@@ -1784,6 +1785,13 @@ async function brokerSync() {
 const brokerSyncSoon = debounce(() => brokerSync().catch(() => {}), 700);
 
 // ---------- placing and changing orders ----------
+// Account-wide brakes for the Alpaca side: the kill switch, and no new buys after a bad day. Selling is always allowed.
+function realDay() { const a = BROKER?.account; if (!a) return null; const eq = +a.equity, last = +a.last_equity; return last > 0 ? eq / last - 1 : null; }
+function realGuard() {
+  if (S.realHalt) fail('Trading on Alpaca is stopped by the kill switch. Resume it in Alpaca controls. Selling still works.');
+  const d = realDay();
+  if (S.realDailyLossPct > 0 && d != null && d <= -S.realDailyLossPct / 100) fail(`Your Alpaca account is down ${pct(d * 100)} today, past your ${S.realDailyLossPct}% daily limit. No new buys until tomorrow. Selling still works.`);
+}
 function liveGuard(b, notional) {
   if (BROKER.env !== 'live') return;
   if (b.live !== true) fail('This wallet uses real money. Confirm the order in the app to send it.');
@@ -1811,6 +1819,7 @@ async function brokerTrade(w, b) {
     if (!body.take_profit || !body.stop_loss) body.order_class = 'oto';
   }
   liveGuard(b, mode === 'usd' ? amount : (+body.qty || 0) * (num(b.price) || px));
+  if (side === 'buy') realGuard();
   const o = await apca('/v2/orders', { method: 'POST', body });
   log(`broker order ${BROKER.env}: ${side} ${sym} ${body.type} → ${o.status}`);
   brokerSyncSoon();
@@ -1859,10 +1868,10 @@ async function onTradeUpdate(u) {
   if (u.event === 'fill' || u.event === 'partial_fill') {
     await brokerSync();
     const f = { sym, side: o.side, qty: +u.qty || +o.filled_qty, price: +u.price || +o.filled_avg_price, pnl: null };
-    await notify('order', `${u.event === 'fill' ? 'Filled' : 'Partly filled'} · ${sym}`, `${o.side === 'buy' ? 'Bought' : 'Sold'} ${+f.qty.toFixed(6)} ${sym} at ${pxStr(f.price)} on Alpaca (${money_}).`, { sym, wid: BROKER.wid, data: { kind: 'fill', fill: f, label: 'Broker' } });
+    await notify('real', `${BROKER.env === 'live' ? '🔴 LIVE' : '🔵 Alpaca'} · ${u.event === 'fill' ? 'Filled' : 'Partly filled'} · ${sym}`, `${o.side === 'buy' ? 'Bought' : 'Sold'} ${+f.qty.toFixed(6)} ${sym} at ${pxStr(f.price)} on Alpaca (${money_}).`, { sym, wid: BROKER.wid, data: { kind: 'fill', fill: f, label: 'Broker' } });
   } else if (u.event === 'rejected' || u.event === 'expired') {
     brokerSyncSoon();
-    await notify('order', `Order ${u.event} · ${sym}`, `Alpaca ${u.event} your ${o.side} order for ${sym}.${o.reject_reason ? ' ' + o.reject_reason : ''}`, { sym, wid: BROKER.wid });
+    await notify('real', `${BROKER.env === 'live' ? '🔴 LIVE' : '🔵 Alpaca'} · Order ${u.event} · ${sym}`, `Alpaca ${u.event} your ${o.side} order for ${sym}.${o.reject_reason ? ' ' + o.reject_reason : ''}`, { sym, wid: BROKER.wid });
   } else brokerSyncSoon();
 }
 async function brokerLink(confirm) {
@@ -1909,7 +1918,7 @@ async function initPush() {
     VAPID_PUB = pub; pushOn = true;
   } catch (e) { warn('push setup', e.message); }
 }
-const PUSH_SETTING = { alert: 'pushAlerts', order: 'pushOrders', summary: 'notifySummary', move: 'notifyMoves', achv: 'notifyAchv', game: 'notifyGames', bot: 'pushBots' };
+const PUSH_SETTING = { alert: 'pushAlerts', order: 'pushOrders', summary: 'notifySummary', move: 'notifyMoves', achv: 'notifyAchv', game: 'notifyGames', bot: 'pushBots', real: 'pushReal' };
 function quietNow() {
   if (!S.quietStart || !S.quietEnd) return false;
   const p = etParts(), m = p.h * 60 + p.mi, [a, b] = [S.quietStart, S.quietEnd].map(x => { const [h, mi] = x.split(':').map(Number); return h * 60 + mi; });
@@ -3363,6 +3372,7 @@ async function runBotInner(id, { manual, dry }) {
   if (st.auto) { const want = apSyms(bot.params.markets || 'both'); if (want.join() !== bot.syms.join()) { bot.syms = want; await Q('update bots set syms=$1 where id=$2', [JSON.stringify(want), id]); refreshUserSyms().catch(() => {}); } }
   const brk = !!w.broker, liveMoney = brk && BROKER?.env === 'live';
   if (brk && !BROKER) fail('This bot trades through Alpaca, but the Alpaca keys are not set in Railway.');
+  if (brk && S.realHalt && !dry) fail('Alpaca trading is stopped by the kill switch.');
   if (liveMoney && !m.allowLive) fail('This bot is on a real-money wallet but real-money trading is off for it. Turn it on in its limits.');
   const real = isReal(w), prof = profOf(w), sess = sessionAt(prof);
   const pos = await positions(bot.wid), acct = await accountInfo(bot.wid, { w, pos });
@@ -3521,7 +3531,7 @@ async function runBotInner(id, { manual, dry }) {
     const rows = Object.values(decisions).map(d => ({ sym: d.sym, action: d.action, want: round(d.want, 4), target: round(d.target, 4), have: round(d.have, 2), note: d.note, why: d.why, buzz: d.buzz, flags: d.flags }));
     if (dec.report) { await botLog(id, 'report', dec.report.title, dec.report.body, dec.report.data); await notify('bot', `🧭 ${bot.name}: ${dec.report.title.toLowerCase()}`, dec.report.body.split('\n').filter(l => !/: none/.test(l)).slice(0, 5).join('\n') || 'Holding cash: no strategy is working well enough right now.', { wid: bot.wid, url: '/#/bot/' + id }); }
     await botLog(id, 'decision', `${manual ? 'Manual run' : 'Daily decision'}: ${summary}`, [...log.risk, ...log.skips].join('\n'), { rows, equity, capital, dd, dayRet, regime: ctx.regime || null, missing });
-    if (m.notify === 'all' || (m.notify === 'trades' && log.orders.length)) await notify('bot', `🤖 ${bot.name}: ${summary}`, log.orders.map(o => `${o.text}. ${o.label || ''}`.trim()).join('\n').slice(0, 600) || [...log.risk, ...log.skips].join(' ') || 'Nothing to do today.', { wid: bot.wid, url: '/#/bot/' + id });
+    if (m.notify === 'all' || (m.notify === 'trades' && log.orders.length)) await notify(brk ? 'real' : 'bot', `${brk ? (liveMoney ? '🔴 LIVE · ' : '🔵 Alpaca · ') : '🤖 '}${bot.name}: ${summary}`, log.orders.map(o => `${o.text}. ${o.label || ''}`.trim()).join('\n').slice(0, 600) || [...log.risk, ...log.skips].join(' ') || 'Nothing to do today.', { wid: bot.wid, url: '/#/bot/' + id });
   }
   return { dry, equity, capital, dd, dayRet, regime: ctx.regime || null, rows: Object.values(decisions), orders: log.orders, risk: log.risk, skips: log.skips, missing, session: sess };
 }
@@ -4401,7 +4411,7 @@ GET('/api/bots/board', auth, async () => {
     const sells = await rows("select pnl from trd where wid=$1 and side='sell' and pnl is not null and ts >= $2", [b.wid, since]);
     const wins = sells.filter(x => +x.pnl > 0).length, trades = +(await row("select count(*) n from bot_log where bot_id=$1 and kind='trade'", [b.id])).n;
     const st0 = jsonOr(b.state, {}), s0 = st0._spy0 || spyAt(sinceD), spyRet = s0 && spyNow ? spyNow / s0 - 1 : null;
-    out.push({ id: b.id, name: bot.name, strategy: bot.strategy, status: bot.status, since: bot.created, days: Math.max(0, Math.round((Date.now() - bot.created) / 864e5)), start, value, ret: start ? value / start - 1 : 0, spy: spyRet, vs: spyRet == null ? null : (start ? value / start - 1 : 0) - spyRet, maxDD: dd, trades, closed: sells.length, win: sells.length ? wins / sells.length : null, realized: sells.reduce((t, x) => t + +x.pnl, 0) });
+    out.push({ id: b.id, broker: !!w.broker, name: bot.name, strategy: bot.strategy, status: bot.status, since: bot.created, days: Math.max(0, Math.round((Date.now() - bot.created) / 864e5)), start, value, ret: start ? value / start - 1 : 0, spy: spyRet, vs: spyRet == null ? null : (start ? value / start - 1 : 0) - spyRet, maxDD: dd, trades, closed: sells.length, win: sells.length ? wins / sells.length : null, realized: sells.reduce((t, x) => t + +x.pnl, 0) });
   }
   return out.sort((a, c) => c.ret - a.ret);
 });
@@ -4553,6 +4563,52 @@ if (ENV.MANGO_FAST_JOBS) {
   POST('/api/test/weekly', auth, async () => { await kvSet('job_botweekly', ''); const p = etParts(); return weeklySummary({ ...p, y: 2026, m: 10, d: 23 }, '16:30', 'test-' + Date.now()); });
   POST('/api/test/clear-cache', auth, async req => { for (const k of [...cache.keys()]) if (!req.body?.prefix || k.startsWith(req.body.prefix)) cache.delete(k); return { ok: true }; });
 }
+
+// ---------- the Alpaca side: controls, kill switch, moving a bot over ----------
+GET('/api/real', auth, async () => {
+  if (BROKER && Date.now() - (BROKER.lastSync || 0) > 20e3) await brokerSync().catch(() => {});
+  const w = BROKER ? await brokerWallet() : null, a = BROKER?.account;
+  const bots = w ? (await rows('select * from bots where wid=$1 order by id', [w.id])) : [];
+  return {
+    on: !!BROKER, env: BROKER?.env || null, ok: !!BROKER?.ok, err: BROKER?.err || null, wid: w?.id || null, halted: !!S.realHalt, dailyLossPct: S.realDailyLossPct,
+    account: a ? { equity: +a.equity, last: +a.last_equity, day: realDay(), cash: +a.cash, bp: +a.buying_power, status: a.status, number: a.account_number } : null,
+    orders: (BROKER?.orders || []).length, bots: await Promise.all(bots.map(botCard)), maxOrder: ALP.maxOrder || null,
+    blocked: (() => { try { realGuard(); return null; } catch (e) { return e.message; } })(),
+  };
+});
+POST('/api/real/kill', auth, async req => {
+  if (!BROKER) fail('Alpaca is not connected');
+  await saveSettings({ realHalt: true });
+  const w = await brokerWallet(), out = { paused: 0, cancelled: false, closed: false };
+  if (w) { const r = await Q("update bots set status='paused' where wid=$1 and status='running'", [w.id]); out.paused = r.rowCount; }
+  try { await apca('/v2/orders', { method: 'DELETE' }); out.cancelled = true; } catch (e) { out.cancelErr = e.message; }
+  if (req.body?.flatten) { try { await apca('/v2/positions?cancel_orders=true', { method: 'DELETE' }); out.closed = true; } catch (e) { out.closeErr = e.message; } }
+  brokerSyncSoon(); broadcast({ t: 'evt', e: 'settings' });
+  await notify('real', `${BROKER.env === 'live' ? '🔴 LIVE' : '🔵 Alpaca'} · Kill switch on`, `All Alpaca trading is stopped. ${out.paused} bot${out.paused === 1 ? '' : 's'} paused, open orders cancelled${out.closed ? ', every position sold' : ''}. Resume it in Alpaca controls.`, { url: '/#/real' });
+  return out;
+});
+POST('/api/real/resume', auth, async () => { await saveSettings({ realHalt: false }); broadcast({ t: 'evt', e: 'settings' }); return { ok: true }; });
+POST('/api/bots/:id/promote', auth, async req => {
+  if (!BROKER) fail('Connect Alpaca first: add ALPACA_KEY_ID and ALPACA_SECRET_KEY in Railway, then connect it in Alpaca controls.');
+  const w = await brokerWallet(); if (!w) fail('Connect your Alpaca account in Alpaca controls first.');
+  const src = await row('select * from bots where id=$1', [+req.params.id]); if (!src) fail('That bot is gone', 404);
+  const bot = botJson(src), b = req.body || {};
+  if (src.wid === w.id) fail('This bot already trades on Alpaca.');
+  const budget = num(b.budget), cap = num(b.liveCap);
+  if (!(budget > 0)) fail('Give it a budget: the most money it can use on Alpaca.');
+  if (BROKER.env === 'live') { if (b.confirm !== 'REAL MONEY') fail('Type REAL MONEY to move this bot to real money.'); if (!(cap > 0)) fail('Set a real-money cap.'); }
+  const others = (await rows("select * from bots where wid=$1 and status<>'killed'", [w.id])).map(botJson);
+  const overlap = others.flatMap(o => o.syms.filter(s => bot.syms.includes(s)));
+  if (overlap.length) fail(`Another Alpaca bot already trades ${[...new Set(overlap)].join(', ')}. Each bot needs its own symbols on one account.`);
+  const card = await botCard(src);
+  const mandate = cleanMandate({ ...bot.mandate, budget, liveCap: cap, allowLive: BROKER.env === 'live', notify: 'trades' });
+  const r = await row('insert into bots(name,wid,strategy,params,syms,mandate,status,peak,day_start,day_date,state) values($1,$2,$3,$4,$5,$6,$7,$8,$8,$9,$10) returning *',
+    [String(b.name || bot.name).slice(0, 30), w.id, bot.strategy, JSON.stringify(bot.params), JSON.stringify(bot.syms), JSON.stringify(mandate), b.start ? 'running' : 'paused', (await accountInfo(w.id)).equity, etDate(),
+      JSON.stringify({ _spy0: priceOf('SPY') || null, _start0: budget, _from: { id: src.id, name: bot.name, ret: card.ret, days: Math.round((Date.now() - bot.created) / 864e5) }, ...(STRATEGIES[bot.strategy]?.auto ? Object.fromEntries(Object.entries(jsonOr(src.state, {})).filter(([k]) => ['_since', '_histStart', '_alloc', '_allocMonth'].includes(k))) : {}) })]);
+  await botLog(r.id, 'info', `Moved over from paper`, `${bot.name} made ${pct(card.ret)} in ${Math.round((Date.now() - bot.created) / 864e5)} days on paper. On Alpaca it can use up to ${money(budget)}${cap ? `, with at most ${money(cap)} invested in real money` : ''}. The paper bot keeps running so you can compare.`);
+  await refreshUserSyms();
+  return { bot: await botCard(r) };
+});
 
 // =====================================================================
 // Background jobs

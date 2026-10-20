@@ -889,6 +889,58 @@ button.tile:active { transform: scale(.98); }
 .bot-meta .tag { flex: none; white-space: nowrap; }
 .bot-meta .next-cap { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* ---------- Paper / Alpaca sides ---------- */
+.space-sw { display: inline-flex; gap: 4px; padding: 4px; border-radius: 14px; background: var(--card); box-shadow: var(--hi); margin: 2px 0 10px; }
+.space-sw button { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: 10px; font-size: 14px; font-weight: 650; color: var(--mu); transition: background .2s, color .2s; }
+.space-sw button svg { width: 15px; height: 15px; }
+.space-sw button.on { background: var(--card3); color: var(--tx); }
+.space-sw button.on svg { color: var(--ac); }
+.space-sw .real-badge { height: 16px; font-size: 9.5px; padding: 0 5px; }
+
+/* The Alpaca side: calmer neutrals, a blue accent, and an always-on bar saying which account this is. */
+[data-space="real"] {
+  --bg: #0B0D12; --bg2: #10131A; --card: #151922; --card2: #1C212C; --card3: #262C39;
+  --line: #222836; --line2: #303849; --tx: #F2F5FA; --tx2: #C3CAD8; --mu: #8790A3; --mu2: #5F687B;
+  --glass: rgba(11, 13, 18, .88);
+  --ac: #5AB8FF; --ac2: #3D7BFF; --ac-ink: #00142B; --ac-soft: rgba(90, 184, 255, .14);
+  --bar-c: #2F6FE0;
+  --safe-t: calc(env(safe-area-inset-top, 0px) + 30px);
+}
+[data-space="real"][data-live="1"] { --bar-c: #D8324B; }
+[data-theme="light"][data-space="real"] {
+  --bg: #F3F5F9; --bg2: #FFFFFF; --card: #FFFFFF; --card2: #EDF0F5; --card3: #E1E6EE;
+  --line: #E2E7EF; --line2: #D2D9E4; --tx: #121722; --tx2: #3E4757; --mu: #758096; --mu2: #A1AABA;
+  --glass: rgba(255, 255, 255, .88); --ac: #1F7FE0; --ac2: #1A5FD0; --ac-soft: rgba(31, 127, 224, .12);
+}
+#space-bar { display: none; }
+[data-space="real"] #space-bar {
+  display: flex; align-items: center; gap: 8px; position: fixed; z-index: 60; left: 0; right: 0; top: 0;
+  padding: env(safe-area-inset-top, 0px) calc(12px + var(--safe-r)) 0 calc(12px + var(--safe-l)); height: calc(env(safe-area-inset-top, 0px) + 30px);
+  background: var(--bar-c); color: #fff; font-size: 11.5px; letter-spacing: .04em;
+}
+#space-bar b { font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#space-bar button, #space-bar .sb-halt { flex: none; white-space: nowrap; }
+#space-bar .sb-dot { width: 7px; height: 7px; border-radius: 50%; background: #fff; flex: none; }
+[data-live="1"] #space-bar .sb-dot { animation: sb-blink 1.6s infinite; }
+@keyframes sb-blink { 50% { opacity: .35; } }
+#space-bar .sb-halt { background: rgba(0, 0, 0, .28); padding: 2px 6px; border-radius: 5px; font-weight: 800; }
+#space-bar button { height: 22px; padding: 0 9px; border-radius: 7px; background: rgba(255, 255, 255, .2); color: #fff; font-size: 12px; font-weight: 700; letter-spacing: 0; }
+@media (prefers-reduced-motion: reduce) { [data-live="1"] #space-bar .sb-dot { animation: none; } }
+@media (min-width: 960px) { [data-space="real"] #nav { top: calc(env(safe-area-inset-top, 0px) + 30px); } }
+
+/* Alpaca side with no account connected yet */
+#real-gate { display: none; }
+[data-gate] #real-gate { display: block; position: absolute; inset: 0; z-index: 20; overflow-y: auto; background: var(--bg); padding: calc(var(--safe-t) + 28px) calc(var(--gut) + var(--safe-r)) calc(var(--nav-h) + var(--safe-b) + 28px) calc(var(--gut) + var(--safe-l)); }
+[data-gate] #real-gate .inner { max-width: 520px; margin: 0 auto; }
+[data-gate] #tabs { visibility: hidden; }
+.gate-ic { width: 56px; height: 56px; border-radius: 18px; display: grid; place-items: center; background: var(--ac-soft); color: var(--ac); margin-bottom: 14px; }
+.gate-ic svg { width: 28px; height: 28px; }
+#real-gate .t-display { margin: 0 0 6px; }
+
+/* Alpaca controls */
+.rc-head { margin-top: 8px; padding: 18px 16px 10px; border-radius: var(--r-xl); background: radial-gradient(120% 120% at 0 0, color-mix(in srgb, var(--bar-c, var(--ac)) 22%, transparent), transparent 65%), var(--card); box-shadow: var(--hi); }
+.rc-eq { font-family: var(--font-num); font-weight: 750; font-size: 38px; letter-spacing: -.03em; margin: 2px 0; }
+
 /* ---------- motion ---------- */
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--up) 55%, transparent); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
@@ -1267,6 +1319,7 @@ function onEvent(d) {
   if (d.e === 'notif') {
     if (App.S) App.S.unread = (App.S.unread || 0) + 1;
     const n = d.n, fill = d.data?.kind === 'fill';
+    if (isRealSpace() && ['achv', 'game'].includes(n.kind)) { emit('unread'); reload(); return; } // no game pop-ups on the Alpaca side
     toast(n.title, { sub: n.body, kind: n.kind === 'order' && /couldn|not filled/i.test(n.title) ? 'err' : (fill || n.kind === 'achv') ? 'ok' : 'info', ms: 5200, action: n.sym ? { label: 'View', fn: () => Router.go('asset/' + n.sym) } : null });
     if (fill && d.data.fill?.pnl > 0) celebrate();
     emit('unread'); reload();
@@ -1594,7 +1647,7 @@ function pullToRefresh(scroller, fn) {
 
 // ---------- confetti for winning trades ----------
 function celebrate() {
-  if (reduced() || SET().celebrate === false) return;
+  if (reduced() || SET().celebrate === false || isRealSpace()) return;
   const c = document.createElement('canvas'); c.className = 'confetti'; document.body.appendChild(c);
   const dpr = devicePixelRatio || 1; c.width = innerWidth * dpr; c.height = innerHeight * dpr; const g = c.getContext('2d'); g.scale(dpr, dpr);
   const cols = ['#FFD646', '#FFA028', '#FA5256', '#3BD68A', '#FFFFFF', '#B48CFF'];
@@ -1612,7 +1665,7 @@ function celebrate() {
 const NAV = [['portfolio', 'Portfolio', 'wallet'], ['market', 'Market', 'market'], ['bots', 'Bots', 'bot'], ['activity', 'Activity', 'activity'], ['games', 'Games', 'games']];
 function renderNav() {
   const nav = $('#nav');
-  nav.innerHTML = `<div class="nav-inner"><svg class="nav-logo" viewBox="0 0 120 120" aria-hidden="true"><use href="#mango-mark"/></svg>${NAV.filter(n => (n[0] !== 'games' || feature('games')) && (n[0] !== 'bots' || feature('bots'))).map(([k, l, i]) => `<button class="nav-btn ${App.tab === k ? 'on' : ''}" data-tab="${k}" aria-label="${l}">${icon(i)}<span>${l}</span>${k === 'activity' && App.S?.counts?.conditional ? '' : ''}</button>`).join('')}<i class="nav-glow"></i></div>`;
+  nav.innerHTML = `<div class="nav-inner"><svg class="nav-logo" viewBox="0 0 120 120" aria-hidden="true"><use href="#mango-mark"/></svg>${NAV.filter(n => (n[0] !== 'games' || (feature('games') && !isRealSpace())) && (n[0] !== 'bots' || feature('bots'))).map(([k, l, i]) => `<button class="nav-btn ${App.tab === k ? 'on' : ''}" data-tab="${k}" aria-label="${l}">${icon(i)}<span>${l}</span>${k === 'activity' && App.S?.counts?.conditional ? '' : ''}</button>`).join('')}<i class="nav-glow"></i></div>`;
   placeNavGlow();
 }
 function placeNavGlow() {
@@ -1630,7 +1683,7 @@ document.addEventListener('click', e => {
 });
 const VIEWS = {};
 function setTab(t) {
-  if (!TABS.includes(t)) t = 'portfolio';
+  if (!TABS.includes(t) || (t === 'games' && isRealSpace())) t = 'portfolio';
   const changed = App.tab !== t; App.tab = t;
   for (const s of $$('.tab')) s.classList.toggle('on', s.dataset.tab === t);
   $$('.nav-btn').forEach(b => b.classList.toggle('on', b.dataset.tab === t)); placeNavGlow();
@@ -1870,7 +1923,7 @@ function gaugeSvg(v) {
 const RANGES = [['1D', '1D'], ['1W', '1W'], ['1M', '1M'], ['3M', '3M'], ['1Y', '1Y'], ['ALL', 'All']];
 const RANGE_WORD = { '1D': 'Past day', '1W': 'Past week', '1M': 'Past month', '3M': 'Past 3 months', '1Y': 'Past year', 'ALL': 'All time' };
 const W = () => App.S?.wallet || { name: 'Wallet', emoji: '🥭', color: 'mango', cash: 0, start: 10000 };
-const walletPill = () => `<button class="wallet-pill" data-act="wallets" aria-label="Switch wallet"><span class="we" data-wc="${h(W().color)}" style="background:linear-gradient(140deg,var(--w1),var(--w2))">${h(W().emoji)}</span><span class="ellip">${h(W().name)}</span>${W().broker && W().brokerEnv === 'live' ? '<span class="real-badge">REAL</span>' : ''}${icon('down')}</button>`;
+const walletPill = () => `<button class="wallet-pill" data-act="${isRealSpace() ? 'go' : 'wallets'}" data-to="real" aria-label="Switch wallet"><span class="we" data-wc="${h(W().color)}" style="background:linear-gradient(140deg,var(--w1),var(--w2))">${h(W().emoji)}</span><span class="ellip">${h(W().name)}</span>${W().broker && W().brokerEnv === 'live' ? '<span class="real-badge">REAL</span>' : ''}${icon('down')}</button>`;
 function marketChip() {
   const m = App.S?.market; if (!m) return '';
   const now = Date.now();
@@ -1902,6 +1955,7 @@ VIEWS.portfolio = {
       <div class="topbar">${walletPill()}<div class="grow"></div><div class="mini mini-val"><b class="priv" id="pf-mini-v"></b><span id="pf-mini-c"></span></div>
         <button class="icon-btn" data-act="inbox" aria-label="Notifications">${icon('bell')}<span class="badge hidden" id="pf-unread"></span></button>
         <button class="icon-btn" data-act="go" data-to="settings" aria-label="Settings">${icon('gear')}</button></div>
+      <div id="pf-space">${spaceSwitch()}</div>
       <div class="split"><div class="main-col">
       <div class="hero"><div class="label"><span id="pf-label">Wallet value</span><span id="pf-mstate">${marketChip()}</span></div>
         <div class="hero-val priv n" id="pf-val"></div>
@@ -1926,7 +1980,7 @@ VIEWS.portfolio = {
   },
   update() {
     const el = this.el; if (!el || !App.S) return;
-    $('.wallet-pill', el).outerHTML = walletPill();
+    $('.wallet-pill', el).outerHTML = walletPill(); $('#pf-space', el).innerHTML = spaceSwitch();
     const u = $('#pf-unread'); u.textContent = App.S.unread > 99 ? '99+' : App.S.unread; u.classList.toggle('hidden', !App.S.unread);
     $('#pf-mstate').innerHTML = marketChip();
     this.renderStrip(); this.renderBody(); this.tick();
@@ -2578,7 +2632,7 @@ function tradeSheet(sym, side = 'buy', preset = {}) {
         <div class="t-foot mt8" id="tk-br"></div></div></div>` : ''}
       ${feature('journal') && !broker ? `<label class="field"><span>Note for your journal (optional)</span><input id="tk-note" placeholder="Why are you making this trade?" value="${h(st.note)}" maxlength="500"></label>` : ''}
       <p class="t-err dn center mt8" id="tk-err" style="font-weight:600;min-height:20px;margin-bottom:0"></p>`);
-    const cs = liveMoney() ? 'hold' : SET().confirmStyle;
+    const cs = liveMoney() || isRealSpace() ? 'hold' : SET().confirmStyle;
     sh.foot(`<button class="btn ${buy ? 'btn-buy' : 'btn-sell'} btn-lg btn-block" id="tk-go">${buttonLabel(cs)}</button>`);
     holdButton($('#tk-go', sh.footEl), submit, liveMoney() ? 1100 : 650, cs);
     raf(() => placeThumbs(sh.body));
@@ -2626,7 +2680,7 @@ function tradeSheet(sym, side = 'buy', preset = {}) {
     if (a > 0 && st.otype === 'trail' && !(num(st.trail) > 0)) err = 'Enter how far to trail';
     $('#tk-err', sh.body).textContent = a > 0 ? err : '';
     const go = $('#tk-go', sh.footEl);
-    if (go) { go.disabled = !(a > 0) || !!err || !pv || pv.qty == null; const lab = $('.hold-label', go) || go; const cs = liveMoney() ? 'hold' : SET().confirmStyle; const t = buttonLabel(cs); if (lab.textContent !== t) lab.textContent = t; }
+    if (go) { go.disabled = !(a > 0) || !!err || !pv || pv.qty == null; const lab = $('.hold-label', go) || go; const cs = liveMoney() || isRealSpace() ? 'hold' : SET().confirmStyle; const t = buttonLabel(cs); if (lab.textContent !== t) lab.textContent = t; }
     const inp = $('#tk-amt', sh.body); if (inp) inp.style.width = `calc(${Math.max(1, (inp.value || '0').length)}ch + 6px)`;
   }
   function bind() {
@@ -2658,7 +2712,7 @@ function tradeSheet(sym, side = 'buy', preset = {}) {
   draw();
   async function submit() {
     const pv = st.pv; if (!pv || pv.err) return;
-    const cs = liveMoney() ? 'hold' : SET().confirmStyle;
+    const cs = liveMoney() || isRealSpace() ? 'hold' : SET().confirmStyle;
     if (cs === 'tap' && !(await confirmBox({ title: `${st.side === 'buy' ? 'Buy' : 'Sell'} ${sym}?`, msg: `${OT_LABEL[st.otype]} order: ${st.side} ${qtyStr(sym, pv.qty)} ${unitShort(sym)} for about ${money(pv.total)}${pv.fees?.total ? ` including ${money(pv.fees.total)} in fees` : ''}.`, ok: st.side === 'buy' ? 'Buy' : 'Sell', danger: st.side === 'sell' }))) return;
     const go = $('#tk-go', sh.footEl); busy(go, true);
     const b = { ...body(), note: st.note || undefined };
@@ -3146,9 +3200,10 @@ PAGES.dividends = {
 const EMOJIS = ['🥭', '💼', '🚀', '🐂', '🐻', '💎', '🌴', '🔥', '🧪', '🎯', '🪙', '📈', '🦄', '🐋', '🌙', '⚡'];
 const WCOLORS = ['mango', 'leaf', 'sky', 'grape', 'rose', 'slate'];
 ACT.wallets = () => {
+  if (isRealSpace()) return Router.go('real');
   const s = sheet({ title: 'Wallets', mount: s => draw(s) });
   function draw(s) {
-    const ws = (App.S.wallets || []).filter(w => !w.archived);
+    const ws = spaceWallets();
     s.html(`${ws.map(w => `<button class="wcard" data-wc="${h(w.color)}" data-w="${w.id}"><div class="wn"><span style="font-size:20px">${h(w.emoji)}</span>${h(w.name)}</div><div class="wv priv">${money(w.id === App.W ? equityNow() : w.value)}</div><div class="wr">${pct(w.ret)} all time · ${w.count} position${w.count === 1 ? '' : 's'}</div>${w.id === App.W ? `<span class="wcheck">${icon('check')}</span>` : ''}</button>`).join('')}
       <div class="btns mt16"><button class="btn btn-quiet" data-x="manage">${icon('sliders')}Manage</button><button class="btn btn-primary" data-x="new">${icon('plus')}New wallet</button></div>
       <p class="note center">Every wallet has its own cash, positions, orders and history. Make as many as you like.</p>`);
@@ -3216,7 +3271,7 @@ PAGES.wallets = {
   mount(p) { p.title('Wallets', true); p.draw = () => this.draw(p); p.draw(); p.on('state', p.draw); },
   refresh(p) { p.draw && p.draw(); },
   draw(p) {
-    const ws = App.S.wallets || [], live_ = ws.filter(w => !w.archived), arch = ws.filter(w => w.archived);
+    const ws = (App.S.wallets || []).filter(w => !w.broker), live_ = ws.filter(w => !w.archived), arch = ws.filter(w => w.archived);
     p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 14px">Wallets</h1>
       ${live_.map(w => `<div class="wcard" data-wc="${h(w.color)}" style="padding-bottom:12px"><div class="between"><div class="wn"><span style="font-size:20px">${h(w.emoji)}</span>${h(w.name)}${w.id === App.W ? ' <span class="tag" style="background:rgba(255,255,255,.22);color:#fff">Open</span>' : ''}</div>${SET().defaultWallet === w.id ? '<span class="tag" style="background:rgba(255,255,255,.22);color:#fff">Default</span>' : ''}</div><div class="wv priv">${money(w.value)}</div><div class="wr">${pct(w.ret)} all time · cash ${money(w.cash)} · started with ${money(w.start)}</div>
         <div class="row mt12" style="gap:6px;flex-wrap:wrap">${w.id !== App.W ? `<button class="btn btn-sm" style="background:rgba(255,255,255,.22);color:#fff" data-wa="open" data-id="${w.id}">Open</button>` : ''}<button class="btn btn-sm" style="background:rgba(255,255,255,.22);color:#fff" data-wa="edit" data-id="${w.id}">${icon('edit')}Edit</button><button class="btn btn-sm" style="background:rgba(255,255,255,.22);color:#fff" data-wa="reset" data-id="${w.id}">${icon('refresh')}Reset</button>${SET().defaultWallet !== w.id ? `<button class="btn btn-sm" style="background:rgba(255,255,255,.22);color:#fff" data-wa="default" data-id="${w.id}">Make default</button>` : ''}${live_.length > 1 ? `<button class="btn btn-sm" style="background:rgba(255,255,255,.22);color:#fff" data-wa="archive" data-id="${w.id}">Archive</button>` : ''}</div></div>`).join('')}
@@ -3593,7 +3648,7 @@ VIEWS.bots = {
   mount(el) {
     this.el = el;
     el.innerHTML = `<div class="inner"><div class="topbar"><div class="mini t-head">Bots</div><div class="grow"></div><button class="icon-btn" data-act="go" data-to="lab" aria-label="Strategy lab">${icon('flask')}</button><button class="icon-btn" data-act="go" data-to="newbot" aria-label="New bot">${icon('plus')}</button></div>
-      <h1 class="t-display large-title">Bots</h1><div id="bt-body"><div class="sk sk-block"></div><div class="sk sk-block mt12"></div></div><div id="bt-radar"></div></div>`;
+      <h1 class="t-display large-title">Bots</h1><div id="bt-space"></div><div id="bt-body"><div class="sk sk-block"></div><div class="sk sk-block mt12"></div></div><div id="bt-radar"></div></div>`;
     pullToRefresh(el, () => this.load(true));
     on('state', debounce(() => { if (App.tab === 'bots' && Date.now() - (this.t || 0) > 20e3) this.load(); }, 900));
     on('unread', () => { if (App.tab === 'bots') this.load(); });
@@ -3607,9 +3662,13 @@ VIEWS.bots = {
     if (radar || !this.radarT || Date.now() - this.radarT > 10 * 60e3) this.loadRadar();
   },
   render(s) {
-    const bots = this.d.bots, st = s.strategies;
+    $('#bt-space', this.el).innerHTML = spaceSwitch();
+    const real = isRealSpace(), bots = this.d.bots.filter(b => real ? b.wallet?.broker : !b.wallet?.broker), st = s.strategies;
     let html = '';
-    if (!bots.length) {
+    if (real) {
+      html = `<div class="group">${menuCell('lock', 'Alpaca controls', SET().realHalt ? 'Kill switch is on' : 'Account, kill switch and daily loss limit', 'real')}</div>
+        ${bots.length ? `<div class="section-h"><h2>On Alpaca<span class="count">${bots.length}</span></h2><button class="more" data-act="promotePick">Move one over ${icon('right')}</button></div><div class="bot-list">${bots.map(b => botCard(b, st)).join('')}</div>` : `<div class="group mt12"><div class="empty"><div class="art">${icon('swap')}</div><h3>Bots earn their way here</h3><p>Every bot starts on the paper side. When one has a record you trust, move it over with a budget and a cap. The paper copy keeps running beside it.</p><button class="btn btn-primary" data-act="promotePick">${icon('swap')}Move a bot over</button></div></div>`}`;
+    } else if (!bots.length) {
       html = `<div class="bot-intro"><div class="bot-intro-art">${icon('bot')}</div><h3>Put a strategy to work</h3><p>A bot owns a wallet and trades it once a day with fixed rules. Before it buys anything it reads the news, StockTwits and Reddit, and it skips stocks with earnings coming up or serious bad news. It keeps a stop loss on everything it holds and writes down why it did what it did.</p>
         <div class="btns"><button class="btn btn-quiet" data-act="go" data-to="lab">${icon('flask')}Test a strategy</button><button class="btn btn-primary" data-act="go" data-to="newbot">${icon('plus')}New bot</button></div></div>
         <div class="section-h"><h2>Strategies</h2></div><div class="group">${Object.entries(st).filter(([, x]) => !x.auto).map(([k, x]) => `<button class="cell" data-act="go" data-to="newbot/${k}"><div class="lead">${icon(x.icon)}</div><div class="main"><div class="title">${h(x.name)}</div><div class="sub">${h(x.desc.split('. ')[0])}.</div></div>${icon('right', 'chev')}</button>`).join('')}</div>`;
@@ -3618,13 +3677,13 @@ VIEWS.bots = {
       html = `<div class="tiles bt-tiles"><div class="tile"><div class="k">${icon('wallet')}In bot wallets</div><div class="v priv">${money(tot)}</div><div class="s ${cls(tot - start)}">${money(tot - start, { sign: true })} all time</div></div><div class="tile"><div class="k">${icon('activity')}Today</div><div class="v priv ${cls(day)}">${money(day, { sign: true })}</div><div class="s">${bots.filter(b => b.status === 'running').length} of ${bots.length} running</div></div></div>
         <div class="section-h"><h2>Your bots<span class="count">${bots.length}</span></h2></div><div class="bot-list">${bots.map(b => botCard(b, st)).join('')}</div>`;
     }
-    if (!bots.some(b => b.strategy === 'autopilot')) html = autoHero() + html;
+    if (!real && !bots.some(b => b.strategy === 'autopilot')) html = autoHero() + html;
     html += `<div class="section-h"><h2>Tools</h2></div><div class="group">${bots.length ? menuCell('bars', 'Leaderboard', 'Every bot against simply holding the S&P 500', 'botboard') : ''}${menuCell('flask', 'Strategy lab', 'Test any strategy on up to 8 years of daily prices, with real fees', 'lab')}${feature('buzz') ? menuCell('radar', 'News radar', 'What headlines and social media say about what you own and watch', 'radar') : ''}</div>`;
     $('#bt-body', this.el).innerHTML = html;
     Live.run();
   },
   async loadRadar() {
-    const box = $('#bt-radar', this.el); if (!box || !feature('buzz')) { if (box) box.innerHTML = ''; return; }
+    const box = $('#bt-radar', this.el); if (!box || !feature('buzz') || isRealSpace()) { if (box) box.innerHTML = ''; return; }
     this.radarT = Date.now();
     if (!box.innerHTML) box.innerHTML = `<div class="section-h"><h2>News radar</h2></div><div class="sk sk-block"></div>`;
     try {
@@ -3700,6 +3759,7 @@ PAGES.bot = {
         ${kv('Decides at', `${h(RUN_TIMES.find(x => x[0] === m.runAt)?.[1] || m.runAt)} New York time${b.syms.some(isCrypto) ? ', crypto every day' : ', trading days'}`)}
         ${kv('News check', m.newsFilter && feature('buzz') ? [m.earningsDays ? `skips earnings within ${m.earningsDays} day${m.earningsDays === 1 ? '' : 's'}` : '', m.blockSevere ? 'skips serious news' : '', `skips mood below ${m.minSentiment}`, m.sellOnSevere ? 'sells on serious news' : '', m.tilt ? 'sizes by mood' : ''].filter(Boolean).join(', ') : 'Off')}
         ${kv('Notifications', { trades: 'When it trades', all: 'Every decision', off: 'Off' }[m.notify])}</div>
+      ${b.broker ? '' : `<button class="btn btn-quiet btn-block mt16" data-act="promote" data-id="${b.id}">${icon('swap')}Move a copy to Alpaca</button>`}
       <div class="btns mt16"><button class="btn btn-quiet" data-act="botWallet">${icon('wallet')}Open its wallet</button><button class="btn btn-danger" data-act="botDelete">${icon('trash')}Delete bot</button></div>
       <p class="note">${h(st.desc)}</p>`;
     mountThink(p.body, last?.data?.rows || []);
@@ -3924,7 +3984,7 @@ PAGES.newbot = {
     p.body.innerHTML = `<div class="sk sk-block mt16"></div>`;
     strats().then(s => {
       p.s = s; const dr = App.botDraft || {}; App.botDraft = null;
-      p.m = { strategy: dr.strategy || (s.strategies[key] && !s.strategies[key].auto ? key : 'trend'), uni: dr.uni || 'megacap', syms: dr.syms || null, params: dr.params || {}, mandate: { ...s.mandate }, wallet: 0, start: 10000, profile: 'robinhood', years: 5, runNow: true };
+      p.m = { strategy: dr.strategy || (s.strategies[key] && !s.strategies[key].auto ? key : 'trend'), uni: dr.uni || 'megacap', syms: dr.syms || null, params: dr.params || {}, mandate: { ...s.mandate }, wallet: isRealSpace() ? (brokerW()?.id || 0) : 0, start: 10000, profile: 'robinhood', years: 5, runNow: true };
       this.draw(p);
     }).catch(e => { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; });
   },
@@ -3938,12 +3998,12 @@ PAGES.newbot = {
   draw(p) {
     const s = p.s, m = p.m, st = s.strategies[m.strategy];
     if (!m.syms) m.syms = (STRAT_SYMS[m.strategy] || s.universes[m.uni].syms).slice();
-    const wallets = (App.S.wallets || []).filter(w => !w.archived);
+    const wallets = spaceWallets();
     p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">New bot</h1><p class="t-sub" style="margin:0 2px">Pick how it trades, what it trades and the limits it can never cross. Test it before it touches money.</p>
       <div class="section-h"><h2>How it trades</h2></div>${stratPick(s, m.strategy, 'nb')}
       <div class="section-h"><h2>What it trades</h2></div>${uniPick(s, m.uni, m.syms, 'nb')}
       <div class="section-h"><h2>Its money</h2></div>
-      ${seg('nb-w', [['new', 'A new wallet'], ['old', 'One of my wallets']], m.wallet ? 'old' : 'new')}
+      ${isRealSpace() ? '' : seg('nb-w', [['new', 'A new wallet'], ['old', 'One of my wallets']], m.wallet ? 'old' : 'new')}
       <div id="nb-wbox">${m.wallet ? `<label class="field"><span>Wallet</span><select id="nb-wid">${wallets.map(w => `<option value="${w.id}" ${w.id === m.wallet ? 'selected' : ''}>${h(w.emoji)} ${h(w.name)} · ${money(w.value)}</option>`).join('')}</select></label><p class="note">Give each bot its own symbols. Set "Money it can use" below to keep part of the wallet for yourself.${wallets.find(w => w.id === m.wallet)?.broker ? ` <b>This is your Alpaca account${wallets.find(w => w.id === m.wallet).brokerEnv === 'live' ? ', with real money' : ' (paper)'}.</b> Orders go to Alpaca. "Money it can use" is required.` : ''}</p>${wallets.find(w => w.id === m.wallet)?.brokerEnv === 'live' ? `<label class="field"><span>Real money: the most it can ever have invested ($)</span><input type="number" inputmode="decimal" id="nb-livecap" value="${m.liveCap || 500}"></label>` : ''}` : `<label class="field"><span>Starting money</span><input type="number" inputmode="decimal" id="nb-start" value="${m.start}"></label><div class="field"><span>Trading rules</span>${seg('nb-prof', [['robinhood', 'Robinhood'], ['alpaca', 'Alpaca'], ['practice', 'Practice']], m.profile)}</div>`}</div>
       ${st.params.length ? `<div class="section-h"><h2>Strategy settings</h2></div>${paramFields(st.params, m.params, 'nb')}` : ''}
       <div class="section-h"><h2>Limits and news</h2></div>${mandateFields(m.mandate, 'nb')}
@@ -4106,7 +4166,8 @@ PAGES.botboard = {
   mount(p) {
     p.title('Leaderboard', true);
     p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Leaderboard</h1><p class="t-sub" style="margin:0 2px">Every bot since it started, against simply holding the S&P 500 over the same days.</p><div id="lb"><div class="sk sk-block mt16"></div></div>`;
-    api('bots/board').then(list => {
+    api('bots/board').then(all => {
+      const list = all.filter(x => isRealSpace() ? x.broker : !x.broker);
       const max = Math.max(0.0001, ...list.map(x => Math.abs(x.ret)), ...list.map(x => Math.abs(x.spy || 0)));
       $('#lb', p.body).innerHTML = list.length ? `<div class="group mt16">${list.map((x, i) => `<button class="cell lb-row ${i === 0 && x.ret > 0 ? 'lb-top' : ''}" data-act="go" data-to="bot/${x.id}"><span class="lb-n">${i === 0 && x.ret > 0 ? '👑' : i + 1}</span><div class="main"><div class="title">${h(x.name)}${x.status !== 'running' ? ` <span class="t-cap">${x.status === 'paused' ? 'paused' : 'stopped'}</span>` : ''}</div>
         <div class="lb-bars"><span class="lb-bar ${x.ret >= 0 ? 'up' : 'dn'}" style="width:${Math.abs(x.ret) / max * 100}%"></span>${x.spy != null ? `<span class="lb-bar spy" style="width:${Math.abs(x.spy) / max * 100}%"></span>` : ''}</div>
@@ -4127,6 +4188,128 @@ ACT.botRename = async () => {
 
 // Keep the chosen strategy card in view after the picker is redrawn.
 function showPicked(root) { const on = $('.strat-pick .strat.on', root); if (on) on.parentElement.scrollLeft = Math.max(0, on.offsetLeft - 16); }
+
+// ===================================================================
+// Two sides of the app: Paper (the game: practice wallets, bots, games) and Alpaca (a real account,
+// no games, stricter by default). A switch at the top moves between them; each side only shows its own things.
+// ===================================================================
+const isRealSpace = () => store.get('space') === 'real';
+const brokerW = () => (App.S?.wallets || []).find(w => w.broker && !w.archived) || null;
+const inSpace = w => isRealSpace() ? !!w.broker : !w.broker;
+const spaceWallets = () => (App.S?.wallets || []).filter(w => !w.archived && inSpace(w));
+const realLive = () => isRealSpace() && brokerW()?.brokerEnv === 'live';
+const spaceSwitch = () => `<div class="space-sw" role="tablist" aria-label="Paper or Alpaca"><button class="${isRealSpace() ? '' : 'on'}" data-act="space" data-sp="paper">${icon('games')}Paper</button><button class="${isRealSpace() ? 'on' : ''}" data-act="space" data-sp="real">${icon('lock')}Alpaca${brokerW()?.brokerEnv === 'live' ? ' <span class="real-badge">LIVE</span>' : ''}</button></div>`;
+ACT.space = el => setSpace(el.dataset.sp);
+async function setSpace(sp) {
+  if ((sp === 'real') === isRealSpace()) return;
+  if (sp === 'real') store.set('wallet:paper', App.W);
+  store.set('space', sp);
+  pickSpaceWallet();
+  applySpace();
+  Router.closeAll();
+  if (sp === 'real' && App.tab === 'games') setTab('portfolio');
+  try { await loadState(); } catch (e) {}
+  rerenderAll();
+  try { VIEWS.portfolio.loadEq(); } catch (e) {}
+  if (VIEWS.bots.mounted) VIEWS.bots.load();
+  toast(sp === 'real' ? (brokerW() ? (brokerW().brokerEnv === 'live' ? 'Alpaca: real money' : 'Alpaca paper account') : 'Alpaca isn\'t connected yet') : 'Paper trading', { kind: 'info', ms: 1800 });
+}
+// Keep the open wallet on the current side.
+function pickSpaceWallet() {
+  const ws = App.S?.wallets || [];
+  if (isRealSpace()) { const bw = brokerW(); if (bw) App.W = bw.id; }
+  else if (W().broker || !ws.some(w => w.id === App.W)) { const pw = store.get('wallet:paper'), ok = ws.find(w => w.id === pw && !w.broker && !w.archived) || ws.find(w => w.id === SET().defaultWallet && !w.broker) || ws.find(w => !w.broker && !w.archived); if (ok) App.W = ok.id; }
+  store.set('wallet', App.W);
+}
+function applySpace() {
+  const real = isRealSpace(), bw = brokerW(), de = document.documentElement, halted = !!SET().realHalt;
+  de.dataset.space = real ? 'real' : 'paper';
+  de.dataset.live = real && bw?.brokerEnv === 'live' ? '1' : '0';
+  de.toggleAttribute('data-gate', real && !bw);
+  let bar = $('#space-bar');
+  if (!bar) { bar = document.createElement('div'); bar.id = 'space-bar'; document.body.appendChild(bar); }
+  bar.innerHTML = real ? `<span class="sb-dot"></span><b>${bw ? (bw.brokerEnv === 'live' ? 'ALPACA · REAL MONEY' : 'ALPACA · PAPER') : 'ALPACA · NOT CONNECTED'}</b>${halted ? '<span class="sb-halt">STOPPED</span>' : ''}<span class="grow"></span><button data-act="go" data-to="real">Controls</button><button data-act="space" data-sp="paper">Paper</button>` : '';
+  let gate = $('#real-gate');
+  if (real && !bw) {
+    if (!gate) { gate = document.createElement('div'); gate.id = 'real-gate'; $('#app').appendChild(gate); }
+    gate.innerHTML = `<div class="inner"><div class="gate-ic">${icon('lock')}</div><h1 class="t-display">Alpaca</h1><p class="t-sub">This side is for a real brokerage account: your Alpaca positions and orders, and only the bots you move here. No games, no practice wallets.</p><div class="card mt16" id="gate-box"><div class="sk sk-block"></div></div><button class="btn btn-quiet btn-block mt16" data-act="space" data-sp="paper">${icon('games')}Back to paper trading</button></div>`;
+    brokerBox($('#gate-box', gate));
+  } else if (gate) gate.remove();
+}
+on('state', () => {
+  if (!App.S) return;
+  const before = App.W; pickSpaceWallet(); applySpace();
+  if (App.W !== before && !applySpace.busy) { applySpace.busy = true; loadState({ quiet: true }).catch(() => {}).finally(() => { applySpace.busy = false; }); }
+});
+
+// ---------- Alpaca controls ----------
+PAGES.real = {
+  mount(p) {
+    p.title('Alpaca controls', true);
+    p.body.innerHTML = `<div class="sk sk-block mt16"></div><div class="sk sk-block mt12"></div>`;
+    p.load = async () => { try { p.d = await api('real'); this.draw(p); } catch (e) { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; } };
+    p.load(); p.on('state', debounce(() => p.load(), 800)); p.timer(() => p.load(), 30e3);
+  },
+  refresh(p) { p.load && p.load(); },
+  draw(p) {
+    const d = p.d, a = d.account, live = d.env === 'live';
+    const kv = (k, v, c = '') => `<div class="kv"><span class="k">${k}</span><span class="v ${c}">${v}</span></div>`;
+    if (!d.on || !d.wid) {
+      p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Alpaca</h1><p class="t-sub" style="margin:0 2px">Connect an account to use this side.</p><div class="card mt16" id="rc-box"></div>`;
+      brokerBox($('#rc-box', p.body)); return;
+    }
+    p.body.innerHTML = `<div class="rc-head ${live ? 'live' : ''}"><div class="t-cap">${live ? 'Real money' : 'Alpaca paper account'}${a?.number ? ' · ' + h(a.number) : ''}</div><div class="rc-eq priv">${money(a?.equity || 0)}</div><div class="n ${cls(a?.day || 0)}">${a?.day != null ? `${money((a.equity || 0) - (a.last || 0), { sign: true })} (${pct(a.day * 100)}) today` : ''}</div>
+        <div class="mt12">${kv('Cash', `<span class="priv">${money(a?.cash || 0)}</span>`)}${kv('Buying power', `<span class="priv">${money(a?.bp || 0)}</span>`)}${kv('Open orders', String(d.orders))}${kv('Status', h(a?.status || (d.ok ? 'Active' : d.err || 'Connecting')))}</div></div>
+      ${d.halted ? `<div class="callout warn mt12">${icon('pause')}<div><b>The kill switch is on.</b> No new buys on Alpaca and its bots are paused. Selling still works.</div></div>` : d.blocked ? `<div class="callout warn mt12">${icon('shield')}<div>${h(d.blocked)}</div></div>` : ''}
+      <div class="section-h"><h2>Safety</h2></div>
+      <div class="card">${d.halted ? `<button class="btn btn-buy btn-block btn-lg" id="rc-resume">${icon('play')}Resume Alpaca trading</button>` : `<button class="btn btn-sell btn-block btn-lg" id="rc-kill">${icon('x')}Stop all Alpaca trading</button>`}
+        <p class="t-foot" style="margin:10px 2px 0">The kill switch cancels every open order, pauses every Alpaca bot and blocks new buys until you resume. You can also sell everything with it.</p>
+        <label class="field"><span>No new buys after the account is down this much in a day (%)</span><input type="number" inputmode="decimal" id="rc-dl" value="${d.dailyLossPct}"></label>
+        ${d.maxOrder ? kv('Largest single order (ALPACA_MAX_ORDER)', money(d.maxOrder)) : `<p class="note">Tip: add ALPACA_MAX_ORDER in Railway to cap any one order${live ? '. Strongly recommended with real money.' : '.'}</p>`}</div>
+      <div class="section-h"><h2>Bots on Alpaca<span class="count">${d.bots.length}</span></h2><button class="more" data-act="promotePick">Move one over ${icon('right')}</button></div>
+      ${d.bots.length ? `<div class="bot-list">${d.bots.map(b => botCard(b, STRATS?.strategies || {})).join('')}</div>` : `<div class="group"><div class="empty"><div class="art">${icon('bot')}</div><h3>No bots here yet</h3><p>Bots start on paper. When one has a track record you trust, move it over with a budget${live ? ' and a real-money cap' : ''}. The paper bot keeps running beside it.</p><button class="btn btn-primary" data-act="promotePick">${icon('swap')}Move a bot over</button></div></div>`}
+      <div class="section-h"><h2>Connection</h2></div><div class="card" id="rc-box"></div>
+      <p class="note">${live ? 'Every order here is real. Fills are final. Mango never moves money in or out of your bank; do that in the Alpaca app.' : 'This is Alpaca\'s paper account: their real order engine with fake money. Switching Railway to ALPACA_ENV=live makes it real.'}</p>`;
+    brokerBox($('#rc-box', p.body));
+    strats().catch(() => {});
+    $('#rc-dl', p.body).addEventListener('change', e => saveSetting({ realDailyLossPct: num(e.target.value, 3) }));
+    const kill = $('#rc-kill', p.body);
+    if (kill) kill.addEventListener('click', () => {
+      const s = sheet({ title: 'Stop all Alpaca trading?', html: `<p class="dialog-msg">Cancels every open order on Alpaca, pauses every Alpaca bot and blocks new buys until you resume.</p><div class="group"><div class="cell"><div class="main"><div class="title">Also sell every position</div><div class="sub">Market orders; stocks sell at the open if the market is closed</div></div>${sw(false, 'id="k-fl"')}</div></div><button class="btn btn-sell btn-block btn-lg mt16" id="k-go">Hold to stop everything</button>` });
+      $('#k-fl', s.body).addEventListener('click', e => e.currentTarget.classList.toggle('on'));
+      holdButton($('#k-go', s.body), async () => { try { const r = await post('real/kill', { flatten: $('#k-fl', s.body).classList.contains('on') }); s.close(); toast('Alpaca trading stopped', { sub: `${r.paused} bot${r.paused === 1 ? '' : 's'} paused${r.cancelled ? ', orders cancelled' : ''}${r.closed ? ', positions sold' : ''}` }); await loadState({ quiet: true }); p.load(); } catch (e) { toastErr(e); } }, 900, 'hold');
+    });
+    const res = $('#rc-resume', p.body);
+    if (res) res.addEventListener('click', async () => { if (!(await confirmBox({ title: 'Resume Alpaca trading?', msg: 'New buys are allowed again. Paused bots stay paused until you resume each one.', ok: 'Resume' }))) return; try { await post('real/resume'); toast('Alpaca trading resumed'); await loadState({ quiet: true }); p.load(); } catch (e) { toastErr(e); } });
+  },
+};
+// Pick a paper bot to move to Alpaca, then set its budget.
+ACT.promotePick = async () => {
+  const [d, s0] = await Promise.all([api('bots'), strats()]);
+  const paper = d.bots.filter(b => !b.wallet?.broker);
+  sheet({ title: 'Move a bot to Alpaca', tall: true, html: paper.length ? `<p class="dialog-msg">Pick one with a record you trust. A few months of results mean much more than a few good days.</p><div class="group">${paper.map(b => { const days = Math.round((Date.now() - b.created) / 864e5); return `<button class="cell" data-act="promote" data-id="${b.id}"><div class="lead" style="color:${hueOf(b.strategy)}">${icon(s0.strategies[b.strategy]?.icon || 'bot')}</div><div class="main"><div class="title">${h(b.name)}</div><div class="sub">${days} day${days === 1 ? '' : 's'} on paper${days < 30 ? ' · <span class="dn">short record</span>' : ''}</div></div><b class="n ${cls(b.ret)}">${pct(b.ret)}</b></button>`; }).join('')}</div>` : '<p class="dialog-msg">You have no paper bots yet. Make one on the paper side first.</p>' });
+};
+ACT.promote = async el => {
+  const id = +(el.dataset.id || curBot()?.id); if (!id) return;
+  const [b, r] = await Promise.all([api('bots/' + id), api('real').catch(() => ({}))]);
+  if (!r.on || !r.wid) { toast('Connect Alpaca first', { kind: 'err', sub: 'Add ALPACA_KEY_ID and ALPACA_SECRET_KEY in Railway, then connect it in Alpaca controls.' }); return; }
+  const live = r.env === 'live', days = Math.round((Date.now() - b.created) / 864e5);
+  const s = sheet({ title: 'Move ' + b.name + ' to Alpaca', tall: true, html: `<div class="card"><div class="t-cap">On paper</div><div class="bt-big ${cls(b.ret)}">${pct(b.ret)}</div><div class="t-foot">in ${days} day${days === 1 ? '' : 's'} · biggest drop from its high ${pct0(Math.abs(b.dd || 0) * 100, 1)}</div></div>
+      ${days < 30 ? `<div class="callout warn mt12">${icon('info')}<div>Only ${days} day${days === 1 ? '' : 's'} of results. That's mostly luck either way; a few months tell you much more.</div></div>` : ''}
+      <label class="field"><span>Money it can use on Alpaca ($)</span><input type="number" inputmode="decimal" id="pr-b" value="1000"></label>
+      ${live ? `<label class="field"><span>Real money: the most it can ever have invested ($)</span><input type="number" inputmode="decimal" id="pr-c" value="500"></label>` : ''}
+      <div class="group mt12"><div class="cell"><div class="main"><div class="title">Start it right away</div><div class="sub">Otherwise it waits, paused, until you resume it</div></div>${sw(false, 'id="pr-go"')}</div></div>
+      <p class="note">It copies the strategy, symbols and limits. The paper bot keeps running so you can compare them side by side on the Leaderboard.</p>`,
+    foot: `<button class="btn ${live ? 'btn-sell' : 'btn-primary'} btn-block btn-lg" id="pr-do">${icon('swap')}Move to Alpaca${live ? ' (real money)' : ''}</button>` });
+  $('#pr-go', s.body).addEventListener('click', e => e.currentTarget.classList.toggle('on'));
+  $('#pr-do', s.el).addEventListener('click', async e => {
+    const btn = e.currentTarget; if (btn.classList.contains('is-busy')) return;
+    let confirm;
+    if (live) { confirm = await askText({ title: 'Real money', msg: `This bot will trade real money on your Alpaca account, up to ${money(num($('#pr-c', s.body).value))} invested. Type REAL MONEY to confirm.`, placeholder: 'REAL MONEY', ok: 'Confirm' }); if (confirm == null) return; }
+    busy(btn, true);
+    try { const x = await post(`bots/${id}/promote`, { budget: num($('#pr-b', s.body).value), liveCap: num($('#pr-c', s.body)?.value), start: $('#pr-go', s.body).classList.contains('on'), confirm }); s.close(); toast(`${x.bot.name} is on Alpaca`, { sub: x.bot.status === 'running' ? 'It decides at its usual time.' : 'Paused until you resume it.' }); await loadState({ quiet: true }); Router.go('bot/' + x.bot.id); } catch (err) { busy(btn, false); toastErr(err); }
+  });
+};
 
 // ===================================================================
 // Settings
@@ -4357,6 +4540,7 @@ function startApp() {
   if (started) { rerenderAll(); return; }
   started = true;
   applyLook(App.S.settings);
+  pickSpaceWallet(); applySpace();
   App.tab = TABS.includes(SET().defaultTab) ? SET().defaultTab : 'portfolio';
   show('app');
   renderNav();
@@ -4418,7 +4602,7 @@ document.addEventListener('keydown', e => {
   if (top?.page?.name === 'asset' && (e.key === 'b' || e.key === 's')) { if (e.key === 's' && !posOf(top.page.sym)) return; tradeSheet(top.page.sym, e.key === 'b' ? 'buy' : 'sell'); }
   if (!top && ['1', '2', '3', '4'].includes(e.key)) setTab(TABS[+e.key - 1]);
 });
-window.Mango = { App, Router, api, loadState, VIEWS, PAGES };
+window.Mango = { App, Router, api, loadState, VIEWS, PAGES, ACT };
 boot();
 
 })();
