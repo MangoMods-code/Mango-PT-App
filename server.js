@@ -2956,6 +2956,13 @@ const STRATEGIES = {
     decide(ctx) { const out = { weights: {}, stops: {}, notes: {} }, live = ctx.syms.filter(s => ctx.idx[s] != null); for (const s of live) { out.weights[s] = Math.min(ctx.maxW, 1 / live.length); out.notes[s] = 'Held in equal parts.'; } return out; },
   },
 };
+// Autopilot is not a strategy of its own: it blends the others (see 09f-autopilot.js).
+STRATEGIES.autopilot = {
+  name: 'Autopilot', short: 'Autopilot', icon: 'sparkle', rebalance: 'daily', markets: 'both', auto: true, band: 0.03,
+  desc: 'Runs every strategy as a tryout with pretend money on today\'s real prices, and gives this wallet\'s money to the ones that are working: more to steady winners, nothing to the ones that have gone cold. A new plan every month; a strategy that stops working loses its money right away.',
+  params: [{ k: 'markets', label: 'Trades', def: 'both', choices: [['both', 'Stocks and crypto'], ['stocks', 'Stocks only'], ['crypto', 'Crypto only']] }, { k: 'maxSleeve', label: 'Most in one strategy (%)', def: 35, min: 15, max: 100 }],
+  grid: {}, need: () => 2, decide() { fail('Autopilot decides through its tryouts'); },
+};
 const UNIVERSES = {
   megacap: { name: 'Big US stocks', syms: ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'META', 'AVGO', 'TSLA', 'JPM', 'V', 'LLY', 'COST', 'NFLX', 'WMT', 'XOM', 'AMD'] },
   etfs: { name: 'Index and sector ETFs', syms: ['SPY', 'QQQ', 'IWM', 'DIA', 'XLK', 'XLF', 'XLE', 'XLV', 'XLY', 'XLP', 'XLI', 'XLU', 'XLB', 'XLC', 'XLRE'] },
@@ -2972,7 +2979,7 @@ function cleanParams(key, p = {}) {
   }
   return out;
 }
-const strategiesJson = () => Object.fromEntries(Object.entries(STRATEGIES).map(([k, s]) => [k, { name: s.name, short: s.short, icon: s.icon, desc: s.desc, rebalance: s.rebalance, markets: s.markets, params: s.params }]));
+const strategiesJson = () => Object.fromEntries(Object.entries(STRATEGIES).map(([k, s]) => [k, { name: s.name, short: s.short, icon: s.icon, desc: s.desc, rebalance: s.rebalance, markets: s.markets, params: s.params, auto: !!s.auto }]));
 
 // =====================================================================
 // Backtester: replays a strategy day by day with the same spreads and fees as live trading
@@ -3066,7 +3073,7 @@ function runBacktest({ key, params, syms, data, start, end, capital = 10000, pro
     const b = series[bench]; let units = null; bcurve = [];
     for (const [d] of curve) { const i = b.at.get(d) ?? lastIndexOnOrBefore(b.d, d); if (i < 0) { bcurve.push([d, capital]); continue; } if (units == null) units = capital / b.c[i]; bcurve.push([d, units * b.c[i]]); }
   }
-  return { curve, bcurve, trades, closed, fees, spreadCost, maxDD, exposure: curve.length ? exposureDays / curve.length : 0, open: Object.entries(pos).map(([s, h]) => ({ sym: s, qty: h.qty, entry: h.cost / h.qty, entryDate: h.entryDate, value: h.qty * series[s].c[ptr[s]] })) };
+  return { curve, bcurve, trades, closed, fees, spreadCost, maxDD, exposure: curve.length ? exposureDays / curve.length : 0, open: Object.entries(pos).map(([s, h]) => ({ sym: s, qty: h.qty, entry: h.cost / h.qty, entryDate: h.entryDate, value: h.qty * series[s].c[ptr[s]], stop: h.stop || null })) };
 }
 function lastIndexOnOrBefore(arr, d) { let lo = 0, hi = arr.length - 1, r = -1; while (lo <= hi) { const m = (lo + hi) >> 1; if (arr[m] <= d) { r = m; lo = m + 1; } else hi = m - 1; } return r; }
 const addIso = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 864e5).toISOString().slice(0, 10);
@@ -3100,7 +3107,7 @@ function summarize(r, periodsPerYear, capital) {
 const ppy = syms => syms.every(isCrypto) ? 365 : 252;
 const downsamplePts = (pts, n = 260) => { if (pts.length <= n) return pts; const out = [], step = (pts.length - 1) / (n - 1); for (let i = 0; i < n; i++) out.push(pts[Math.round(i * step)]); return out; };
 async function backtest(o) {
-  const key = o.strategy, st = STRATEGIES[key]; if (!st) fail('Pick a strategy');
+  const key = o.strategy, st = STRATEGIES[key]; if (!st) fail('Pick a strategy'); if (st.auto) fail('Autopilot picks its own strategies, so it is tested by its tryouts instead');
   const syms = [...new Set((o.syms || []).map(cleanSym).filter(Boolean))].slice(0, 40); if (!syms.length) fail('Pick at least one symbol');
   for (const s of syms) if (!assets.has(s)) addAsset(s, CRYPTO_DEFAULT.includes(s) || o.kinds?.[s] === 'crypto' ? 'crypto' : 'stock');
   const params = cleanParams(key, o.params), years = clamp(num(o.years, 3), 1, 8), capital = clamp(num(o.capital, 10000), 100, 1e8);
@@ -3173,6 +3180,7 @@ function withLive(b, sym) {
   const q = prices.get(sym), today = isCrypto(sym) ? new Date().toISOString().slice(0, 10) : etDate();
   const out = { sym, d: b.d.slice(), o: b.o.slice(), h: b.h.slice(), l: b.l.slice(), c: b.c.slice(), v: b.v.slice(), memo: {} };
   if (!q?.p) return { bars: out, live: false };
+  if (!isCrypto(sym)) { const t = etParts(); if (!isTradingDay(t.y, t.m, t.d) || t.h * 60 + t.mi < 9 * 60 + 30) return { bars: out, live: false }; } // no stock bar before today's open
   const n = out.d.length - 1;
   if (out.d[n] === today) { out.c[n] = q.p; out.h[n] = Math.max(out.h[n], q.p); out.l[n] = Math.min(out.l[n], q.p); }
   else if (out.d[n] < today) { out.d.push(today); out.o.push(q.open || q.p); out.h.push(Math.max(q.hi || q.p, q.p)); out.l.push(Math.min(q.lo || q.p, q.p)); out.c.push(q.p); out.v.push(0); }
@@ -3229,8 +3237,10 @@ async function runBotInner(id, { manual, dry }) {
     held[p.sym] = { qty: p.qty, entry: p.avg, entryDate, high: Math.max(s0.high || 0, c), days, weight: s0.weight, stopPx: s0.stopPx };
   }
   const month = today.slice(0, 7), rebalanceDue = st.rebalance === 'none' || !state._lastRebalance || (st.rebalance === 'monthly' ? state._lastRebalance.slice(0, 7) !== month : true) || manual;
+  const band = st.band || 0.01;
   const ctx = { syms: tradable, data: series, idx, params: bot.params, held, bench, maxW: m.maxPosPct / 100 };
-  const dec = rebalanceDue ? st.decide(ctx) : { weights: Object.fromEntries(Object.entries(held).map(([s, h]) => [s, h.weight || (h.qty * (priceOf(s) || h.entry)) / capital])), stops: {}, notes: Object.fromEntries(Object.keys(held).map(s => [s, 'Holding until the next monthly rebalance.'])) };
+  const dec = st.auto ? await autopilotDecide(bot, state, series, today, { dry, manual }) : rebalanceDue ? st.decide(ctx) : { weights: Object.fromEntries(Object.entries(held).map(([s, h]) => [s, h.weight || (h.qty * (priceOf(s) || h.entry)) / capital])), stops: {}, notes: Object.fromEntries(Object.keys(held).map(s => [s, 'Holding until the next monthly rebalance.'])) };
+  if (st.auto) { ctx.regime = dec.regime; for (const k of Object.keys(dec.weights)) dec.weights[k] = Math.min(dec.weights[k], m.maxPosPct / 100); }
   if (!rebalanceDue) log.risk.push(`${st.name} rebalances monthly; next on the first trading day of next month. Holding as is.`);
   // ---- news and social check before buying ----
   const buzz = {};
@@ -3276,14 +3286,14 @@ async function runBotInner(id, { manual, dry }) {
     if (!(isCrypto(d.sym) || tradable.includes(d.sym))) continue;
     const targetV = d.target * capital, diff = targetV - d.have;
     if (d.target <= 0) { d.action = 'sell'; await placeOrder(d.sym, 'sell', { pct: 100 }, `${st.short}: ${d.why[0] || d.note}`); delete state[d.sym]; }
-    else if (rebalanceDue && st.rebalance !== 'none' && -diff > Math.max(m.minTrade, capital * 0.01)) { d.action = 'trim'; await placeOrder(d.sym, 'sell', { qty: Math.min(held[d.sym].qty, -diff / px) }, `${st.short}: rebalance down to ${pct0n(d.target)} of the wallet`); }
+    else if (rebalanceDue && st.rebalance !== 'none' && -diff > Math.max(m.minTrade, capital * band)) { d.action = 'trim'; await placeOrder(d.sym, 'sell', { qty: Math.min(held[d.sym].qty, -diff / px) }, `${st.short}: rebalance down to ${pct0n(d.target)} of the wallet`); }
   }
   for (const d of Object.values(decisions).sort((a, b) => b.target - a.target)) {
     if (!(d.target > 0) || !tradable.includes(d.sym)) continue;
     const px = priceOf(d.sym), targetV = d.target * capital, diff = targetV - d.have;
     const isNew = !held[d.sym];
     if (!isNew && !(rebalanceDue && st.rebalance !== 'none')) continue;
-    if (diff <= Math.max(m.minTrade, capital * 0.01)) continue;
+    if (diff <= Math.max(m.minTrade, capital * (isNew ? 0.01 : band))) continue;
     const a2 = dry ? acct : await accountInfo(bot.wid);
     const bp = isCrypto(d.sym) || !marginable(d.sym, px) ? a2.bpCrypto : a2.bp;
     const usd = Math.floor(Math.min(diff, bp * 0.995) * 100) / 100;
@@ -3317,6 +3327,7 @@ async function runBotInner(id, { manual, dry }) {
     const summary = log.orders.length ? [bought.length ? 'Bought ' + bought.join(', ') : '', sold.length ? 'sold ' + sold.join(', ') : ''].filter(Boolean).join('; ') : 'No changes';
     await Q('update bots set state=$1, last_run=now(), last_day=$2, peak=$3, day_start=$4, day_date=$5, summary=$6 where id=$7', [JSON.stringify(state), today, peak, dayStart, today, summary, id]);
     const rows = Object.values(decisions).map(d => ({ sym: d.sym, action: d.action, want: round(d.want, 4), target: round(d.target, 4), have: round(d.have, 2), note: d.note, why: d.why, buzz: d.buzz, flags: d.flags }));
+    if (dec.report) { await botLog(id, 'report', dec.report.title, dec.report.body, dec.report.data); await notify('bot', `🧭 ${bot.name}: ${dec.report.title.toLowerCase()}`, dec.report.body.split('\n').filter(l => !/: none/.test(l)).slice(0, 5).join('\n') || 'Holding cash: no strategy is working well enough right now.', { wid: bot.wid, url: '/#/bot/' + id }); }
     await botLog(id, 'decision', `${manual ? 'Manual run' : 'Daily decision'}: ${summary}`, [...log.risk, ...log.skips].join('\n'), { rows, equity, capital, dd, dayRet, regime: ctx.regime || null, missing });
     if (m.notify === 'all' || (m.notify === 'trades' && log.orders.length)) await notify('bot', `🤖 ${bot.name}: ${summary}`, log.orders.map(o => `${o.text}. ${o.label || ''}`.trim()).join('\n').slice(0, 600) || [...log.risk, ...log.skips].join(' ') || 'Nothing to do today.', { wid: bot.wid, url: '/#/bot/' + id });
   }
@@ -3362,6 +3373,112 @@ fillCbs.push(async f => {
   await botLog(bot.id, 'trade', text, viaBot ? 'Filled when the market opened.' : t.otype === 'stop' || t.otype === 'trail' ? 'The protective stop was hit.' : 'Traded outside the bot.', { side: f.side, fill: { qty: f.qty, price: f.price, fee: f.fee, pnl: f.pnl, id: f.id }, outside: !viaBot }, f.sym);
   if ((t.otype === 'stop' || t.otype === 'trail') && bot.mandate.notify !== 'off') await notify('bot', `🤖 ${bot.name}: ${label.toLowerCase()} hit on ${f.sym}`, text, { wid: f.wid, sym: f.sym, url: '/#/bot/' + bot.id });
 });
+
+// =====================================================================
+// Autopilot: runs every strategy as a tryout with pretend money, and gives its own wallet's money
+// to the ones that are working. Tryouts are simulated day by day on real daily prices from a fixed
+// start, so each one's record is exactly what it would have done; from the Autopilot's first day on,
+// that record is live and unseen. Money moves between strategies once a month, and right away when
+// one goes cold.
+// =====================================================================
+const AP_STOCKS = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'META', 'AVGO', 'TSLA', 'JPM', 'LLY', 'COST', 'NFLX'];
+const AP_ETFS = ['SPY', 'QQQ', 'IWM', 'EFA', 'EEM', 'TLT', 'IEF', 'GLD', 'DBC', 'VNQ'];
+const AP_CRYPTO = ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'LINK'];
+const AP_TRYOUTS = [
+  { k: 'trend-stocks', strategy: 'trend', syms: AP_STOCKS, label: 'Trend on big US stocks', market: 'stocks' },
+  { k: 'breakout-stocks', strategy: 'breakout', syms: AP_STOCKS, label: 'Breakouts in big US stocks', market: 'stocks' },
+  { k: 'momentum-mix', strategy: 'momentum', syms: AP_ETFS, label: 'Momentum across stocks, bonds and gold', market: 'stocks' },
+  { k: 'dips-index', strategy: 'rsi2', syms: ['SPY', 'QQQ', 'IWM', 'DIA'], label: 'Buying dips in index ETFs', market: 'stocks' },
+  { k: 'hold-mix', strategy: 'hold', syms: ['SPY', 'QQQ', 'TLT', 'GLD'], label: 'Steady mix of stocks, bonds and gold', market: 'stocks' },
+  { k: 'trend-crypto', strategy: 'trend', syms: AP_CRYPTO, label: 'Trend on top crypto', market: 'crypto' },
+  { k: 'breakout-crypto', strategy: 'breakout', syms: AP_CRYPTO, label: 'Breakouts in crypto', market: 'crypto' },
+  { k: 'momentum-all', strategy: 'momentum', syms: ['SPY', 'QQQ', 'GLD', 'TLT', 'BTC', 'ETH', 'SOL'], label: 'Momentum across stocks and crypto', market: 'both', params: { filterLen: 0 } },
+];
+const apTryouts = markets => AP_TRYOUTS.filter(t => markets === 'both' || t.market === markets || (t.market === 'both' && markets !== 'crypto' && markets !== 'stocks'));
+const apSyms = markets => [...new Set(apTryouts(markets).flatMap(t => t.syms))];
+const AP_WINDOW = 126, AP_MIN_LIVE = 20, AP_MIN_SLEEVE = 0.08;
+// How good a track record is: return per unit of risk over the last ~6 months, docked for deep drops.
+function apScore(curve, P) {
+  const c = curve.slice(-AP_WINDOW - 1); if (c.length < 40) return null;
+  const rets = []; for (let i = 1; i < c.length; i++) rets.push(c[i][1] / c[i - 1][1] - 1);
+  const mean = rets.reduce((a, b) => a + b, 0) / rets.length, sd = Math.sqrt(rets.reduce((a, r) => a + (r - mean) ** 2, 0) / Math.max(1, rets.length - 1));
+  let peak = -Infinity, dd = 0; for (const [, v] of c) { peak = Math.max(peak, v); dd = Math.min(dd, v / peak - 1); }
+  const sharpe = sd > 0 ? mean / sd * Math.sqrt(P) : 0;
+  const q = c.slice(-64), ret3m = q.length > 1 ? q[q.length - 1][1] / q[0][1] - 1 : 0, ret6m = c[c.length - 1][1] / c[0][1] - 1;
+  const score = sharpe * (1 - Math.min(0.6, Math.abs(dd)));
+  return { sharpe, dd, ret3m, ret6m, score, eligible: sharpe > 0.3 && ret3m > -0.03 };
+}
+// Split the money: in proportion to score, capped per strategy, small slices dropped, the rest left in cash.
+function apAllocate(board, maxSleeve) {
+  let live = board.filter(t => t.eligible && t.score > 0);
+  for (let pass = 0; pass < 4; pass++) {
+    const tot = live.reduce((a, t) => a + t.score, 0); if (!tot) return {};
+    const w = {}; let left = 1, open = live.slice();
+    // water-fill so capped strategies hand their extra to the others
+    for (let it = 0; it < 6 && open.length; it++) {
+      const sum = open.reduce((a, t) => a + t.score, 0), next = [];
+      let used = 0;
+      for (const t of open) { const share = left * t.score / sum, cap = t.cap; if (share >= cap) { w[t.k] = cap; used += cap; } else next.push(t); }
+      if (next.length === open.length) { for (const t of open) w[t.k] = left * t.score / sum; open = []; break; }
+      left -= used; open = next;
+    }
+    const small = live.filter(t => (w[t.k] || 0) < AP_MIN_SLEEVE);
+    if (!small.length) return Object.fromEntries(Object.entries(w).map(([k, v]) => [k, round(v, 4)]));
+    live = live.filter(t => !small.includes(t));
+  }
+  return {};
+}
+async function autopilotDecide(bot, state, series, today, { dry = false, manual = false } = {}) {
+  const p = bot.params, tryouts = apTryouts(p.markets || 'both'), maxSleeve = (p.maxSleeve || 35) / 100;
+  if (!state._since) state._since = today;
+  if (!state._histStart) state._histStart = addIso(state._since, -460);
+  const board = [];
+  const shadows = {};
+  for (const t of tryouts) {
+    const st = STRATEGIES[t.strategy], syms = t.syms.filter(s => series[s]);
+    if (!syms.length) continue;
+    const params = cleanParams(t.strategy, t.params || {}), bench = benchFor(syms);
+    const r = runBacktest({ key: t.strategy, params, syms, data: series, start: state._histStart, end: null, capital: 10000, maxPosPct: 100, bench });
+    if (!r.curve.length) continue;
+    const P = ppy(syms), sc = apScore(r.curve, P) || { sharpe: 0, dd: 0, ret3m: 0, ret6m: 0, score: 0, eligible: false };
+    const liveC = r.curve.filter(x => x[0] >= state._since), liveDays = liveC.length;
+    const eq = r.curve[r.curve.length - 1][1];
+    const holds = {}; for (const o of r.open) holds[o.sym] = { w: o.value / eq, stop: o.stop || null };
+    shadows[t.k] = holds;
+    board.push({ k: t.k, label: t.label, strategy: t.strategy, name: st.name, market: t.market, syms, ...Object.fromEntries(Object.entries(sc).map(([a, v]) => [a, typeof v === 'number' ? round(v, 4) : v])),
+      live: liveC.length > 1 ? round(liveC[liveC.length - 1][1] / liveC[0][1] - 1, 4) : 0, liveDays, cap: liveDays < AP_MIN_LIVE ? Math.min(maxSleeve, 0.25) : maxSleeve,
+      holding: Object.keys(holds), cash: round(1 - Object.values(holds).reduce((a, h) => a + h.w, 0), 3), spark: downsamplePts(r.curve.slice(-AP_WINDOW), 40).map(x => round(x[1], 2)) });
+  }
+  // A new plan on the first run of each month (or the first run ever, or when asked); in between, a strategy that goes cold loses its money right away.
+  const month = today.slice(0, 7), prev = state._alloc || {};
+  let alloc = prev, changed = false, why = '';
+  if (!state._allocMonth || state._allocMonth !== month || manual && !Object.keys(prev).length) { alloc = apAllocate(board, maxSleeve); changed = true; why = state._allocMonth ? 'monthly' : 'first'; }
+  else {
+    const cold = Object.keys(prev).filter(k => { const t = board.find(x => x.k === k); return !t || !t.eligible; });
+    if (cold.length) { alloc = { ...prev }; for (const k of cold) delete alloc[k]; changed = true; why = 'cold:' + cold.join(','); }
+  }
+  for (const t of board) t.alloc = alloc[t.k] || 0;
+  const out = { weights: {}, stops: {}, notes: {} }, from = {};
+  for (const [k, a] of Object.entries(alloc)) for (const [s, h] of Object.entries(shadows[k] || {})) {
+    out.weights[s] = (out.weights[s] || 0) + a * h.w;
+    (from[s] = from[s] || []).push(`${board.find(x => x.k === k)?.label || k} (${Math.round(h.w * 100)}% of its money)`);
+    if (h.stop) out.stops[s] = out.stops[s] ? { trail: false, price: Math.min(out.stops[s].price, h.stop) } : { trail: false, price: h.stop };
+  }
+  for (const s of Object.keys(series)) if (!out.notes[s]) out.notes[s] = from[s] ? `Held by ${from[s].join(' and ')}.` : 'None of the strategies it is using hold this right now.';
+  for (const s of Object.keys(out.weights)) out.weights[s] = round(out.weights[s], 4);
+  const cash = 1 - Object.values(out.weights).reduce((a, b) => a + b, 0);
+  out.regime = Object.keys(alloc).length ? `Using ${Object.keys(alloc).length} of ${board.length} strategies: ${board.filter(t => t.alloc > 0).sort((a, b) => b.alloc - a.alloc).map(t => `${t.label} ${Math.round(t.alloc * 100)}%`).join(', ')}. About ${Math.max(0, Math.round(cash * 100))}% in cash.` : `Sitting out: none of the ${board.length} strategies has a good enough record right now, so it holds cash.`;
+  if (!dry) {
+    state._board = board; state._boardT = Date.now();
+    if (changed) {
+      state._alloc = alloc; state._allocMonth = month;
+      const lines = board.slice().sort((a, b) => b.alloc - a.alloc || b.score - a.score).map(t => `${t.label}: ${t.alloc ? Math.round(t.alloc * 100) + '%' : 'none'}${prev[t.k] != null && Math.round((prev[t.k] || 0) * 100) !== Math.round(t.alloc * 100) ? ` (was ${Math.round((prev[t.k] || 0) * 100)}%)` : ''} · 6 months ${pct(t.ret6m * 100)}, Sharpe ${t.sharpe.toFixed(2)}${t.eligible ? '' : ' · not working lately'}`);
+      const title = why === 'first' ? 'First plan' : why === 'monthly' ? `Plan for ${new Date(today + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })}` : 'Pulled money from a strategy that went cold';
+      out.report = { title, body: lines.join('\n'), data: { board, alloc, prev, why } };
+    }
+  }
+  return out;
+}
 
 // =====================================================================
 // Login
@@ -3943,7 +4060,8 @@ GET('/api/bots/:id', auth, async req => {
   const log = (await rows('select * from bot_log where bot_id=$1 order by id desc limit 60', [b.id])).map(logJson);
   const last = await row("select * from bot_log where bot_id=$1 and kind='decision' order by id desc limit 1", [b.id]);
   const queued = [...limOrders.values()].flat().filter(l => l.wid === b.wid).map(l => ({ id: l.id, sym: l.sym, side: l.side, kind: l.kind, amt: l.amt, units: l.units }));
-  return { ...card, positions: pos, log, last: last ? logJson(last) : null, queued, strategyInfo: strategiesJson()[card.strategy] || null };
+  const auto = STRATEGIES[card.strategy]?.auto ? { since: state._since || null, alloc: state._alloc || {}, board: state._board || [], boardT: state._boardT || null, month: state._allocMonth || null, report: (await row("select * from bot_log where bot_id=$1 and kind='report' order by id desc limit 1", [b.id]).then(r => r && logJson(r))) || null } : null;
+  return { ...card, positions: pos, log, last: last ? logJson(last) : null, queued, auto, strategyInfo: strategiesJson()[card.strategy] || null };
 });
 const logJson = r => ({ id: r.id, ts: tsMs(r.ts), kind: r.kind, sym: r.sym, title: r.title, body: r.body, data: jsonOr(r.data) });
 function nextRunOf(bot) {
@@ -3968,7 +4086,13 @@ POST('/api/bots', auth, async req => {
   if (+(await row('select count(*) n from bots')).n >= 20) fail('You can have up to 20 bots');
   const name = String(b.name || st.name).trim().slice(0, 30) || st.name;
   if (FINNHUB_KEY && S.f_buzz !== false) earningsCal().catch(() => {});
-  const syms = await cleanBotSyms(b.syms, b.kinds || {}), params = cleanParams(b.strategy, b.params), mandate = cleanMandate(b.mandate || {});
+  const params = cleanParams(b.strategy, b.params), mandate = cleanMandate({ ...(st.auto ? { maxTradesDay: 30, maxPosPct: 20 } : {}), ...(b.mandate || {}) });
+  let syms;
+  if (st.auto) { // Autopilot trades the tryouts' symbols; prices are fetched in the background
+    syms = apSyms(params.markets);
+    for (const s of syms) if (!assets.has(s)) addAsset(s, AP_CRYPTO.includes(s) || CRYPTO_DEFAULT.includes(s) ? 'crypto' : 'stock');
+    Promise.allSettled(syms.map(s => trackAsset(s, AP_CRYPTO.includes(s) ? 'crypto' : 'stock'))).catch(() => {});
+  } else syms = await cleanBotSyms(b.syms, b.kinds || {});
   let wid = +b.wallet || 0;
   if (!wid) {
     if (+(await row('select count(*) n from wallets')).n >= 25) fail('You have 25 wallets already. Pick an existing wallet for this bot or archive one.');
@@ -4000,9 +4124,9 @@ PATCH('/api/bots/:id', auth, async req => {
   const bot = botJson(b), x = req.body || {}, sets = [], vals = [];
   const set = (k, v) => { vals.push(v); sets.push(`${k}=$${vals.length}`); };
   if (x.name !== undefined) set('name', String(x.name).trim().slice(0, 30) || bot.name);
-  if (x.params) set('params', JSON.stringify(cleanParams(bot.strategy, { ...bot.params, ...x.params })));
+  if (x.params) { const np = cleanParams(bot.strategy, { ...bot.params, ...x.params }); set('params', JSON.stringify(np)); if (STRATEGIES[bot.strategy]?.auto) set('syms', JSON.stringify(apSyms(np.markets))); }
   if (x.mandate) set('mandate', JSON.stringify(cleanMandate(x.mandate, bot.mandate)));
-  if (x.syms) set('syms', JSON.stringify(await cleanBotSyms(x.syms, x.kinds || {})));
+  if (x.syms && !STRATEGIES[bot.strategy]?.auto) set('syms', JSON.stringify(await cleanBotSyms(x.syms, x.kinds || {})));
   const changes = [];
   if (x.status && ['running', 'paused'].includes(x.status) && x.status !== bot.status) {
     set('status', x.status); changes.push(x.status === 'running' ? 'Resumed' : 'Paused');

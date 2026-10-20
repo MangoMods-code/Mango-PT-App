@@ -837,6 +837,23 @@ button.tile:active { transform: scale(.98); }
 @media (prefers-reduced-motion: reduce) { .bot-st.up i { animation: none; } }
 [data-motion="reduce"] .bot-st.up i { animation: none; }
 
+/* autopilot */
+.auto-hero { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; padding: 16px; margin-bottom: 4px; border-radius: var(--r-xl); background: radial-gradient(130% 140% at 0 0, color-mix(in srgb, var(--ac) 26%, transparent), transparent 62%), var(--card); box-shadow: var(--hi), inset 0 0 0 1px color-mix(in srgb, var(--ac) 30%, transparent); transition: transform .15s; }
+.auto-hero:active { transform: scale(.985); }
+.auto-hero .t { font-family: var(--font-display); font-weight: 750; font-size: 21px; letter-spacing: -.02em; }
+.auto-hero .d { font-size: 13.5px; color: var(--tx2); line-height: 1.4; margin-top: 3px; }
+.auto-hero .chev { width: 18px; height: 18px; color: var(--mu); flex: none; }
+.auto-hero-ic { width: 48px; height: 48px; border-radius: 15px; flex: none; display: grid; place-items: center; background: linear-gradient(135deg, var(--ac), var(--ac2)); color: var(--ac-ink); }
+.auto-hero-ic svg { width: 26px; height: 26px; }
+.plan-stack { margin: 2px 0 12px; }
+.plan-list { display: flex; flex-direction: column; gap: 8px; }
+.plan-row { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--tx2); }
+.plan-row > i { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.plan-row b { color: var(--tx); }
+.tryout .sub { white-space: normal; line-height: 1.4; }
+.tryout:not(.on) .title { color: var(--tx2); }
+.tryout .spark { flex: none; width: 64px; height: 28px; }
+
 /* ---------- motion ---------- */
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--up) 55%, transparent); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
@@ -3555,12 +3572,13 @@ VIEWS.bots = {
     if (!bots.length) {
       html = `<div class="bot-intro"><div class="bot-intro-art">${icon('bot')}</div><h3>Put a strategy to work</h3><p>A bot owns a wallet and trades it once a day with fixed rules. Before it buys anything it reads the news, StockTwits and Reddit, and it skips stocks with earnings coming up or serious bad news. It keeps a stop loss on everything it holds and writes down why it did what it did.</p>
         <div class="btns"><button class="btn btn-quiet" data-act="go" data-to="lab">${icon('flask')}Test a strategy</button><button class="btn btn-primary" data-act="go" data-to="newbot">${icon('plus')}New bot</button></div></div>
-        <div class="section-h"><h2>Strategies</h2></div><div class="group">${Object.entries(st).map(([k, x]) => `<button class="cell" data-act="go" data-to="newbot/${k}"><div class="lead">${icon(x.icon)}</div><div class="main"><div class="title">${h(x.name)}</div><div class="sub">${h(x.desc.split('. ')[0])}.</div></div>${icon('right', 'chev')}</button>`).join('')}</div>`;
+        <div class="section-h"><h2>Strategies</h2></div><div class="group">${Object.entries(st).filter(([, x]) => !x.auto).map(([k, x]) => `<button class="cell" data-act="go" data-to="newbot/${k}"><div class="lead">${icon(x.icon)}</div><div class="main"><div class="title">${h(x.name)}</div><div class="sub">${h(x.desc.split('. ')[0])}.</div></div>${icon('right', 'chev')}</button>`).join('')}</div>`;
     } else {
       const tot = bots.reduce((t, b) => t + (b.value || 0), 0), start = bots.reduce((t, b) => t + (b.start || 0), 0), day = bots.reduce((t, b) => t + (b.day?.change || 0), 0);
       html = `<div class="tiles bt-tiles"><div class="tile"><div class="k">${icon('wallet')}In bot wallets</div><div class="v priv">${money(tot)}</div><div class="s ${cls(tot - start)}">${money(tot - start, { sign: true })} all time</div></div><div class="tile"><div class="k">${icon('activity')}Today</div><div class="v priv ${cls(day)}">${money(day, { sign: true })}</div><div class="s">${bots.filter(b => b.status === 'running').length} of ${bots.length} running</div></div></div>
         <div class="section-h"><h2>Your bots<span class="count">${bots.length}</span></h2></div><div class="bot-list">${bots.map(b => botCard(b, st)).join('')}</div>`;
     }
+    if (!bots.some(b => b.strategy === 'autopilot')) html = autoHero() + html;
     html += `<div class="section-h"><h2>Tools</h2></div><div class="group">${menuCell('flask', 'Strategy lab', 'Test any strategy on up to 8 years of daily prices, with real fees', 'lab')}${feature('buzz') ? menuCell('radar', 'News radar', 'What headlines and social media say about what you own and watch', 'radar') : ''}</div>`;
     $('#bt-body', this.el).innerHTML = html;
     Live.run();
@@ -3628,6 +3646,7 @@ PAGES.bot = {
         <div class="meter-row"><span>Drop from its high</span><b class="n">${pct0(dd, 1)}${ddLim ? ` of ${ddLim}%` : ''}</b></div>${ddLim ? `<div class="meter"><i style="width:${clamp(dd / ddLim * 100, 0, 100)}%;background:${dd / ddLim > 0.75 ? 'var(--dn)' : dd / ddLim > 0.4 ? 'var(--ac)' : 'var(--up)'}"></i></div>` : ''}
         <div class="meter-row mt12"><span>Today</span><b class="n ${cls(dayPct)}">${pct(dayPct)}${m.dailyLossPct ? ` · stops buying at −${m.dailyLossPct}%` : ''}</b></div>
         <div class="t-foot mt8">${ddLim ? `At a ${ddLim}% drop from its high it stops itself${m.flattenOnKill ? ' and sells what it owns' : ''}.` : 'No drawdown stop.'} At most ${m.maxPosPct}% in one position, ${m.maxTradesDay} trades a day${m.budget > 0 ? `, using up to ${money(m.budget)}` : ''}. ${m.stops ? 'Keeps a stop loss on every position.' : 'No stop losses.'}</div></div>
+      ${autoSections(b)}
       ${last ? `<div class="section-h"><h2>Latest thinking</h2><span class="t-foot">${timeAgo(last.ts)}</span></div><div class="card think-card"><div class="think-head">${h(last.title.replace(/^(Daily decision|Manual run): /, ''))}</div>${last.body ? `<p class="t-foot think-risk">${h(last.body).replace(/\n/g, '<br>')}</p>` : ''}${last.data?.regime ? `<p class="t-foot think-risk">${icon('chart')} ${h(last.data.regime)}</p>` : ''}${thinkRows(last.data?.rows || [])}</div>` : `<div class="section-h"><h2>Latest thinking</h2></div><div class="card"><p class="t-foot" style="margin:0">${b.lastRun ? '' : 'If you asked for a first decision, it\'s reading the news now and will show up here. '}It hasn't made a decision yet. ${b.status === 'running' ? h(nextRunText(b.next)) + ', or tap Decide now.' : ''}</p></div>`}
       <div class="section-h"><h2>Holding<span class="count">${mine.length}</span></h2></div>
       <div class="group">${mine.length ? mine.map(x => `<button class="cell arow" data-act="asset" data-sym="${h(x.sym)}">${logo(x.sym, 'logo-sm')}<div class="main"><div class="sym">${h(x.sym)}</div><div class="name">${qtyStr(x.sym, x.qty)} · ${x.entryDate ? 'since ' + fmtDate(x.entryDate + 'T12:00') : 'bought ' + fmtDate(x.since)}${x.stop ? ` · stop ${price(x.stop)}` : ''}</div></div><div class="trail col" style="align-items:flex-end"><b class="n priv">${money(x.value)}</b><span class="n ${cls(x.pl)}">${money(x.pl, { sign: true })} (${pct(x.plPct)})</span></div></button>`).join('') : `<div class="cell"><div class="main t-foot">All cash right now${b.cash ? ': ' + money(b.cash) : ''}.</div></div>`}
@@ -3636,7 +3655,7 @@ PAGES.bot = {
       <div class="group" id="bot-log">${b.log.slice(0, 12).map(logRow).join('') || '<div class="cell"><div class="main t-foot">Nothing yet.</div></div>'}</div>
       <div class="section-h"><h2>Rules</h2><button class="more" data-act="botEdit">Change ${icon('right')}</button></div>
       <div class="card">${(st.params || []).map(x => kv(h(x.label), h(x.choices ? (x.choices.find(c => c[0] === b.params[x.k]) || [, b.params[x.k]])[1] : b.params[x.k]))).join('')}
-        ${kv('Trades', h(b.syms.join(', ')))}
+        ${kv('Trades', st.auto ? `${b.syms.length} stocks, ETFs and coins from its tryouts` : h(b.syms.join(', ')))}
         ${kv('Decides at', `${h(RUN_TIMES.find(x => x[0] === m.runAt)?.[1] || m.runAt)} New York time${b.syms.some(isCrypto) ? ', crypto every day' : ', trading days'}`)}
         ${kv('News check', m.newsFilter && feature('buzz') ? [m.earningsDays ? `skips earnings within ${m.earningsDays} day${m.earningsDays === 1 ? '' : 's'}` : '', m.blockSevere ? 'skips serious news' : '', `skips mood below ${m.minSentiment}`, m.sellOnSevere ? 'sells on serious news' : '', m.tilt ? 'sizes by mood' : ''].filter(Boolean).join(', ') : 'Off')}
         ${kv('Notifications', { trades: 'When it trades', all: 'Every decision', off: 'Off' }[m.notify])}</div>
@@ -3661,8 +3680,8 @@ PAGES.bot = {
     } catch (e) {}
   },
 };
-const LOG_IC = { decision: 'bot', trade: 'swap', risk: 'shield', error: 'info', info: 'note' };
-const logRow = l => `<button class="cell log-${l.kind}" ${l.kind === 'decision' ? `data-act="botDecision" data-id="${l.id}"` : l.sym ? `data-act="asset" data-sym="${h(l.sym)}"` : ''}><div class="lead">${l.sym && l.kind === 'trade' ? logo(l.sym, 'logo-sm') : icon(LOG_IC[l.kind] || 'note')}</div><div class="main"><div class="title">${h(l.title)}</div><div class="sub ellip">${l.body ? h(l.body.split('\n')[0]) + ' · ' : ''}${timeAgo(l.ts)}</div></div>${l.kind === 'decision' ? icon('right', 'chev') : ''}</button>`;
+const LOG_IC = { decision: 'bot', trade: 'swap', risk: 'shield', error: 'info', info: 'note', report: 'calendar' };
+const logRow = l => `<button class="cell log-${l.kind}" ${l.kind === 'decision' ? `data-act="botDecision" data-id="${l.id}"` : l.kind === 'report' ? `data-act="botReport" data-id="${l.id}"` : l.sym ? `data-act="asset" data-sym="${h(l.sym)}"` : ''}><div class="lead">${l.sym && l.kind === 'trade' ? logo(l.sym, 'logo-sm') : icon(LOG_IC[l.kind] || 'note')}</div><div class="main"><div class="title">${h(l.title)}</div><div class="sub ellip">${l.body ? h(l.body.split('\n')[0]) + ' · ' : ''}${timeAgo(l.ts)}</div></div>${l.kind === 'decision' || l.kind === 'report' ? icon('right', 'chev') : ''}</button>`;
 const curBot = () => { const t = Router.top(); return t?.page?.name === 'bot' ? t.page : Router.pages().reverse().find(x => x.name === 'bot'); };
 ACT.botDecision = async el => {
   const p = curBot(); let l = p?.d?.log.find(x => x.id === +el.dataset.id) || p?.logAll?.find(x => x.id === +el.dataset.id); if (!l) return;
@@ -3671,7 +3690,7 @@ ACT.botDecision = async el => {
 };
 ACT.botLogAll = async () => {
   const p = curBot(); if (!p) return;
-  const s = sheet({ title: 'Journal', tall: true, html: `<div class="chips">${[['', 'All'], ['decision', 'Decisions'], ['trade', 'Trades'], ['risk', 'Limits'], ['error', 'Problems']].map(([k, l]) => `<button class="chip ${k ? '' : 'on'}" data-k="${k}">${l}</button>`).join('')}</div><div class="group mt12" id="lg-all"><div class="sk sk-block"></div></div>` });
+  const s = sheet({ title: 'Journal', tall: true, html: `<div class="chips">${[['', 'All'], ['decision', 'Decisions'], ['trade', 'Trades'], ['report', 'Plans'], ['risk', 'Limits'], ['error', 'Problems']].map(([k, l]) => `<button class="chip ${k ? '' : 'on'}" data-k="${k}">${l}</button>`).join('')}</div><div class="group mt12" id="lg-all"><div class="sk sk-block"></div></div>` });
   const load = async k => { try { p.logAll = await api(`bots/${p.id}/log${k ? '?kind=' + k : ''}`); $('#lg-all', s.body).innerHTML = p.logAll.map(logRow).join('') || '<div class="cell"><div class="main t-foot">Nothing here yet.</div></div>'; } catch (e) { toastErr(e); } };
   s.body.addEventListener('click', e => { const c = e.target.closest('[data-k]'); if (!c) return; s.body.querySelectorAll('[data-k]').forEach(x => x.classList.toggle('on', x === c)); load(c.dataset.k); });
   load('');
@@ -3721,13 +3740,13 @@ ACT.botEdit = async () => {
   const p = curBot(); if (!p) return;
   const b = p.d, st = p.s.strategies[b.strategy];
   const s = sheet({ title: 'Change ' + b.name, tall: true, html: `<label class="field"><span>Name</span><input id="be-name" value="${h(b.name)}" maxlength="30"></label>
-      <label class="field"><span>Symbols, separated by commas</span><input id="be-syms" value="${h(b.syms.join(', '))}" autocapitalize="characters"></label>
+      ${st.auto ? '' : `<label class="field"><span>Symbols, separated by commas</span><input id="be-syms" value="${h(b.syms.join(', '))}" autocapitalize="characters"></label>`}
       ${st.params.length ? `<div class="section-h"><h2>Strategy</h2></div>${paramFields(st.params, b.params, 'be')}` : ''}
       <div class="section-h"><h2>Limits and news</h2></div>${mandateFields(b.mandate, 'be')}`, foot: `<button class="btn btn-primary btn-block btn-lg" id="be-save">Save changes</button>` });
   bindFields(s.body);
   $('#be-save', s.el).addEventListener('click', async e => {
     busy(e.currentTarget, true);
-    try { await patch('bots/' + p.id, { name: $('#be-name', s.body).value, syms: symList($('#be-syms', s.body).value), params: readParams(st.params, s.body, 'be'), mandate: readMandate(s.body, 'be') }); s.close(); toast('Saved'); p.load(); } catch (err) { busy(e.currentTarget, false); toastErr(err); }
+    try { await patch('bots/' + p.id, { name: $('#be-name', s.body).value, syms: st.auto ? undefined : symList($('#be-syms', s.body).value), params: readParams(st.params, s.body, 'be'), mandate: readMandate(s.body, 'be') }); s.close(); toast('Saved'); p.load(); } catch (err) { busy(e.currentTarget, false); toastErr(err); }
   });
 };
 
@@ -3838,7 +3857,7 @@ PAGES.lab = {
 ACT.labReset = () => { LAB.params = {}; const p = Router.top()?.page; if (p?.name === 'lab') PAGES.lab.draw(p); };
 ACT.labToBot = () => { App.botDraft = { strategy: LAB.strategy, syms: LAB.syms.slice(), params: { ...LAB.params }, uni: LAB.uni }; Router.go('newbot'); };
 function stratPick(s, cur, pre) {
-  return `<div class="strat-pick" data-pick="${pre}-strat">${Object.entries(s.strategies).map(([k, x]) => `<button type="button" class="strat ${k === cur ? 'on' : ''}" data-k="${k}"><span class="strat-ic">${icon(x.icon)}</span><span class="strat-t">${h(x.name)}</span><span class="strat-d">${h(x.desc)}</span><span class="strat-m">${x.rebalance === 'monthly' ? 'Trades monthly' : 'Checks daily'} · ${x.markets === 'stocks' ? 'Best on stocks and ETFs' : 'Stocks and crypto'}</span></button>`).join('')}</div>`;
+  return `<div class="strat-pick" data-pick="${pre}-strat">${Object.entries(s.strategies).filter(([, x]) => !x.auto).map(([k, x]) => `<button type="button" class="strat ${k === cur ? 'on' : ''}" data-k="${k}"><span class="strat-ic">${icon(x.icon)}</span><span class="strat-t">${h(x.name)}</span><span class="strat-d">${h(x.desc)}</span><span class="strat-m">${x.rebalance === 'monthly' ? 'Trades monthly' : 'Checks daily'} · ${x.markets === 'stocks' ? 'Best on stocks and ETFs' : 'Stocks and crypto'}</span></button>`).join('')}</div>`;
 }
 function uniPick(s, cur, syms, pre) {
   return `<div class="chips">${Object.entries(s.universes).map(([k, u]) => `<button type="button" class="chip ${k === cur ? 'on' : ''}" data-uni="${k}">${h(u.name)}</button>`).join('')}<button type="button" class="chip ${cur === 'custom' ? 'on' : ''}" data-uni="custom">Your own</button></div>
@@ -3861,7 +3880,7 @@ PAGES.newbot = {
     p.body.innerHTML = `<div class="sk sk-block mt16"></div>`;
     strats().then(s => {
       p.s = s; const dr = App.botDraft || {}; App.botDraft = null;
-      p.m = { strategy: dr.strategy || (s.strategies[key] ? key : 'trend'), uni: dr.uni || 'megacap', syms: dr.syms || null, params: dr.params || {}, mandate: { ...s.mandate }, wallet: 0, start: 10000, profile: 'robinhood', years: 5, runNow: true };
+      p.m = { strategy: dr.strategy || (s.strategies[key] && !s.strategies[key].auto ? key : 'trend'), uni: dr.uni || 'megacap', syms: dr.syms || null, params: dr.params || {}, mandate: { ...s.mandate }, wallet: 0, start: 10000, profile: 'robinhood', years: 5, runNow: true };
       this.draw(p);
     }).catch(e => { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; });
   },
@@ -3967,6 +3986,48 @@ function buzzCard(b) {
     <button class="card buzz-mini" data-act="go" data-to="buzz/${encodeURIComponent(b.sym)}"><div class="between"><div><b class="${moodCls(b.sentiment)}">${moodWord(b.sentiment, b.count)}</b> <span class="t-foot">· ${b.count} items this week${b.bullPct != null ? ` · ${Math.round(b.bullPct)}% bullish` : ''}</span></div>${moodBar(b.sentiment)}</div>${flagChips(b.flags)}
     ${b.items.slice(0, 3).map(i => `<div class="buzz-line"><i class="sdot ${i.score > 0.15 ? 'up' : i.score < -0.15 ? 'dn' : ''}"></i><span class="ellip">${h(i.title)}</span><span class="t-cap">${h(i.via)}</span></div>`).join('')}</button>`;
 }
+
+// ---------- Autopilot ----------
+const autoHero = () => `<button class="auto-hero" data-act="autoNew"><div class="auto-hero-ic">${icon('sparkle')}</div><div class="grow"><div class="t">Autopilot</div><div class="d">Set it once. It tries every strategy with pretend money and gives a wallet's money to the ones that are working, moving it every month.</div></div>${icon('right', 'chev')}</button>`;
+ACT.autoNew = async () => {
+  const s = sheet({ title: 'Turn on Autopilot', tall: true, html: `<p class="dialog-msg">Autopilot gets its own new wallet. Every day it runs 8 strategy tryouts on real prices with pretend money, then puts this wallet's money into the ones with the best recent record. New strategies start small until they've proven themselves for 4 weeks, and none can ever hold more than the limit you set.</p>
+    <label class="field"><span>Starting money</span><input type="number" inputmode="decimal" id="ap-start" value="10000"></label>
+    <div class="field"><span>What it trades</span>${seg('ap-mk', [['both', 'Stocks and crypto'], ['stocks', 'Stocks'], ['crypto', 'Crypto']], 'both')}</div>
+    <div class="pf-grid"><label class="field"><span>Stop everything after a drop of (%)</span><input type="number" inputmode="decimal" id="ap-dd" value="20"></label><label class="field"><span>Most in one strategy (%)</span><input type="number" inputmode="decimal" id="ap-max" value="35"></label></div>
+    <div class="group mt12"><div class="cell"><div class="main"><div class="title">Check news and social media before buying</div><div class="sub">Skips earnings weeks, serious news and gloomy moods</div></div>${sw(true, 'id="ap-news"')}</div></div>
+    <p class="note">It makes its first plan right away, then decides every day at 3:45 PM New York time (crypto every day). You'll get a notification when it trades and a plan every month.</p>`,
+    foot: `<button class="btn btn-primary btn-block btn-lg" id="ap-go">${icon('sparkle')}Turn on Autopilot</button>` });
+  raf(() => placeThumbs(s.body));
+  $('#ap-news', s.body).addEventListener('click', e => e.currentTarget.classList.toggle('on'));
+  $('#ap-go', s.el).addEventListener('click', async e => {
+    const btn = e.currentTarget; if (btn.classList.contains('is-busy')) return; busy(btn, true);
+    try {
+      const mk = $('[data-seg="ap-mk"] button.on', s.body)?.dataset.v || 'both';
+      const r = await post('bots', { strategy: 'autopilot', name: 'Autopilot', start: num($('#ap-start', s.body).value, 10000), params: { markets: mk, maxSleeve: num($('#ap-max', s.body).value, 35) }, mandate: { maxDDPct: num($('#ap-dd', s.body).value, 20), newsFilter: $('#ap-news', s.body).classList.contains('on') }, runNow: true });
+      s.close(); await loadState({ quiet: true });
+      toast('Autopilot is on', { sub: 'It\'s running its tryouts and making its first plan.' });
+      setTimeout(() => { Router.go('bot/' + r.bot.id); VIEWS.bots.load(); }, 120);
+    } catch (err) { busy(btn, false); toastErr(err); }
+  });
+};
+function autoSections(b) {
+  const a = b.auto; if (!a) return '';
+  const board = a.board.slice().sort((x, y) => (y.alloc || 0) - (x.alloc || 0) || y.score - x.score);
+  const used = board.filter(t => t.alloc > 0), cash = Math.max(0, 1 - used.reduce((t, x) => t + x.alloc, 0));
+  const COL = ['var(--ac)', 'var(--up)', '#5AB8FF', '#B48CFF', '#FF6F96', '#2EC4B6', '#F5C542', '#8D99FF'];
+  const days = a.since ? Math.max(0, Math.round((Date.now() - Date.parse(a.since + 'T12:00:00')) / 864e5)) : 0;
+  return `<div class="section-h"><h2>The plan</h2><span class="t-foot">${a.month ? 'For ' + new Date(a.month + '-15T12:00').toLocaleDateString('en-US', { month: 'long' }) : 'Not made yet'}</span></div>
+    <div class="card">${used.length ? `<div class="stack plan-stack">${used.map((t, i) => `<i style="flex:${t.alloc};background:${COL[i % COL.length]}"></i>`).join('')}${cash > 0.005 ? `<i style="flex:${cash};background:var(--card3)"></i>` : ''}</div>
+      <div class="plan-list">${used.map((t, i) => `<div class="plan-row"><i style="background:${COL[i % COL.length]}"></i><span class="grow">${h(t.label)}</span><b class="n">${Math.round(t.alloc * 100)}%</b></div>`).join('')}${cash > 0.005 ? `<div class="plan-row"><i style="background:var(--card3)"></i><span class="grow">Cash</span><b class="n">${Math.round(cash * 100)}%</b></div>` : ''}</div>` : `<p class="t-foot" style="margin:0">${a.board.length ? 'Holding cash: none of the strategies has a good enough record right now. It checks again every day.' : 'Its first plan shows up here after the first decision.'}</p>`}
+      ${a.report ? `<button class="link mt12" data-act="botReport" data-id="${a.report.id}">Read the ${h(a.report.title.toLowerCase())}</button>` : ''}</div>
+    ${board.length ? `<div class="section-h"><h2>Tryouts</h2><span class="t-foot">${days ? `${days} day${days === 1 ? '' : 's'} live` : 'Live from today'}</span></div>
+    <div class="group">${board.map(t => `<div class="cell tryout ${t.alloc > 0 ? 'on' : ''}"><div class="main"><div class="title">${h(t.label)}</div><div class="sub">${t.alloc > 0 ? `<b class="ac">${Math.round(t.alloc * 100)}% of the money</b> · ` : t.eligible ? 'Not needed this month · ' : '<span class="dn">Not working lately</span> · '}6 months ${pct(t.ret6m * 100, 1)} · Sharpe ${t.sharpe.toFixed(2)} · since start ${pct(t.live * 100, 1)}</div></div>${sparkSvg(t.spark, { w: 64, h: 28 })}</div>`).join('')}</div>
+    <p class="note">Each tryout trades its own pretend $10,000 with real fees. Scores use the last 6 months: return per unit of risk, docked for big drops. A strategy needs a Sharpe above 0.3 and no real loss in the last 3 months to get money, and starts at most 25% until it has 4 weeks of live results.</p>` : ''}`;
+}
+ACT.botReport = el => {
+  const p = curBot(); const l = p?.d?.auto?.report?.id === +el.dataset.id ? p.d.auto.report : (p?.d?.log || []).concat(p?.logAll || []).find(x => x.id === +el.dataset.id); if (!l) return;
+  sheet({ title: l.title, tall: true, html: `<div class="t-foot">${fmtDT(l.ts)}</div><div class="group mt12">${(l.data?.board || []).slice().sort((a, b) => (b.alloc || 0) - (a.alloc || 0) || b.score - a.score).map(t => { const was = l.data.prev?.[t.k]; return `<div class="cell"><div class="main"><div class="title">${h(t.label)}</div><div class="sub">6 months ${pct(t.ret6m * 100, 1)} · 3 months ${pct(t.ret3m * 100, 1)} · Sharpe ${t.sharpe.toFixed(2)} · biggest drop ${pct0(Math.abs(t.dd) * 100, 1)}${t.eligible ? '' : ' · not working lately'}</div></div><div class="trail col" style="align-items:flex-end"><b class="n">${t.alloc ? Math.round(t.alloc * 100) + '%' : '–'}</b>${was != null && Math.round(was * 100) !== Math.round((t.alloc || 0) * 100) ? `<span class="t-cap">was ${Math.round(was * 100)}%</span>` : ''}</div></div>`; }).join('')}</div>` });
+};
 
 // ===================================================================
 // Settings
