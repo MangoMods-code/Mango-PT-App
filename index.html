@@ -854,6 +854,24 @@ button.tile:active { transform: scale(.98); }
 .tryout:not(.on) .title { color: var(--tx2); }
 .tryout .spark { flex: none; width: 64px; height: 28px; }
 
+/* health, leaderboard, holds summary */
+.health .t-foot { margin-top: 4px; color: var(--tx2); }
+.health .link { margin-top: 8px; display: inline-block; }
+.hdot { width: 9px; height: 9px; border-radius: 50%; background: var(--mu2); flex: none; }
+.hdot.on { background: var(--up); } .hdot.off { background: var(--dn); }
+.th-holds { display: flex; gap: 6px; margin: 8px 6px 2px; font-size: 13px; color: var(--mu); line-height: 1.4; }
+.th-holds svg { width: 14px; height: 14px; flex: none; margin-top: 2px; }
+.plan-risk { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 12px; font-size: 13px; color: var(--tx2); }
+.plan-risk span { display: inline-flex; align-items: center; gap: 5px; }
+.plan-risk svg { width: 14px; height: 14px; }
+.bot-meta .tag svg { width: 12px; height: 12px; }
+.lb-row { align-items: center; }
+.lb-n { width: 22px; flex: none; font-family: var(--font-num); font-weight: 750; color: var(--mu); text-align: center; }
+.lb-bars { display: flex; flex-direction: column; gap: 3px; margin: 6px 0 5px; }
+.lb-bar { display: block; height: 5px; border-radius: 3px; min-width: 2px; }
+.lb-bar.up { background: var(--up); } .lb-bar.dn { background: var(--dn); } .lb-bar.spy { background: var(--mu2); }
+.bt-legend .ln.spy-ln { background: var(--mu2); }
+
 /* ---------- motion ---------- */
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--up) 55%, transparent); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
@@ -3536,14 +3554,16 @@ function rowAction(r) {
 const actRank = r => ({ Buy: 0, Sell: 0, Add: 1, Trim: 1, Skipped: 2, Hold: 3, Pass: 4 })[rowAction(r)[0]];
 function thinkRows(rows, { all = false } = {}) {
   const list = rows.slice().sort((a, b) => actRank(a) - actRank(b) || (b.have || 0) - (a.have || 0));
-  const shown = all ? list : list.filter(r => actRank(r) < 4).concat(list.filter(r => actRank(r) === 4).slice(0, Math.max(0, 4 - list.filter(r => actRank(r) < 4).length)));
+  const long = list.length > 10, act = list.filter(r => actRank(r) < (long ? 3 : 4)), holds = long ? list.filter(r => actRank(r) === 3) : [];
+  const shown = all ? list : act.concat(list.filter(r => actRank(r) === 4).slice(0, Math.max(0, (long ? 0 : 4) - act.length)));
   const quiet = list.length - shown.length;
+  const holdLine = !all && holds.length ? `<p class="th-holds">${icon('layers')}<span>Holding ${holds.length} unchanged: ${holds.map(r => h(r.sym)).join(', ')}</span></p>` : '';
   return `<div class="think">${shown.map(r => { const [a, c] = rowAction(r); return `<div class="th-row th-${c || 'hold'}">
       <div class="th-h">${logo(r.sym, 'logo-sm')}<b>${h(r.sym)}</b><span class="th-act">${a}</span>${r.target > 0 ? `<span class="th-w">${pct0(r.target * 100, 0)} of the wallet</span>` : ''}</div>
       ${r.note ? `<p class="th-note">${h(r.note)}</p>` : ''}
       ${(r.why || []).map(w => `<p class="th-why">${h(w)}</p>`).join('')}
       ${r.buzz ? `<p class="th-buzz">${icon('radar')}<span>${h(r.buzz)}</span></p>` : ''}${flagChips(r.flags)}</div>`; }).join('')}
-    ${quiet ? `<button class="th-more" data-act="thinkAll">${quiet} more with nothing to do ${icon('down')}</button>` : ''}</div>`;
+    ${holdLine}${quiet ? `<button class="th-more" data-act="thinkAll">${shown.length ? `See all ${list.length}` : `${quiet} more with nothing to do`} ${icon('down')}</button>` : ''}</div>`;
 }
 ACT.thinkAll = el => { const box = el.closest('.think'), rows = box?._rows; if (rows) box.outerHTML = thinkRows(rows, { all: true }); };
 const mountThink = (root, rows) => { const b = $('.think', root); if (b) b._rows = rows; };
@@ -3579,7 +3599,7 @@ VIEWS.bots = {
         <div class="section-h"><h2>Your bots<span class="count">${bots.length}</span></h2></div><div class="bot-list">${bots.map(b => botCard(b, st)).join('')}</div>`;
     }
     if (!bots.some(b => b.strategy === 'autopilot')) html = autoHero() + html;
-    html += `<div class="section-h"><h2>Tools</h2></div><div class="group">${menuCell('flask', 'Strategy lab', 'Test any strategy on up to 8 years of daily prices, with real fees', 'lab')}${feature('buzz') ? menuCell('radar', 'News radar', 'What headlines and social media say about what you own and watch', 'radar') : ''}</div>`;
+    html += `<div class="section-h"><h2>Tools</h2></div><div class="group">${bots.length ? menuCell('bars', 'Leaderboard', 'Every bot against simply holding the S&P 500', 'botboard') : ''}${menuCell('flask', 'Strategy lab', 'Test any strategy on up to 8 years of daily prices, with real fees', 'lab')}${feature('buzz') ? menuCell('radar', 'News radar', 'What headlines and social media say about what you own and watch', 'radar') : ''}</div>`;
     $('#bt-body', this.el).innerHTML = html;
     Live.run();
   },
@@ -3598,7 +3618,7 @@ function botCard(b, st) {
   return `<button class="bot-card" data-act="go" data-to="bot/${b.id}">
     <div class="bot-top"><div class="bot-ava ${b.status}">${icon(s.icon)}</div><div class="main"><div class="title">${h(b.name)}</div><div class="sub">${h(s.name)} · ${b.syms.length} symbol${b.syms.length === 1 ? '' : 's'}</div></div>
       <div class="trail col"><b class="n priv">${money(b.value || 0)}</b><span class="n ${cls(b.ret)}">${pct(b.ret)}</span></div></div>
-    <div class="bot-meta"><span class="bot-st ${stc}"><i></i>${stl}</span><span class="ellip">${b.holding.length ? 'Holding ' + b.holding.slice(0, 4).join(', ') + (b.holding.length > 4 ? ` +${b.holding.length - 4}` : '') : 'All cash'}</span><span class="grow"></span><span class="t-cap">${b.status === 'running' ? h(nextRunText(b.next)) : b.lastRun ? 'Last ran ' + timeAgo(b.lastRun) : ''}</span></div></button>`;
+    <div class="bot-meta"><span class="bot-st ${stc}"><i></i>${stl}</span>${b.health && !b.health.ok ? `<span class="tag dn">${icon('info')}Needs a look</span>` : ''}${b.wallet?.broker ? '<span class="tag ac">Alpaca</span>' : ''}<span class="ellip">${b.holding.length ? 'Holding ' + b.holding.slice(0, 4).join(', ') + (b.holding.length > 4 ? ` +${b.holding.length - 4}` : '') : 'All cash'}</span><span class="grow"></span><span class="t-cap">${b.status === 'running' ? h(nextRunText(b.next)) : b.lastRun ? 'Last ran ' + timeAgo(b.lastRun) : ''}</span></div></button>`;
 }
 function moodBar(v) {
   const w = Math.min(50, Math.abs(v) * 50);
@@ -3630,8 +3650,9 @@ PAGES.bot = {
     const kv = (k, v, c = '') => `<div class="kv"><span class="k">${k}</span><span class="v ${c}">${v}</span></div>`;
     const keepScroll = p.scroller.scrollTop;
     p.body.innerHTML = `
-      <div class="bot-hero"><div class="bot-ava lg ${b.status}">${icon(st.icon)}</div><div class="grow"><h1 class="t-display" style="margin:0">${h(b.name)}</h1><div class="t-sub">${h(st.name)} · ${h(b.wallet?.emoji || '')} ${h(b.wallet?.name || 'wallet')}</div></div></div>
+      <div class="bot-hero"><div class="bot-ava lg ${b.status}">${icon(st.icon)}</div><div class="grow"><h1 class="t-display" style="margin:0">${h(b.name)}</h1><div class="t-sub">${h(st.name)} · ${h(b.wallet?.emoji || '')} ${h(b.wallet?.name || 'wallet')}${b.broker ? ` · ${b.live ? '<span class="real-badge">REAL MONEY</span>' : 'Alpaca paper'}` : ''}</div></div></div>
       <div class="bot-status mt12"><span class="bot-st ${stc}"><i></i>${stl}</span><span class="t-foot">${b.status === 'running' ? h(nextRunText(b.next)) : b.status === 'killed' ? h(b.killed || '') : 'Paused: no new decisions until you resume it.'}</span></div>
+      ${healthCard(b)}
       <div class="a-price mt12"><span class="priv">${money(b.value || 0)}</span></div><div class="a-chg ${cls(b.ret)}">${money((b.value || 0) - (b.start || 0), { sign: true })} (${pct(b.ret)}) since it started</div>
       <div class="chart-wrap" id="bot-chart"></div>
       <div class="range-bar">${seg('bor', ['1W', '1M', '3M', '1Y', 'ALL'], p.range, 'ranges')}</div>
@@ -3742,11 +3763,14 @@ ACT.botEdit = async () => {
   const s = sheet({ title: 'Change ' + b.name, tall: true, html: `<label class="field"><span>Name</span><input id="be-name" value="${h(b.name)}" maxlength="30"></label>
       ${st.auto ? '' : `<label class="field"><span>Symbols, separated by commas</span><input id="be-syms" value="${h(b.syms.join(', '))}" autocapitalize="characters"></label>`}
       ${st.params.length ? `<div class="section-h"><h2>Strategy</h2></div>${paramFields(st.params, b.params, 'be')}` : ''}
-      <div class="section-h"><h2>Limits and news</h2></div>${mandateFields(b.mandate, 'be')}`, foot: `<button class="btn btn-primary btn-block btn-lg" id="be-save">Save changes</button>` });
+      <div class="section-h"><h2>Limits and news</h2></div>${mandateFields(b.mandate, 'be')}
+      ${b.live ? `<div class="section-h"><h2>Real money</h2></div><div class="group"><div class="cell"><div class="main"><div class="title">Let it trade real money</div><div class="sub">Off pauses its orders at Alpaca</div></div>${sw(b.mandate.allowLive, 'data-mk="allowLive"')}</div></div><label class="field"><span>Most it can ever have invested ($)</span><input type="number" inputmode="decimal" id="be-m-liveCap" value="${b.mandate.liveCap}"></label>` : ''}`, foot: `<button class="btn btn-primary btn-block btn-lg" id="be-save">Save changes</button>` });
   bindFields(s.body);
   $('#be-save', s.el).addEventListener('click', async e => {
     busy(e.currentTarget, true);
-    try { await patch('bots/' + p.id, { name: $('#be-name', s.body).value, syms: st.auto ? undefined : symList($('#be-syms', s.body).value), params: readParams(st.params, s.body, 'be'), mandate: readMandate(s.body, 'be') }); s.close(); toast('Saved'); p.load(); } catch (err) { busy(e.currentTarget, false); toastErr(err); }
+    const md = readMandate(s.body, 'be'); let confirm;
+    if (b.live) { md.liveCap = num($('#be-m-liveCap', s.body)?.value, b.mandate.liveCap); if (md.allowLive && !b.mandate.allowLive) { confirm = await askText({ title: 'Real money', msg: 'This bot will place real-money orders on your Alpaca account. Type REAL MONEY to confirm.', placeholder: 'REAL MONEY', ok: 'Confirm' }); if (confirm == null) { busy(e.currentTarget, false); return; } } }
+    try { await patch('bots/' + p.id, { confirm, name: $('#be-name', s.body).value, syms: st.auto ? undefined : symList($('#be-syms', s.body).value), params: readParams(st.params, s.body, 'be'), mandate: md }); s.close(); toast('Saved'); p.load(); } catch (err) { busy(e.currentTarget, false); toastErr(err); }
   });
 };
 
@@ -3889,18 +3913,18 @@ PAGES.newbot = {
     if (!p.body.querySelector('#nb-syms')) return;
     const st = p.s.strategies[p.m.strategy];
     p.m.syms = symList($('#nb-syms', p.body).value); p.m.params = readParams(st.params, p.body, 'nb'); p.m.mandate = { ...p.m.mandate, ...readMandate(p.body, 'nb') };
-    p.m.start = num($('#nb-start', p.body)?.value, p.m.start); p.m.name = $('#nb-name', p.body)?.value ?? p.m.name;
+    p.m.start = num($('#nb-start', p.body)?.value, p.m.start); p.m.name = $('#nb-name', p.body)?.value ?? p.m.name; if ($('#nb-livecap', p.body)) p.m.liveCap = num($('#nb-livecap', p.body).value, 0);
   },
   draw(p) {
     const s = p.s, m = p.m, st = s.strategies[m.strategy];
     if (!m.syms) m.syms = (m.strategy === 'momentum' ? s.universes.allweather : m.strategy === 'rsi2' ? { syms: ['SPY', 'QQQ', 'IWM', 'DIA'] } : s.universes[m.uni]).syms.slice();
-    const wallets = (App.S.wallets || []).filter(w => !w.archived && !w.broker);
+    const wallets = (App.S.wallets || []).filter(w => !w.archived);
     p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">New bot</h1><p class="t-sub" style="margin:0 2px">Pick how it trades, what it trades and the limits it can never cross. Test it before it touches money.</p>
       <div class="section-h"><h2>How it trades</h2></div>${stratPick(s, m.strategy, 'nb')}
       <div class="section-h"><h2>What it trades</h2></div>${uniPick(s, m.uni, m.syms, 'nb')}
       <div class="section-h"><h2>Its money</h2></div>
       ${seg('nb-w', [['new', 'A new wallet'], ['old', 'One of my wallets']], m.wallet ? 'old' : 'new')}
-      <div id="nb-wbox">${m.wallet ? `<label class="field"><span>Wallet</span><select id="nb-wid">${wallets.map(w => `<option value="${w.id}" ${w.id === m.wallet ? 'selected' : ''}>${h(w.emoji)} ${h(w.name)} · ${money(w.value)}</option>`).join('')}</select></label><p class="note">Give each bot its own symbols. Set "Money it can use" below to keep part of the wallet for yourself.</p>` : `<label class="field"><span>Starting money</span><input type="number" inputmode="decimal" id="nb-start" value="${m.start}"></label><div class="field"><span>Trading rules</span>${seg('nb-prof', [['robinhood', 'Robinhood'], ['alpaca', 'Alpaca'], ['practice', 'Practice']], m.profile)}</div>`}</div>
+      <div id="nb-wbox">${m.wallet ? `<label class="field"><span>Wallet</span><select id="nb-wid">${wallets.map(w => `<option value="${w.id}" ${w.id === m.wallet ? 'selected' : ''}>${h(w.emoji)} ${h(w.name)} · ${money(w.value)}</option>`).join('')}</select></label><p class="note">Give each bot its own symbols. Set "Money it can use" below to keep part of the wallet for yourself.${wallets.find(w => w.id === m.wallet)?.broker ? ` <b>This is your Alpaca account${wallets.find(w => w.id === m.wallet).brokerEnv === 'live' ? ', with real money' : ' (paper)'}.</b> Orders go to Alpaca. "Money it can use" is required.` : ''}</p>${wallets.find(w => w.id === m.wallet)?.brokerEnv === 'live' ? `<label class="field"><span>Real money: the most it can ever have invested ($)</span><input type="number" inputmode="decimal" id="nb-livecap" value="${m.liveCap || 500}"></label>` : ''}` : `<label class="field"><span>Starting money</span><input type="number" inputmode="decimal" id="nb-start" value="${m.start}"></label><div class="field"><span>Trading rules</span>${seg('nb-prof', [['robinhood', 'Robinhood'], ['alpaca', 'Alpaca'], ['practice', 'Practice']], m.profile)}</div>`}</div>
       ${st.params.length ? `<div class="section-h"><h2>Strategy settings</h2></div>${paramFields(st.params, m.params, 'nb')}` : ''}
       <div class="section-h"><h2>Limits and news</h2></div>${mandateFields(m.mandate, 'nb')}
       <div class="section-h"><h2>Test it first</h2></div>
@@ -3910,13 +3934,13 @@ PAGES.newbot = {
       <label class="field"><span>Name</span><input id="nb-name" maxlength="30" value="${h(m.name || st.name)}"></label>
       <div class="group mt12"><div class="cell"><div class="main"><div class="title">Make its first decision now</div><div class="sub">Otherwise it waits for ${h(RUN_TIMES.find(x => x[0] === m.mandate.runAt)?.[1] || m.mandate.runAt)}. When the market is closed, stock orders wait for the open.</div></div>${sw(m.runNow, 'id="nb-now"')}</div></div>
       <button class="btn btn-primary btn-block btn-lg mt16" id="nb-go">${icon('bot')}Start the bot</button>
-      <p class="note">Bots trade practice money in Mango wallets with the same fees, spreads and settlement as a real account. They never touch a connected broker. Nothing here is financial advice, and no strategy wins every year.</p>`;
+      <p class="note">Bots trade practice money in Mango wallets with the same fees, spreads and settlement as a real account, unless you pick your Alpaca wallet. Real money needs ALPACA_ENV=live in Railway, a cap, and typing REAL MONEY. Nothing here is financial advice, and no strategy wins every year.</p>`;
     bindFields(p.body);
     bindPickers(p.body, 'nb', s, () => { this.save(p); this.draw(p); }, m);
     onSeg(p.body, 'nb-w', v => { this.save(p); m.wallet = v === 'old' ? (wallets[0]?.id || 0) : 0; if (v === 'old' && !wallets.length) { toast('No wallets to pick from', { kind: 'err' }); return; } this.draw(p); });
     onSeg(p.body, 'nb-prof', v => { m.profile = v; });
     onSeg(p.body, 'nb-years', v => { m.years = +v; });
-    $('#nb-wid', p.body)?.addEventListener('change', e => { m.wallet = +e.target.value; });
+    $('#nb-wid', p.body)?.addEventListener('change', e => { this.save(p); m.wallet = +e.target.value; this.draw(p); });
     $('#nb-now', p.body).addEventListener('click', e => { e.currentTarget.classList.toggle('on'); m.runNow = e.currentTarget.classList.contains('on'); });
     $('#nb-test', p.body).addEventListener('click', e => this.test(p, e.currentTarget));
     $('#nb-go', p.body).addEventListener('click', () => this.create(p));
@@ -3936,7 +3960,9 @@ PAGES.newbot = {
     if (!m.syms.length) { toast('Add at least one symbol for it to trade', { kind: 'err' }); return; }
     busy(btn, true);
     try {
-      const r = await post('bots', { name: m.name, strategy: m.strategy, syms: m.syms, params: m.params, mandate: m.mandate, wallet: m.wallet || undefined, start: m.start, profile: m.profile, runNow: m.runNow });
+      const wsel = (App.S.wallets || []).find(w => w.id === m.wallet); let confirm;
+      if (wsel?.brokerEnv === 'live') { confirm = await askText({ title: 'Real money', msg: `This bot will place real-money orders on your Alpaca account, up to ${money(m.liveCap || 0)} invested. Type REAL MONEY to confirm.`, placeholder: 'REAL MONEY', ok: 'Confirm' }); if (confirm == null) { busy(btn, false); return; } }
+      const r = await post('bots', { confirm, name: m.name, strategy: m.strategy, syms: m.syms, params: m.params, mandate: { ...m.mandate, liveCap: m.liveCap || 0 }, wallet: m.wallet || undefined, start: m.start, profile: m.profile, runNow: m.runNow });
       await loadState({ quiet: true });
       const f = r.first;
       toast(`${r.bot.name} is running`, { sub: r.deciding ? 'It\'s reading the news and making its first decision now.' : f?.error ? 'First decision: ' + f.error : f ? (f.orders.length ? f.orders.map(o => o.text).join('\n') : 'Its first decision: nothing to buy yet.') : nextRunText(r.bot.next) });
@@ -3990,20 +4016,22 @@ function buzzCard(b) {
 // ---------- Autopilot ----------
 const autoHero = () => `<button class="auto-hero" data-act="autoNew"><div class="auto-hero-ic">${icon('sparkle')}</div><div class="grow"><div class="t">Autopilot</div><div class="d">Set it once. It tries every strategy with pretend money and gives a wallet's money to the ones that are working, moving it every month.</div></div>${icon('right', 'chev')}</button>`;
 ACT.autoNew = async () => {
-  const s = sheet({ title: 'Turn on Autopilot', tall: true, html: `<p class="dialog-msg">Autopilot gets its own new wallet. Every day it runs 8 strategy tryouts on real prices with pretend money, then puts this wallet's money into the ones with the best recent record. New strategies start small until they've proven themselves for 4 weeks, and none can ever hold more than the limit you set.</p>
+  const s = sheet({ title: 'Turn on Autopilot', tall: true, html: `<p class="dialog-msg">Autopilot gets its own new wallet. Every day it runs 18 strategy tryouts on real prices with pretend money, then puts this wallet's money into the ones with the best recent record. New strategies start small until they've proven themselves for 4 weeks, and none can ever hold more than the limit you set.</p>
     <label class="field"><span>Starting money</span><input type="number" inputmode="decimal" id="ap-start" value="10000"></label>
     <div class="field"><span>What it trades</span>${seg('ap-mk', [['both', 'Stocks and crypto'], ['stocks', 'Stocks'], ['crypto', 'Crypto']], 'both')}</div>
-    <div class="pf-grid"><label class="field"><span>Stop everything after a drop of (%)</span><input type="number" inputmode="decimal" id="ap-dd" value="20"></label><label class="field"><span>Most in one strategy (%)</span><input type="number" inputmode="decimal" id="ap-max" value="35"></label></div>
+    <div class="pf-grid"><label class="field"><span>Stop everything after a drop of (%)</span><input type="number" inputmode="decimal" id="ap-dd" value="20"></label><label class="field"><span>Most in one strategy (%)</span><input type="number" inputmode="decimal" id="ap-max" value="35"></label><label class="field"><span>Swing target (% a year)</span><input type="number" inputmode="decimal" id="ap-vol" value="20"><small class="t-foot">Holds less when markets get wild. 0 = off.</small></label></div>
+    <div class="group mt12"><div class="cell"><div class="main"><div class="title">Safety switch</div><div class="sub">Cuts stocks and crypto in half when the S&P 500 or Bitcoin falls below its 200-day average</div></div>${sw(true, 'id="ap-safe"')}</div></div>
     <div class="group mt12"><div class="cell"><div class="main"><div class="title">Check news and social media before buying</div><div class="sub">Skips earnings weeks, serious news and gloomy moods</div></div>${sw(true, 'id="ap-news"')}</div></div>
     <p class="note">It makes its first plan right away, then decides every day at 3:45 PM New York time (crypto every day). You'll get a notification when it trades and a plan every month.</p>`,
     foot: `<button class="btn btn-primary btn-block btn-lg" id="ap-go">${icon('sparkle')}Turn on Autopilot</button>` });
   raf(() => placeThumbs(s.body));
   $('#ap-news', s.body).addEventListener('click', e => e.currentTarget.classList.toggle('on'));
+  $('#ap-safe', s.body).addEventListener('click', e => e.currentTarget.classList.toggle('on'));
   $('#ap-go', s.el).addEventListener('click', async e => {
     const btn = e.currentTarget; if (btn.classList.contains('is-busy')) return; busy(btn, true);
     try {
       const mk = $('[data-seg="ap-mk"] button.on', s.body)?.dataset.v || 'both';
-      const r = await post('bots', { strategy: 'autopilot', name: 'Autopilot', start: num($('#ap-start', s.body).value, 10000), params: { markets: mk, maxSleeve: num($('#ap-max', s.body).value, 35) }, mandate: { maxDDPct: num($('#ap-dd', s.body).value, 20), newsFilter: $('#ap-news', s.body).classList.contains('on') }, runNow: true });
+      const r = await post('bots', { strategy: 'autopilot', name: 'Autopilot', start: num($('#ap-start', s.body).value, 10000), params: { markets: mk, maxSleeve: num($('#ap-max', s.body).value, 35), volTarget: num($('#ap-vol', s.body).value, 20), safety: $('#ap-safe', s.body).classList.contains('on') ? 'on' : 'off' }, mandate: { maxDDPct: num($('#ap-dd', s.body).value, 20), newsFilter: $('#ap-news', s.body).classList.contains('on') }, runNow: true });
       s.close(); await loadState({ quiet: true });
       toast('Autopilot is on', { sub: 'It\'s running its tryouts and making its first plan.' });
       setTimeout(() => { Router.go('bot/' + r.bot.id); VIEWS.bots.load(); }, 120);
@@ -4019,14 +4047,55 @@ function autoSections(b) {
   return `<div class="section-h"><h2>The plan</h2><span class="t-foot">${a.month ? 'For ' + new Date(a.month + '-15T12:00').toLocaleDateString('en-US', { month: 'long' }) : 'Not made yet'}</span></div>
     <div class="card">${used.length ? `<div class="stack plan-stack">${used.map((t, i) => `<i style="flex:${t.alloc};background:${COL[i % COL.length]}"></i>`).join('')}${cash > 0.005 ? `<i style="flex:${cash};background:var(--card3)"></i>` : ''}</div>
       <div class="plan-list">${used.map((t, i) => `<div class="plan-row"><i style="background:${COL[i % COL.length]}"></i><span class="grow">${h(t.label)}</span><b class="n">${Math.round(t.alloc * 100)}%</b></div>`).join('')}${cash > 0.005 ? `<div class="plan-row"><i style="background:var(--card3)"></i><span class="grow">Cash</span><b class="n">${Math.round(cash * 100)}%</b></div>` : ''}</div>` : `<p class="t-foot" style="margin:0">${a.board.length ? 'Holding cash: none of the strategies has a good enough record right now. It checks again every day.' : 'Its first plan shows up here after the first decision.'}</p>`}
+      ${a.risk ? `<div class="plan-risk">${a.risk.vol != null ? `<span>${icon('activity')}Swinging ${Math.round(a.risk.vol * 100)}% a year${a.risk.scale < 0.999 ? ` · holding ${Math.round(a.risk.scale * 100)}% of the plan` : ''}</span>` : ''}${a.risk.stocksOff ? `<span class="dn">${icon('shield')}Safety switch on for stocks</span>` : ''}${a.risk.cryptoOff ? `<span class="dn">${icon('shield')}Safety switch on for crypto</span>` : ''}</div>` : ''}
       ${a.report ? `<button class="link mt12" data-act="botReport" data-id="${a.report.id}">Read the ${h(a.report.title.toLowerCase())}</button>` : ''}</div>
     ${board.length ? `<div class="section-h"><h2>Tryouts</h2><span class="t-foot">${days ? `${days} day${days === 1 ? '' : 's'} live` : 'Live from today'}</span></div>
     <div class="group">${board.map(t => `<div class="cell tryout ${t.alloc > 0 ? 'on' : ''}"><div class="main"><div class="title">${h(t.label)}</div><div class="sub">${t.alloc > 0 ? `<b class="ac">${Math.round(t.alloc * 100)}% of the money</b> · ` : t.eligible ? 'Not needed this month · ' : '<span class="dn">Not working lately</span> · '}6 months ${pct(t.ret6m * 100, 1)} · Sharpe ${t.sharpe.toFixed(2)} · since start ${pct(t.live * 100, 1)}</div></div>${sparkSvg(t.spark, { w: 64, h: 28 })}</div>`).join('')}</div>
-    <p class="note">Each tryout trades its own pretend $10,000 with real fees. Scores use the last 6 months: return per unit of risk, docked for big drops. A strategy needs a Sharpe above 0.3 and no real loss in the last 3 months to get money, and starts at most 25% until it has 4 weeks of live results.</p>` : ''}`;
+    <p class="note">Each idea runs in a couple of versions, and one idea never gets more than the per-strategy limit however many versions it has. Each tryout trades its own pretend $10,000 with real fees. Scores use the last 6 months: return per unit of risk, docked for big drops. A strategy needs a Sharpe above 0.3 and no real loss in the last 3 months to get money, and starts at most 25% until it has 4 weeks of live results.</p>` : ''}`;
 }
 ACT.botReport = el => {
   const p = curBot(); const l = p?.d?.auto?.report?.id === +el.dataset.id ? p.d.auto.report : (p?.d?.log || []).concat(p?.logAll || []).find(x => x.id === +el.dataset.id); if (!l) return;
   sheet({ title: l.title, tall: true, html: `<div class="t-foot">${fmtDT(l.ts)}</div><div class="group mt12">${(l.data?.board || []).slice().sort((a, b) => (b.alloc || 0) - (a.alloc || 0) || b.score - a.score).map(t => { const was = l.data.prev?.[t.k]; return `<div class="cell"><div class="main"><div class="title">${h(t.label)}</div><div class="sub">6 months ${pct(t.ret6m * 100, 1)} · 3 months ${pct(t.ret3m * 100, 1)} · Sharpe ${t.sharpe.toFixed(2)} · biggest drop ${pct0(Math.abs(t.dd) * 100, 1)}${t.eligible ? '' : ' · not working lately'}</div></div><div class="trail col" style="align-items:flex-end"><b class="n">${t.alloc ? Math.round(t.alloc * 100) + '%' : '–'}</b>${was != null && Math.round(was * 100) !== Math.round((t.alloc || 0) * 100) ? `<span class="t-cap">was ${Math.round(was * 100)}%</span>` : ''}</div></div>`; }).join('')}</div>` });
+};
+
+// ---------- health ----------
+function healthCard(b) {
+  const hh = b.health; if (!hh || !hh.issues.length) return '';
+  return `<div class="callout ${hh.ok ? '' : 'warn'} mt12 health">${icon('info')}<div><b>${hh.ok ? 'Running, with a note' : 'Needs a look'}</b>${hh.issues.map(i => `<div class="t-foot">${h(i.text)}</div>`).join('')}<button class="link" data-act="botHealth">Data sources</button></div></div>`;
+}
+ACT.botHealth = () => {
+  const p = curBot(); const src = p?.d?.sources; if (!src) return;
+  const dot = ok => `<i class="hdot ${ok === true ? 'on' : ok === false ? 'off' : ''}"></i>`;
+  const ago = t => t ? timeAgo(t) : 'not yet';
+  const pr = src.prices, n = src.news;
+  sheet({ title: 'Data sources', html: `<div class="group">
+    <div class="cell">${dot(pr.yahoo.ok)}<div class="main"><div class="title">Price history (Yahoo)</div><div class="sub">${pr.yahoo.ok === false ? h(pr.yahoo.err || 'Failing') + ' · ' : ''}checked ${ago(pr.yahoo.t)}</div></div></div>
+    <div class="cell">${dot(pr.coinbase.ok)}<div class="main"><div class="title">Crypto history backup (Coinbase)</div><div class="sub">${pr.coinbase.t ? 'used ' + ago(pr.coinbase.t) : 'Not needed so far'}</div></div></div>
+    <div class="cell">${dot(pr.saved.used ? null : true)}<div class="main"><div class="title">Saved price history</div><div class="sub">${pr.saved.used ? `Used ${pr.saved.used} time${pr.saved.used === 1 ? '' : 's'}, last ${ago(pr.saved.t)}` : 'Kept for when a source is down'}</div></div></div>
+    <div class="cell">${dot(src.stocks.ok)}<div class="main"><div class="title">Live stock prices (Finnhub)</div><div class="sub">${src.stocks.ok ? 'Connected' : h(src.stocks.err || 'Not connected')}</div></div></div>
+    <div class="cell">${dot(src.crypto.ok)}<div class="main"><div class="title">Live crypto prices (Coinbase)</div><div class="sub">${src.crypto.ok ? 'Connected' : 'Not connected'}</div></div></div>
+    <div class="cell">${dot(n.google.ok)}<div class="main"><div class="title">Google News</div><div class="sub">checked ${ago(n.google.t)}</div></div></div>
+    <div class="cell">${dot(n.stocktwits.ok)}<div class="main"><div class="title">StockTwits</div><div class="sub">${n.stocktwits.ok === false ? 'Not answering (best effort) · ' : ''}checked ${ago(n.stocktwits.t)}</div></div></div>
+    <div class="cell">${dot(n.reddit.ok)}<div class="main"><div class="title">Reddit</div><div class="sub">${n.reddit.ok === false && !n.reddit.t ? 'Not set up' : 'checked ' + ago(n.reddit.t)}</div></div></div>
+    ${src.broker ? `<div class="cell">${dot(src.broker.ok)}<div class="main"><div class="title">Alpaca (${src.broker.env})</div><div class="sub">${src.broker.ok ? 'Connected' : h(src.broker.err || 'Not connected')}</div></div></div>` : ''}</div>
+    <p class="note">If price history is down, bots use the copy saved the last time it worked for up to 10 days, with today's live price on top. A missed decision is made up the next morning at 9:45, and you get a notification either way.</p>` });
+};
+
+// ---------- leaderboard ----------
+PAGES.botboard = {
+  mount(p) {
+    p.title('Leaderboard', true);
+    p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Leaderboard</h1><p class="t-sub" style="margin:0 2px">Every bot since it started, against simply holding the S&P 500 over the same days.</p><div id="lb"><div class="sk sk-block mt16"></div></div>`;
+    api('bots/board').then(list => {
+      const max = Math.max(0.0001, ...list.map(x => Math.abs(x.ret)), ...list.map(x => Math.abs(x.spy || 0)));
+      $('#lb', p.body).innerHTML = list.length ? `<div class="group mt16">${list.map((x, i) => `<button class="cell lb-row" data-act="go" data-to="bot/${x.id}"><span class="lb-n">${i + 1}</span><div class="main"><div class="title">${h(x.name)}${x.status !== 'running' ? ` <span class="t-cap">${x.status === 'paused' ? 'paused' : 'stopped'}</span>` : ''}</div>
+        <div class="lb-bars"><span class="lb-bar ${x.ret >= 0 ? 'up' : 'dn'}" style="width:${Math.abs(x.ret) / max * 100}%"></span>${x.spy != null ? `<span class="lb-bar spy" style="width:${Math.abs(x.spy) / max * 100}%"></span>` : ''}</div>
+        <div class="sub">${x.days} day${x.days === 1 ? '' : 's'} · ${x.trades} trade${x.trades === 1 ? '' : 's'}${x.win != null ? ` · ${Math.round(x.win * 100)}% wins` : ''} · biggest drop ${pct0(Math.abs(x.maxDD) * 100, 1)}</div></div>
+        <div class="trail col" style="align-items:flex-end"><b class="n ${cls(x.ret)}">${pct(x.ret * 100)}</b>${x.vs != null ? `<span class="t-cap n ${cls(x.vs)}">${x.vs >= 0 ? 'beats' : 'trails'} S&P by ${pct0(Math.abs(x.vs) * 100, 1)}</span>` : ''}</div></button>`).join('')}</div>
+        <div class="bt-legend"><span><i class="ln"></i>Bot</span><span><i class="ln spy-ln"></i>S&P 500 over the same days</span></div>
+        <p class="note">Early results are mostly luck: give a bot a few months before judging it. Returns count everything in its wallet, including cash.</p>` : `<div class="group mt16"><div class="empty"><p>No bots yet.</p></div></div>`;
+    }).catch(e => { $('#lb', p.body).innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; });
+  },
 };
 
 // ===================================================================
@@ -4119,7 +4188,8 @@ PAGES.settings = {
         ${rowToggle('notifySummary', 'Daily summary', 'Your day after the stock market closes')}
         ${rowToggle('notifyAchv', 'Achievements', 'When you unlock something new')}
         ${rowToggle('notifyGames', 'Bull vs Bear results', 'When your predictions finish')}
-        ${rowToggle('pushBots', 'Bots', 'What your bots bought and sold, stop losses and limit stops')}</div>
+        ${rowToggle('pushBots', 'Bots', 'What your bots bought and sold, stop losses and limit stops')}
+        ${rowToggle('botWeekly', 'Weekly bot summary', 'Fridays after the close: how each bot did')}</div>
       <div class="section-h"><h2>Quiet hours</h2></div><div class="group"><div class="cell"><div class="main"><div class="title">No buzzing between</div><div class="sub">New York time. Everything still lands in your inbox.</div></div><input class="input" type="time" style="width:112px;height:40px;font-size:15px" data-time="quietStart" value="${h(S.quietStart || '')}"><span class="mu">and</span><input class="input" type="time" style="width:112px;height:40px;font-size:15px" data-time="quietEnd" value="${h(S.quietEnd || '')}"></div></div>
       <div class="group mt12">${rowLink('inbox', 'Notification inbox', 'Everything Mango has sent you', 'inbox')}</div>`;
   },
