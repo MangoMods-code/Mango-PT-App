@@ -259,6 +259,16 @@ const MIGRATIONS = [
     await c.query("update lim set expires = now() + interval '90 days' where expires is null and kind <> 'moo'");
     await backfillLots(c);
   },
+  // 3: bots that trade by themselves, and their decision journal
+  async c => {
+    await c.query(`
+      create table if not exists bots(id serial primary key, name text not null, wid int not null, strategy text not null, params text, syms text not null, mandate text,
+        status text not null default 'running', created timestamptz not null default now(), last_run timestamptz, last_day text, peak numeric, day_start numeric, day_date text,
+        state text, summary text, killed_reason text);
+      create table if not exists bot_log(id serial primary key, bot_id int not null, ts timestamptz not null default now(), kind text not null, sym text, title text not null, body text, data text);
+      create index if not exists bot_log_b on bot_log(bot_id, ts desc);
+    `);
+  },
 ];
 
 async function migrate() {
@@ -281,7 +291,7 @@ const DEF = {
   confirmStyle: 'hold', confirmBuy: false, confirmSell: true, cashAPY: 0, startBalance: 10000,
   // notifications
   pushAlerts: true, pushOrders: true, notifySummary: true, notifyMoves: true, moveThreshold: 5,
-  notifyAchv: true, notifyGames: true, quietStart: '', quietEnd: '',
+  notifyAchv: true, notifyGames: true, pushBots: true, quietStart: '', quietEnd: '',
   // look and feel
   hideBalances: false, showCents: true, compactNums: false, defaultRange: '1D', defaultChart: 'Candles',
   theme: 'mango', accent: 'mango', plColors: 'classic', roundedNums: true, reduceMotion: false, celebrate: true,
@@ -290,7 +300,7 @@ const DEF = {
   // features (every one can be switched off)
   f_watch: true, f_alerts: true, f_analytics: true, f_journal: true, f_news: true, f_earnings: true,
   f_heatmap: true, f_book: true, f_fng: true, f_games: true, f_preds: true, f_achv: true, f_leader: true,
-  f_divs: true, f_ext: true, f_movers: true, f_insights: true, f_taxes: true, f_statements: true,
+  f_divs: true, f_ext: true, f_movers: true, f_insights: true, f_taxes: true, f_statements: true, f_bots: true, f_buzz: true,
 };
 const LIMITS = {
   feeFlat: [0, 1000], feePct: [0, 10], slippage: [0, 5], maxPos: [0, 100], reservePct: [0, 100], autoSL: [0, 90], autoTP: [0, 1000],
@@ -299,7 +309,7 @@ const LIMITS = {
 const CHOICES = {
   closedTrading: ['fill', 'queue', 'block'], confirmStyle: ['hold', 'tap', 'none'], defaultRange: ['1D', '1W', '1M', '3M', '1Y', 'ALL', '5Y'],
   defaultChart: ['Candles', 'Line'], theme: ['mango', 'midnight', 'light', 'auto'], accent: ['mango', 'leaf', 'sky', 'grape', 'rose'],
-  plColors: ['classic', 'colorblind', 'reversed'], defaultTab: ['portfolio', 'market', 'activity', 'games'],
+  plColors: ['classic', 'colorblind', 'reversed'], defaultTab: ['portfolio', 'market', 'bots', 'activity', 'games'],
   posMetric: ['day', 'total', 'value', 'pl'], posSort: ['value', 'day', 'total', 'name'],
 };
 let S = { ...DEF };
@@ -503,10 +513,10 @@ async function savePriceCache() {
 const focus = new Map(); // sym -> last time someone looked at it
 let userSyms = { pos: new Set(), orders: new Set(), alerts: new Set(), watch: new Set(), extra: new Set() };
 async function refreshUserSyms() {
-  const [p, o, l, a, w, e, pr] = await Promise.all([
+  const [p, o, l, a, w, e, pr, bt] = await Promise.all([
     rows('select distinct p.sym from pos p join wallets w on w.id=p.wid where not w.archived'), rows('select distinct sym from ord'), rows('select distinct sym from lim'),
-    rows('select distinct sym from alert where not fired'), rows('select sym from watch'), rows('select sym, kind from extra'), rows('select distinct sym from preds where result is null')]);
-  userSyms = { pos: new Set(p.map(x => x.sym)), orders: new Set([...o, ...l].map(x => x.sym)), alerts: new Set([...a, ...pr].map(x => x.sym)), watch: new Set(w.map(x => x.sym)), extra: new Set(e.map(x => x.sym)) };
+    rows('select distinct sym from alert where not fired'), rows('select sym from watch'), rows('select sym, kind from extra'), rows('select distinct sym from preds where result is null'), rows("select syms from bots where status<>'killed'").catch(() => [])]);
+  userSyms = { pos: new Set(p.map(x => x.sym)), orders: new Set([...o, ...l].map(x => x.sym).concat(bt.flatMap(x => { try { return JSON.parse(x.syms); } catch (e) { return []; } }))), alerts: new Set([...a, ...pr].map(x => x.sym)), watch: new Set(w.map(x => x.sym)), extra: new Set(e.map(x => x.sym)) };
   for (const x of e) addAsset(x.sym, x.kind);
   for (const s of [...userSyms.pos, ...userSyms.orders, ...userSyms.alerts, ...userSyms.watch]) if (!assets.has(s)) addAsset(s, kindOf(s));
   cbSync(); fhSync();
@@ -1267,8 +1277,8 @@ async function planOrder(c, w, pos, acct, sym, side, o = {}) {
       fail(why);
     }
     const equity = acct.equity;
-    if (S.maxPos > 0 && ((p ? p.qty : 0) + qty) * px > equity * S.maxPos / 100 + 0.01) fail(`One position can be at most ${S.maxPos}% of this wallet (${money(equity * S.maxPos / 100)}). Change this in Settings → Trading.`);
-    if (S.reservePct > 0 && cashAfter < equity * S.reservePct / 100 - 0.01) fail(`That would leave less than your ${S.reservePct}% cash reserve (${money(equity * S.reservePct / 100)}).`);
+    if (S.maxPos > 0 && !o.bot && ((p ? p.qty : 0) + qty) * px > equity * S.maxPos / 100 + 0.01) fail(`One position can be at most ${S.maxPos}% of this wallet (${money(equity * S.maxPos / 100)}). Change this in Settings → Trading.`);
+    if (S.reservePct > 0 && !o.bot && cashAfter < equity * S.reservePct / 100 - 0.01) fail(`That would leave less than your ${S.reservePct}% cash reserve (${money(equity * S.reservePct / 100)}).`);
   }
   const pnl = side === 'sell' ? (px - p.avg) * qty - fees.total : null;
   return {
@@ -1345,8 +1355,8 @@ async function practiceTrade(c, w, sym, side, o) {
     if (cost + fee > cash + 0.005) fail(`Not enough cash. This needs ${money(cost + fee)}${fee ? ' including the ' + money(fee) + ' fee' : ''} and you have ${money(cash)}.`);
     const all = (await c.query('select sym, qty, avg from pos where wid=$1', [wid])).rows.map(x => ({ sym: x.sym, qty: +x.qty, avg: +x.avg }));
     const equity = cash + marketValue(all);
-    if (S.maxPos > 0 && ((pos ? pos.qty : 0) + qty) * px > equity * S.maxPos / 100 + 0.01) fail(`One position can be at most ${S.maxPos}% of this wallet (${money(equity * S.maxPos / 100)}). Change this in Settings → Trading.`);
-    if (S.reservePct > 0 && cash - cost - fee < equity * S.reservePct / 100 - 0.01) fail(`That would leave less than your ${S.reservePct}% cash reserve (${money(equity * S.reservePct / 100)}).`);
+    if (S.maxPos > 0 && !o.bot && ((pos ? pos.qty : 0) + qty) * px > equity * S.maxPos / 100 + 0.01) fail(`One position can be at most ${S.maxPos}% of this wallet (${money(equity * S.maxPos / 100)}). Change this in Settings → Trading.`);
+    if (S.reservePct > 0 && !o.bot && cash - cost - fee < equity * S.reservePct / 100 - 0.01) fail(`That would leave less than your ${S.reservePct}% cash reserve (${money(equity * S.reservePct / 100)}).`);
     const nq = (pos ? pos.qty : 0) + qty;
     const avg = ((pos ? pos.qty * pos.avg : 0) + cost + fee) / nq;
     newCash = Math.max(0, round(cash - cost - fee, 6));
@@ -1897,7 +1907,7 @@ async function initPush() {
     VAPID_PUB = pub; pushOn = true;
   } catch (e) { warn('push setup', e.message); }
 }
-const PUSH_SETTING = { alert: 'pushAlerts', order: 'pushOrders', summary: 'notifySummary', move: 'notifyMoves', achv: 'notifyAchv', game: 'notifyGames' };
+const PUSH_SETTING = { alert: 'pushAlerts', order: 'pushOrders', summary: 'notifySummary', move: 'notifyMoves', achv: 'notifyAchv', game: 'notifyGames', bot: 'pushBots' };
 function quietNow() {
   if (!S.quietStart || !S.quietEnd) return false;
   const p = etParts(), m = p.h * 60 + p.mi, [a, b] = [S.quietStart, S.quietEnd].map(x => { const [h, mi] = x.split(':').map(Number); return h * 60 + mi; });
@@ -2604,6 +2614,738 @@ async function leaderboard(activeWid, a) {
 }
 
 // =====================================================================
+// Buzz: what news and social media are saying about a stock or coin.
+// Free sources only: Finnhub news, Google News RSS, StockTwits, and Reddit when REDDIT_CLIENT_ID/SECRET are set.
+// Scoring is done here with a finance word list and event patterns, so it costs nothing to run.
+// =====================================================================
+const REDDIT = { id: (ENV.REDDIT_CLIENT_ID || '').trim(), secret: (ENV.REDDIT_SECRET || ENV.REDDIT_CLIENT_SECRET || '').trim(), token: null, exp: 0 };
+const buzzStatus = { google: { ok: null, t: 0 }, stocktwits: { ok: null, t: 0 }, reddit: { ok: REDDIT.id ? null : false, t: 0 }, finnhub: { ok: null, t: 0 } };
+async function getText(url, { timeout = 9000, headers = {} } = {}) {
+  const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Mango Paper Trading)', ...headers }, signal: AbortSignal.timeout(timeout) });
+  if (!r.ok) throw new HttpError(502, 'Source error ' + r.status);
+  return r.text();
+}
+// ---------- scoring words (weights from -3 to +3), in the spirit of the Loughran-McDonald finance lexicon ----------
+const LEX = {};
+const addWords = (w, list) => list.split(/\s+/).filter(Boolean).forEach(x => { LEX[x] = w; });
+addWords(3, 'soar soars soared skyrocket skyrockets skyrocketed surge surges surged breakout record-high blowout smashes crushes');
+addWords(2, 'beat beats beating rally rallies rallied jump jumps jumped upgrade upgrades upgraded outperform raises raised boost boosts strong stronger strongest bullish buy approval approved approves partnership wins win profit profitable growth gains gain rebound rebounds expands expansion breakthrough tops exceeds exceeded accelerates momentum optimistic upbeat milestone');
+addWords(1, 'up higher rise rises rising positive launch launches launching unveil unveils unveiled release releases released announce announces new demand recover recovers steady solid opportunity undervalued upside dividend buyback');
+addWords(-1, 'down lower falls fall falling drop drops slips slip weak weaker concern concerns risk risks pressure volatile uncertainty uncertain delay delays delayed caution cautious slowdown slows headwind headwinds overvalued');
+addWords(-2, 'miss misses missed downgrade downgrades downgraded underperform cut cuts cutting bearish sell selloff sell-off plunge plunges plunged slump slumps tumble tumbles tumbled loss losses layoffs layoff probe recall recalls warning warns lowers lowered disappoint disappoints disappointing short shorts dilution offering decline declines declined crash crashes');
+addWords(-3, 'fraud bankruptcy bankrupt chapter delist delisted delisting investigation indicted subpoena lawsuit sued hack hacked exploit exploited default defaults collapse collapses insolvency halted halt scandal');
+const NEGATORS = new Set(['not', 'no', 'never', "isn't", "wasn't", "didn't", "doesn't", 'without', 'fails', 'failed']);
+function scoreText(text) {
+  const words = String(text || '').toLowerCase().replace(/[^a-z0-9\-' ]+/g, ' ').split(/\s+/).filter(Boolean);
+  let s = 0, n = 0;
+  for (let i = 0; i < words.length; i++) {
+    const w = LEX[words[i]]; if (!w) continue;
+    const neg = NEGATORS.has(words[i - 1]) || NEGATORS.has(words[i - 2]);
+    s += neg ? -w * 0.7 : w; n++;
+  }
+  return n ? Math.max(-1, Math.min(1, s / (n * 2.2))) : 0;
+}
+// ---------- events that matter for trading ----------
+const EVENTS = [
+  { k: 'earnings', label: 'Earnings', re: /\b(earnings|quarterly results|q[1-4] results|reports? (?:q[1-4]|results)|eps)\b/i, impact: 0 },
+  { k: 'launch', label: 'Launch or release', re: /\b(launch(?:es|ed|ing)?|unveil(?:s|ed|ing)?|releas(?:e|es|ed|ing)|debut(?:s|ed)?|keynote|event on|coming (?:soon|out)|rolls? out|ships?)\b/i, impact: 1 },
+  { k: 'upgrade', label: 'Analyst upgrade', re: /\b(upgrade[sd]?|raises? (?:price )?target|outperform|overweight|initiat\w+ .*buy)\b/i, impact: 1 },
+  { k: 'downgrade', label: 'Analyst downgrade', re: /\b(downgrade[sd]?|cuts? (?:price )?target|underperform|underweight)\b/i, impact: -1 },
+  { k: 'guidance_up', label: 'Raised guidance', re: /\b(raise[sd]? (?:its |full-year |annual )?(?:guidance|outlook|forecast))\b/i, impact: 1 },
+  { k: 'guidance_down', label: 'Cut guidance', re: /\b(cut[s]?|lower(?:s|ed)?|slash(?:es|ed)?) (?:its |full-year |annual )?(?:guidance|outlook|forecast)\b/i, impact: -2 },
+  { k: 'legal', label: 'Lawsuit or investigation', re: /\b(lawsuit|sued|sues|class action|investigation|probe|subpoena|antitrust|sec charges|doj|fined?|penalty|settlement)\b/i, impact: -2 },
+  { k: 'severe', label: 'Severe problem', re: /\b(fraud|bankrupt\w*|chapter 11|delist\w*|insolven\w*|hack(?:ed)?|exploit(?:ed)?|default(?:s|ed)?|trading halt|halted)\b/i, impact: -3 },
+  { k: 'regulatory', label: 'Regulatory decision', re: /\b(fda|approval|approved|rejects?|rejected|clearance|etf approval|sec approves?|ban(?:s|ned)?)\b/i, impact: 0 },
+  { k: 'deal', label: 'Deal or merger', re: /\b(acquir\w+|acquisition|merger|merge[sd]?|buyout|takeover|stake in|partnership|partners with)\b/i, impact: 1 },
+  { k: 'recall', label: 'Recall or outage', re: /\b(recall(?:s|ed)?|outage|breach|defect)\b/i, impact: -2 },
+  { k: 'layoffs', label: 'Layoffs', re: /\b(layoffs?|job cuts|cuts? \d[\d,]* jobs)\b/i, impact: -1 },
+  { k: 'capital', label: 'Buyback or dividend', re: /\b(buyback|repurchase|dividend (?:hike|increase|raise))\b/i, impact: 1 },
+  { k: 'offering', label: 'Share sale', re: /\b(stock offering|share offering|secondary offering|dilut\w+)\b/i, impact: -1 },
+  { k: 'leadership', label: 'Leadership change', re: /\b(ceo (?:steps down|resigns|to step down|departs)|names new ceo|cfo resigns)\b/i, impact: -1 },
+];
+const tagEvents = text => EVENTS.filter(e => e.re.test(text)).map(e => e.k);
+const EVENT_INFO = Object.fromEntries(EVENTS.map(e => [e.k, e]));
+// ---------- sources ----------
+function decodeXml(s) { return String(s || '').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&#(\d+);/g, (_, d) => String.fromCharCode(+d)).replace(/<[^>]+>/g, '').trim(); }
+async function googleNews(sym) {
+  const a = assets.get(sym), crypto = isCrypto(sym), name = (a?.name || sym).replace(/[^\w .&-]/g, '');
+  const q = crypto ? `${name} crypto when:7d` : `"${name}" OR "${sym} stock" when:7d`;
+  return cached('gn:' + sym, 20 * 60e3, async () => {
+    const xml = await getText(`https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-US&gl=US&ceid=US:en`);
+    buzzStatus.google = { ok: true, t: Date.now() };
+    const items = [];
+    for (const m of xml.matchAll(/<item>([\s\S]*?)<\/item>/g)) {
+      const x = m[1], get = t => decodeXml((new RegExp(`<${t}[^>]*>([\\s\\S]*?)<\\/${t}>`).exec(x) || [])[1]);
+      const title = get('title'), source = get('source'), t = Date.parse(get('pubDate'));
+      if (!title || !Number.isFinite(t)) continue;
+      items.push({ src: 'news', via: source || 'Google News', t, title: title.replace(new RegExp(`\\s+-\\s+${source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`), ''), url: get('link') });
+      if (items.length >= 40) break;
+    }
+    return items;
+  }).catch(e => { buzzStatus.google = { ok: false, t: Date.now(), err: e.message }; return []; });
+}
+async function finnhubNews(sym) {
+  if (!FINNHUB_KEY) return [];
+  try {
+    const list = isCrypto(sym) ? await assetNews(sym) : await assetNews(sym);
+    buzzStatus.finnhub = { ok: true, t: Date.now() };
+    return list.map(n => ({ src: 'news', via: n.source, t: n.t, title: n.title, summary: n.summary, url: n.url }));
+  } catch (e) { buzzStatus.finnhub = { ok: false, t: Date.now(), err: e.message }; return []; }
+}
+async function stocktwits(sym) {
+  return cached('st:' + sym, 15 * 60e3, async () => {
+    const d = await getJ(`https://api.stocktwits.com/api/2/streams/symbol/${encodeURIComponent(isCrypto(sym) ? sym + '.X' : sym)}.json`, { timeout: 8000 });
+    buzzStatus.stocktwits = { ok: true, t: Date.now() };
+    return (d.messages || []).slice(0, 30).map(m => ({ src: 'social', via: 'StockTwits', t: Date.parse(m.created_at), title: String(m.body || '').slice(0, 280), url: `https://stocktwits.com/message/${m.id}`, tagged: m.entities?.sentiment?.basic || null, likes: m.likes?.total || 0 }));
+  }).catch(e => { buzzStatus.stocktwits = { ok: false, t: Date.now(), err: e.message }; return []; });
+}
+async function redditToken() {
+  if (REDDIT.token && Date.now() < REDDIT.exp - 60e3) return REDDIT.token;
+  const r = await fetch('https://www.reddit.com/api/v1/access_token', { method: 'POST', headers: { Authorization: 'Basic ' + Buffer.from(REDDIT.id + ':' + REDDIT.secret).toString('base64'), 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'web:mango-paper-trading:2.2 (personal use)' }, body: 'grant_type=client_credentials', signal: AbortSignal.timeout(8000) });
+  if (!r.ok) throw new Error('Reddit login ' + r.status);
+  const j = await r.json(); REDDIT.token = j.access_token; REDDIT.exp = Date.now() + (j.expires_in || 3600) * 1000;
+  return REDDIT.token;
+}
+async function reddit(sym) {
+  if (!REDDIT.id || !REDDIT.secret) return [];
+  const crypto = isCrypto(sym), name = assets.get(sym)?.name || sym;
+  const subs = crypto ? 'CryptoCurrency+CryptoMarkets+Bitcoin+ethtrader' : 'wallstreetbets+stocks+investing+StockMarket+options';
+  const q = crypto ? `${sym} OR "${name}"` : `$${sym} OR "${name}"`;
+  return cached('rd:' + sym, 20 * 60e3, async () => {
+    const tok = await redditToken();
+    const r = await fetch(`https://oauth.reddit.com/r/${subs}/search?q=${encodeURIComponent(q)}&restrict_sr=1&sort=new&t=week&limit=40`, { headers: { Authorization: 'Bearer ' + tok, 'User-Agent': 'web:mango-paper-trading:2.2 (personal use)' }, signal: AbortSignal.timeout(9000) });
+    if (!r.ok) throw new Error('Reddit ' + r.status);
+    const j = await r.json(); buzzStatus.reddit = { ok: true, t: Date.now() };
+    return (j.data?.children || []).map(c => c.data).map(p => ({ src: 'social', via: 'r/' + p.subreddit, t: p.created_utc * 1000, title: String(p.title || '').slice(0, 280), summary: String(p.selftext || '').slice(0, 300), url: 'https://www.reddit.com' + p.permalink, likes: p.score || 0 }));
+  }).catch(e => { buzzStatus.reddit = { ok: false, t: Date.now(), err: e.message }; return []; });
+}
+// ---------- the summary ----------
+async function buzzFor(sym) {
+  return cached('buzz:' + sym, 10 * 60e3, async () => {
+    const [fh, gn, st, rd, ins] = await Promise.all([finnhubNews(sym), googleNews(sym), stocktwits(sym), reddit(sym), isCrypto(sym) ? null : assetInsights(sym).catch(() => null)]);
+    const now = Date.now(), seen = new Set(), items = [];
+    for (const it of [...fh, ...gn, ...st, ...rd]) {
+      const key = it.title.toLowerCase().replace(/\W+/g, ' ').slice(0, 70);
+      if (!it.title || seen.has(key) || !(it.t > now - 8 * 86400e3)) continue; seen.add(key);
+      const text = it.title + ' ' + (it.summary || '');
+      let score = scoreText(text);
+      if (it.tagged === 'Bullish') score = Math.max(score, 0) * 0.5 + 0.5; else if (it.tagged === 'Bearish') score = Math.min(score, 0) * 0.5 - 0.5;
+      items.push({ ...it, score: round(score, 3), tags: it.src === 'news' ? tagEvents(text) : [] });
+    }
+    items.sort((a, b) => b.t - a.t);
+    const news = items.filter(i => i.src === 'news'), social = items.filter(i => i.src === 'social');
+    // Recent items count more: a 3-day half-life.
+    const wavg = list => { let s = 0, w = 0; for (const i of list) { const k = Math.pow(0.5, (now - i.t) / (3 * 86400e3)) * (1 + Math.log10(1 + (i.likes || 0))); s += i.score * k; w += k; } return w ? s / w : null; };
+    const newsScore = wavg(news), socialScore = wavg(social);
+    const parts = [[newsScore, news.length], [socialScore, social.length]].filter(([v]) => v != null);
+    const sentiment = parts.length ? parts.reduce((t, [v, n]) => t + v * Math.min(n, 30), 0) / parts.reduce((t, [, n]) => t + Math.min(n, 30), 0) : 0;
+    const day = items.filter(i => i.t > now - 86400e3).length, week = items.filter(i => i.t > now - 7 * 86400e3).length;
+    const baseline = Math.max(1, (week - day) / 6);
+    const tagged = social.filter(s => s.tagged), bull = tagged.filter(s => s.tagged === 'Bullish').length;
+    // Events from the last few days, strongest first.
+    const evMap = new Map();
+    for (const it of news.filter(i => i.t > now - 5 * 86400e3)) for (const k of it.tags) { const e = evMap.get(k) || { k, label: EVENT_INFO[k].label, impact: EVENT_INFO[k].impact, count: 0, latest: it }; e.count++; if (it.t > e.latest.t) e.latest = it; evMap.set(k, e); }
+    const events = [...evMap.values()].sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact) || b.count - a.count).map(e => ({ k: e.k, label: e.label, impact: e.impact, count: e.count, title: e.latest.title, t: e.latest.t, url: e.latest.url }));
+    const upcoming = [];
+    if (ins?.next?.date) upcoming.push({ k: 'earnings', label: 'Earnings report', date: ins.next.date, hour: ins.next.hour, eps: ins.next.eps });
+    const daysTo = d => { const p = etParts(); let [y, m, dd] = [p.y, p.m, p.d], n = 0; const target = d; while (`${y}-${String(m).padStart(2, '0')}-${String(dd).padStart(2, '0')}` < target && n < 60) { [y, m, dd] = nextTradingDay(y, m, dd); n++; } return n; };
+    for (const u of upcoming) u.tradingDays = daysTo(u.date);
+    const flags = [];
+    if (upcoming.some(u => u.k === 'earnings' && u.tradingDays <= 3)) flags.push('earnings_soon');
+    if (events.some(e => e.k === 'severe')) flags.push('severe_news');
+    if (events.some(e => e.impact <= -2)) flags.push('negative_event');
+    if (sentiment <= -0.3 && items.length >= 5) flags.push('negative_mood');
+    if (sentiment >= 0.3 && items.length >= 5) flags.push('positive_mood');
+    if (day >= 6 && day / baseline >= 3) flags.push('attention_spike');
+    return {
+      sym, t: now, sentiment: round(sentiment, 3), newsScore: newsScore == null ? null : round(newsScore, 3), socialScore: socialScore == null ? null : round(socialScore, 3),
+      count: items.length, news: news.length, social: social.length, day, attention: round(day / baseline, 2), bullPct: tagged.length >= 5 ? round(bull / tagged.length * 100, 1) : null,
+      events, upcoming, flags, items: items.slice(0, 40), sources: { finnhub: fh.length, google: gn.length, stocktwits: st.length, reddit: rd.length },
+    };
+  });
+}
+const buzzSummary = b => b && ({ sym: b.sym, t: b.t, sentiment: b.sentiment, count: b.count, day: b.day, attention: b.attention, bullPct: b.bullPct, flags: b.flags, events: b.events.slice(0, 3), upcoming: b.upcoming });
+function buzzLine(b) {
+  if (!b) return 'No news or social data';
+  const mood = b.count < 3 ? 'very little chatter' : b.sentiment >= 0.3 ? 'upbeat' : b.sentiment >= 0.1 ? 'leaning positive' : b.sentiment <= -0.3 ? 'gloomy' : b.sentiment <= -0.1 ? 'leaning negative' : 'mixed';
+  const bits = [`${b.count} items this week, mood ${mood} (${b.sentiment >= 0 ? '+' : ''}${b.sentiment.toFixed(2)})`];
+  if (b.bullPct != null) bits.push(`${Math.round(b.bullPct)}% of tagged posts bullish`);
+  if (b.flags.includes('attention_spike')) bits.push(`${b.attention}x the usual attention`);
+  const up = b.upcoming.find(u => u.k === 'earnings'); if (up) bits.push(`earnings ${up.tradingDays <= 0 ? 'today' : `in ${up.tradingDays} trading day${up.tradingDays === 1 ? '' : 's'}`} (${up.date})`);
+  if (b.events.length) bits.push('news: ' + b.events.slice(0, 2).map(e => e.label.toLowerCase()).join(', '));
+  return bits.join('; ');
+}
+
+// =====================================================================
+// Trading strategies (daily bars) and the history they run on
+// Every rule only looks at bars up to the day it decides on, so backtests can't peek at the future.
+// =====================================================================
+async function dailyBars(sym) {
+  return cached('d1:' + sym, 6 * 3600e3, async () => {
+    const r = await yahooChart(sym, 'range=10y&interval=1d&events=div,split');
+    const z = r.indicators?.quote?.[0] || {}, adj = r.indicators?.adjclose?.[0]?.adjclose, ts = r.timestamp || [];
+    const crypto = isCrypto(sym), out = { sym, d: [], o: [], h: [], l: [], c: [], v: [] };
+    for (let i = 0; i < ts.length; i++) {
+      const c = z.close?.[i]; if (c == null || !(c > 0)) continue;
+      const f = adj?.[i] > 0 ? adj[i] / c : 1; // dividend adjustment so returns include dividends
+      const d = crypto ? new Date(ts[i] * 1000).toISOString().slice(0, 10) : etDate(ts[i] * 1000);
+      if (out.d.length && out.d[out.d.length - 1] === d) { out.c[out.c.length - 1] = c * f; continue; }
+      out.d.push(d); out.o.push((z.open?.[i] ?? c) * f); out.h.push((z.high?.[i] ?? c) * f); out.l.push((z.low?.[i] ?? c) * f); out.c.push(c * f); out.v.push(z.volume?.[i] || 0);
+    }
+    if (out.d.length < 30) fail(`Not enough price history for ${sym}`);
+    return out;
+  });
+}
+// ---------- indicators (value at index i using bars 0..i) ----------
+const IND = {
+  sma(a, n, i) { if (i < n - 1) return null; let s = 0; for (let k = i - n + 1; k <= i; k++) s += a[k]; return s / n; },
+  ema(a, n, i, memo) {
+    const key = 'ema' + n; let m = memo?.[key];
+    if (!m) { m = new Array(a.length).fill(null); const k = 2 / (n + 1); let e = null; for (let j = 0; j < a.length; j++) { if (j === n - 1) { let s = 0; for (let q = 0; q < n; q++) s += a[q]; e = s / n; } else if (j >= n) e = a[j] * k + e * (1 - k); m[j] = j >= n - 1 ? e : null; } if (memo) memo[key] = m; }
+    return m[i];
+  },
+  rsi(a, n, i, memo) {
+    const key = 'rsi' + n; let m = memo?.[key];
+    if (!m) { m = new Array(a.length).fill(null); let g = 0, l = 0; for (let j = 1; j < a.length; j++) { const ch = a[j] - a[j - 1], up = Math.max(0, ch), dn = Math.max(0, -ch); if (j <= n) { g += up; l += dn; if (j === n) { g /= n; l /= n; m[j] = l === 0 ? 100 : 100 - 100 / (1 + g / l); } } else { g = (g * (n - 1) + up) / n; l = (l * (n - 1) + dn) / n; m[j] = l === 0 ? 100 : 100 - 100 / (1 + g / l); } } if (memo) memo[key] = m; }
+    return m[i];
+  },
+  atr(b, n, i, memo) {
+    const key = 'atr' + n; let m = memo?.[key];
+    if (!m) { m = new Array(b.c.length).fill(null); let a = null, s = 0; for (let j = 1; j < b.c.length; j++) { const tr = Math.max(b.h[j] - b.l[j], Math.abs(b.h[j] - b.c[j - 1]), Math.abs(b.l[j] - b.c[j - 1])); if (j <= n) { s += tr; if (j === n) a = s / n; } else a = (a * (n - 1) + tr) / n; m[j] = a; } if (memo) memo[key] = m; }
+    return m[i];
+  },
+  highest(a, n, i, skipToday = true) { const e = skipToday ? i - 1 : i, s = e - n + 1; if (s < 0) return null; let v = -Infinity; for (let k = s; k <= e; k++) v = Math.max(v, a[k]); return v; },
+  lowest(a, n, i, skipToday = true) { const e = skipToday ? i - 1 : i, s = e - n + 1; if (s < 0) return null; let v = Infinity; for (let k = s; k <= e; k++) v = Math.min(v, a[k]); return v; },
+  ret(a, n, i, skip = 0) { const j = i - skip, k = i - n; if (k < 0 || j < 0) return null; return a[j] / a[k] - 1; },
+  vol(a, n, i) { if (i < n) return null; let s = 0, s2 = 0; for (let k = i - n + 1; k <= i; k++) { const r = Math.log(a[k] / a[k - 1]); s += r; s2 += r * r; } const m = s / n; return Math.sqrt(Math.max(0, s2 / n - m * m)); },
+};
+const pf = (v, d = 2) => (v >= 0 ? '+' : '') + (v * 100).toFixed(d) + '%';
+const px2 = v => '$' + (+v).toLocaleString('en-US', { maximumFractionDigits: v < 1 ? 6 : 2, minimumFractionDigits: v < 1 ? 2 : 2 });
+// Weights for a set of picks: equal, or inverse volatility (calmer assets get more).
+function sizeWeights(picks, ctx, maxW) {
+  const p = ctx.params, out = {};
+  if (!picks.length) return out;
+  if (p.sizing === 'invvol') {
+    const iv = picks.map(s => { const v = IND.vol(ctx.data[s].c, 20, ctx.idx[s]); return v > 0 ? 1 / v : 0; }), tot = iv.reduce((a, b) => a + b, 0) || 1;
+    picks.forEach((s, k) => { out[s] = Math.min(maxW, iv[k] / tot); });
+  } else picks.forEach(s => { out[s] = Math.min(maxW, 1 / Math.max(picks.length, p.maxPositions || picks.length)); });
+  return out;
+}
+// ---------- the strategies ----------
+const STRATEGIES = {
+  trend: {
+    name: 'Trend follower', short: 'Trend', icon: 'trail', rebalance: 'none', markets: 'both',
+    desc: 'Owns what is in an uptrend: price above its slow average and the fast average above the slow one. Each position has a trailing stop a few ATRs below its high. Rides big moves, gives back some at the turn.',
+    params: [{ k: 'fast', label: 'Fast average (days)', def: 50, min: 5, max: 100 }, { k: 'slow', label: 'Slow average (days)', def: 200, min: 50, max: 300 }, { k: 'atrMult', label: 'Trailing stop (ATRs)', def: 3, min: 1, max: 8, step: 0.5 }, { k: 'maxPositions', label: 'Most positions', def: 5, min: 1, max: 20 }, { k: 'sizing', label: 'Sizing', def: 'invvol', choices: [['invvol', 'By volatility'], ['equal', 'Equal']] }],
+    grid: { fast: [20, 50], slow: [100, 200], atrMult: [2.5, 3.5] },
+    need: p => p.slow + 5,
+    decide(ctx) {
+      const p = ctx.params, out = { weights: {}, stops: {}, notes: {} }, cand = [];
+      for (const s of ctx.syms) {
+        const b = ctx.data[s], i = ctx.idx[s]; if (i == null || i < p.slow) continue;
+        const c = b.c[i], sl = IND.sma(b.c, p.slow, i), ef = IND.ema(b.c, p.fast, i, b.memo), es = IND.ema(b.c, p.slow, i, b.memo), atr = IND.atr(b, 14, i, b.memo), mom = IND.ret(b.c, 126, i) ?? 0;
+        const up = c > sl && ef > es, held = ctx.held[s];
+        out.notes[s] = `Close ${px2(c)} vs ${p.slow}-day average ${px2(sl)}; ${p.fast}-day trend ${ef > es ? 'above' : 'below'} ${p.slow}-day. ${up ? 'In an uptrend' : 'Not trending up'}.`;
+        if (up) cand.push({ s, mom, atr, c, held });
+        else if (held) out.notes[s] += ' Exit: the trend broke.';
+      }
+      cand.sort((a, b) => (b.held ? 1 : 0) - (a.held ? 1 : 0) || b.mom - a.mom);
+      const picks = cand.slice(0, p.maxPositions);
+      Object.assign(out.weights, sizeWeights(picks.map(x => x.s), ctx, ctx.maxW));
+      for (const x of picks) { const hi = Math.max(x.c, ctx.held[x.s]?.high || 0); out.stops[x.s] = { trail: true, price: hi - p.atrMult * x.atr, atr: x.atr, mult: p.atrMult }; }
+      return out;
+    },
+  },
+  momentum: {
+    name: 'Momentum rotation', short: 'Momentum', icon: 'zap', rebalance: 'monthly', markets: 'both',
+    desc: 'Once a month, ranks everything by its return over the past 6 months (skipping the latest month) and holds the top few that are still rising. Goes to cash when the benchmark is below its 200-day average. A well-studied effect across stocks, ETFs and crypto.',
+    params: [{ k: 'lookback', label: 'Look back (days)', def: 126, min: 21, max: 252 }, { k: 'skip', label: 'Skip latest (days)', def: 21, min: 0, max: 42 }, { k: 'top', label: 'Hold the top', def: 3, min: 1, max: 10 }, { k: 'filterLen', label: 'Market filter (days)', def: 200, min: 0, max: 300 }, { k: 'sizing', label: 'Sizing', def: 'equal', choices: [['equal', 'Equal'], ['invvol', 'By volatility']] }],
+    grid: { lookback: [63, 126, 252], top: [2, 3, 5] },
+    need: p => Math.max(p.lookback, p.filterLen || 0) + 5,
+    decide(ctx) {
+      const p = ctx.params, out = { weights: {}, stops: {}, notes: {} };
+      const bench = ctx.bench && ctx.data[ctx.bench], bi = ctx.idx[ctx.bench];
+      let riskOn = true;
+      if (p.filterLen > 0 && bench && bi != null && bi >= p.filterLen) { const bs = IND.sma(bench.c, p.filterLen, bi); riskOn = bench.c[bi] > bs; ctx.regime = `${ctx.bench} ${riskOn ? 'above' : 'below'} its ${p.filterLen}-day average (${px2(bench.c[bi])} vs ${px2(bs)})`; }
+      const ranked = [];
+      for (const s of ctx.syms) { const b = ctx.data[s], i = ctx.idx[s]; if (i == null || i < p.lookback) continue; const r = IND.ret(b.c, p.lookback, i, p.skip); if (r == null) continue; ranked.push({ s, r }); }
+      ranked.sort((a, b) => b.r - a.r);
+      ranked.forEach((x, k) => { out.notes[x.s] = `${p.lookback}-day return ${pf(x.r, 1)} (rank ${k + 1} of ${ranked.length})${!riskOn ? '. Market filter says stay in cash' : x.r <= 0 ? '. Not rising, so no' : k < p.top ? '. In the top ' + p.top : ''}.`; });
+      if (!riskOn) return out;
+      const picks = ranked.filter(x => x.r > 0).slice(0, p.top).map(x => x.s);
+      Object.assign(out.weights, sizeWeights(picks, { ...ctx, params: { ...p, maxPositions: p.top } }, ctx.maxW));
+      return out;
+    },
+  },
+  rsi2: {
+    name: 'Dip buyer (RSI-2)', short: 'Dip buyer', icon: 'arrowDn', rebalance: 'none', markets: 'stocks',
+    desc: 'Buys sharp short pullbacks in assets that are in a long-term uptrend: the 2-day RSI under 10 while price is above its 200-day average. Sells on the first bounce above the 5-day average, or after 10 days. Many small wins, works best on index ETFs and big stocks.',
+    params: [{ k: 'entry', label: 'Buy when RSI-2 below', def: 10, min: 1, max: 30 }, { k: 'exitLen', label: 'Sell above average (days)', def: 5, min: 2, max: 20 }, { k: 'trendLen', label: 'Trend filter (days)', def: 200, min: 0, max: 300 }, { k: 'maxDays', label: 'Most days to hold', def: 10, min: 2, max: 30 }, { k: 'maxPositions', label: 'Most positions', def: 4, min: 1, max: 10 }, { k: 'stopAtr', label: 'Disaster stop (ATRs, 0 = off)', def: 0, min: 0, max: 8, step: 0.5 }],
+    grid: { entry: [5, 10, 15], exitLen: [3, 5, 10] },
+    need: p => Math.max(p.trendLen || 0, 20) + 5,
+    decide(ctx) {
+      const p = ctx.params, out = { weights: {}, stops: {}, notes: {} }, cand = [], slot = Math.min(ctx.maxW, 1 / p.maxPositions);
+      let held = 0;
+      for (const s of ctx.syms) {
+        const b = ctx.data[s], i = ctx.idx[s]; if (i == null || i < Math.max(p.trendLen, 20)) continue;
+        const c = b.c[i], r = IND.rsi(b.c, 2, i, b.memo), ex = IND.sma(b.c, p.exitLen, i), tr = p.trendLen ? IND.sma(b.c, p.trendLen, i) : 0, h = ctx.held[s];
+        if (h) {
+          const days = h.days || 0, exit = c > ex || days >= p.maxDays;
+          out.notes[s] = `Holding ${days} day${days === 1 ? '' : 's'}. Close ${px2(c)} vs ${p.exitLen}-day average ${px2(ex)}.${exit ? (c > ex ? ' Bounced: sell.' : ' Held too long: sell.') : ' Waiting for the bounce.'}`;
+          if (!exit) { out.weights[s] = h.weight || slot; held++; if (p.stopAtr > 0) out.stops[s] = { trail: false, price: h.entry - p.stopAtr * IND.atr(b, 14, i, b.memo) }; }
+        } else {
+          const ok = r != null && r < p.entry && (!p.trendLen || c > tr);
+          out.notes[s] = `RSI-2 ${r == null ? '–' : r.toFixed(1)}${p.trendLen ? `, ${c > tr ? 'above' : 'below'} its ${p.trendLen}-day average` : ''}.${ok ? ' A dip in an uptrend: buy.' : ''}`;
+          if (ok) cand.push({ s, r });
+        }
+      }
+      cand.sort((a, b) => a.r - b.r);
+      for (const x of cand.slice(0, Math.max(0, p.maxPositions - held))) { out.weights[x.s] = slot; if (p.stopAtr > 0) out.stops[x.s] = { trail: false, price: ctx.data[x.s].c[ctx.idx[x.s]] - p.stopAtr * IND.atr(ctx.data[x.s], 14, ctx.idx[x.s], ctx.data[x.s].memo) }; }
+      return out;
+    },
+  },
+  breakout: {
+    name: 'Breakout (Turtle)', short: 'Breakout', icon: 'bolt', rebalance: 'none', markets: 'both',
+    desc: 'Buys when price closes above its highest high of the last 55 days and sells when it closes below its lowest low of the last 20. Each trade risks about 1% of the wallet, using a stop 2 ATRs below the entry. The classic Turtle rules, strong on crypto and trending stocks.',
+    params: [{ k: 'entryLen', label: 'Breakout over (days)', def: 55, min: 10, max: 120 }, { k: 'exitLen', label: 'Exit under (days)', def: 20, min: 5, max: 60 }, { k: 'atrMult', label: 'Stop (ATRs)', def: 2, min: 1, max: 6, step: 0.5 }, { k: 'riskPct', label: 'Risk per trade (%)', def: 1, min: 0.25, max: 3, step: 0.25 }, { k: 'maxPositions', label: 'Most positions', def: 6, min: 1, max: 20 }],
+    grid: { entryLen: [20, 55], exitLen: [10, 20], atrMult: [2, 3] },
+    need: p => Math.max(p.entryLen, p.exitLen) + 20,
+    decide(ctx) {
+      const p = ctx.params, out = { weights: {}, stops: {}, notes: {} }, cand = [];
+      let held = 0;
+      for (const s of ctx.syms) {
+        const b = ctx.data[s], i = ctx.idx[s]; if (i == null || i < p.entryLen + 15) continue;
+        const c = b.c[i], hi = IND.highest(b.h, p.entryLen, i), lo = IND.lowest(b.l, p.exitLen, i), atr = IND.atr(b, 20, i, b.memo), h = ctx.held[s];
+        const w = Math.min(ctx.maxW, (p.riskPct / 100) * c / (p.atrMult * atr));
+        if (h) {
+          const exit = c < lo;
+          out.notes[s] = `Holding. Close ${px2(c)}, ${p.exitLen}-day low ${px2(lo)}.${exit ? ' Broke the low: sell.' : ''}`;
+          if (!exit) { out.weights[s] = h.weight || w; out.stops[s] = { trail: false, price: h.stopPx || (h.entry - p.atrMult * atr) }; held++; }
+        } else {
+          const ok = c > hi;
+          out.notes[s] = `Close ${px2(c)} vs ${p.entryLen}-day high ${px2(hi)}.${ok ? ' New breakout: buy.' : ''}`;
+          if (ok) cand.push({ s, w, c, atr, strength: c / hi - 1 });
+        }
+      }
+      cand.sort((a, b) => b.strength - a.strength);
+      for (const x of cand.slice(0, Math.max(0, p.maxPositions - held))) { out.weights[x.s] = x.w; out.stops[x.s] = { trail: false, price: x.c - p.atrMult * x.atr }; }
+      return out;
+    },
+  },
+  hold: {
+    name: 'Buy and hold', short: 'Hold', icon: 'layers', rebalance: 'monthly', markets: 'both',
+    desc: 'Owns everything in the list in equal parts and rebalances once a month. No timing at all. Use it as the yardstick: a strategy that cannot beat this after fees is not worth running.',
+    params: [], grid: {}, need: () => 2,
+    decide(ctx) { const out = { weights: {}, stops: {}, notes: {} }, live = ctx.syms.filter(s => ctx.idx[s] != null); for (const s of live) { out.weights[s] = Math.min(ctx.maxW, 1 / live.length); out.notes[s] = 'Held in equal parts.'; } return out; },
+  },
+};
+const UNIVERSES = {
+  megacap: { name: 'Big US stocks', syms: ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'META', 'AVGO', 'TSLA', 'JPM', 'V', 'LLY', 'COST', 'NFLX', 'WMT', 'XOM', 'AMD'] },
+  etfs: { name: 'Index and sector ETFs', syms: ['SPY', 'QQQ', 'IWM', 'DIA', 'XLK', 'XLF', 'XLE', 'XLV', 'XLY', 'XLP', 'XLI', 'XLU', 'XLB', 'XLC', 'XLRE'] },
+  allweather: { name: 'Stocks, bonds and gold', syms: ['SPY', 'QQQ', 'IWM', 'EFA', 'EEM', 'TLT', 'IEF', 'GLD', 'DBC', 'VNQ'] },
+  crypto: { name: 'Top crypto', syms: ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'ADA', 'AVAX', 'LINK', 'LTC', 'DOT'] },
+  mixed: { name: 'Stocks and crypto', syms: ['SPY', 'QQQ', 'GLD', 'TLT', 'BTC', 'ETH', 'SOL'] },
+};
+function cleanParams(key, p = {}) {
+  const st = STRATEGIES[key]; if (!st) fail('Unknown strategy');
+  const out = {};
+  for (const d of st.params) {
+    if (d.choices) out[d.k] = d.choices.some(c => c[0] === p[d.k]) ? p[d.k] : d.def;
+    else out[d.k] = clamp(num(p[d.k], d.def), d.min, d.max);
+  }
+  return out;
+}
+const strategiesJson = () => Object.fromEntries(Object.entries(STRATEGIES).map(([k, s]) => [k, { name: s.name, short: s.short, icon: s.icon, desc: s.desc, rebalance: s.rebalance, markets: s.markets, params: s.params }]));
+
+// =====================================================================
+// Backtester: replays a strategy day by day with the same spreads and fees as live trading
+// Decisions use each day's close and fill at that close (bots trade 15 minutes before the bell),
+// paying half the spread, a little slippage and the broker's fees. Stops are checked against each day's low.
+// =====================================================================
+async function loadUniverse(syms) {
+  const data = {}, missing = [];
+  await Promise.all(syms.map(async s => { try { const b = await dailyBars(s); data[s] = b; } catch (e) { missing.push(s); } }));
+  return { data, missing };
+}
+const benchFor = syms => syms.some(s => !isCrypto(s)) ? 'SPY' : 'BTC';
+function runBacktest({ key, params, syms, data, start, end, capital = 10000, profile = 'robinhood', route = 'mm', maxPosPct = 100, slipBps = 2, bench }) {
+  const st = STRATEGIES[key], p = params, prof = PROFILES[profile] || PROFILES.robinhood, w = { crypto_route: route };
+  const series = {}; for (const s of [...new Set([...syms, bench].filter(Boolean))]) if (data[s]) series[s] = { ...data[s], memo: {}, at: new Map(data[s].d.map((d, i) => [d, i])) };
+  const live = syms.filter(s => series[s]);
+  const allDates = [...new Set(live.flatMap(s => series[s].d))].sort().filter(d => (!start || d >= start) && (!end || d <= end));
+  const need = st.need(p), ptr = {}; for (const s of Object.keys(series)) ptr[s] = -1;
+  let cash = capital, peak = capital, maxDD = 0, fees = 0, spreadCost = 0, vol30 = [], exposureDays = 0;
+  const pos = {}, curve = [], trades = [], closed = [], daily = [];
+  const halfSpread = (s, px) => px * modelSpreadBps(s, 'regular') / 2e4 + px * slipBps / 1e4;
+  const fee = (s, side, qty, notional, d) => {
+    if (isCrypto(s)) { const v = vol30.filter(x => x.d > addIso(d, -30)).reduce((t, x) => t + x.v, 0); return cryptoFees(prof, w, notional, 'taker', v).total; }
+    return stockFees(prof, side, qty, notional, d).total;
+  };
+  const trade = (s, side, qty, px, d, why) => {
+    if (!(qty > 0)) return;
+    const fillPx = side === 'buy' ? px + halfSpread(s, px) : Math.max(px * 0.5, px - halfSpread(s, px));
+    const notional = qty * fillPx, f = fee(s, side, qty, notional, d);
+    spreadCost += Math.abs(fillPx - px) * qty; fees += f;
+    if (isCrypto(s)) vol30.push({ d, v: notional });
+    if (side === 'buy') {
+      cash -= notional + f;
+      const h = pos[s] || (pos[s] = { qty: 0, cost: 0, entry: fillPx, entryDate: d, high: px, days: 0 });
+      h.qty += qty; h.cost += notional + f;
+    } else {
+      const h = pos[s]; const part = qty / h.qty, basis = h.cost * part;
+      cash += notional - f; const pnl = notional - f - basis;
+      closed.push({ sym: s, entryDate: h.entryDate, exitDate: d, entry: h.cost / h.qty, exit: fillPx, qty, pnl, ret: pnl / basis, why, days: daysBetween(h.entryDate, d) });
+      h.qty -= qty; h.cost -= basis; if (h.qty <= 1e-9) delete pos[s];
+    }
+    trades.push({ d, sym: s, side, qty, px: fillPx, fee: f, why });
+  };
+  const value = () => cash + Object.entries(pos).reduce((t, [s, h]) => t + h.qty * series[s].c[ptr[s]], 0);
+  let lastMonth = null, started = false;
+  for (const d of allDates) {
+    for (const s of Object.keys(series)) { const j = series[s].at.get(d); if (j != null) ptr[s] = j; }
+    const ready = live.filter(s => ptr[s] >= need);
+    if (!started) { if (!ready.length) continue; started = true; }
+    // 1) stops during the day: a gap below the stop fills at the open. No buying back the same day.
+    const stoppedToday = new Set();
+    for (const [s, h] of Object.entries(pos)) {
+      const i = series[s].at.get(d); if (i == null || h.stop == null) continue;
+      const b = series[s];
+      if (b.l[i] <= h.stop) { trade(s, 'sell', h.qty, Math.min(b.o[i], h.stop), d, 'stop'); stoppedToday.add(s); }
+    }
+    // 2) decide at the close
+    const idx = {}; for (const s of Object.keys(series)) idx[s] = ptr[s] >= 0 ? ptr[s] : null;
+    const tradable = live.filter(s => series[s].at.get(d) != null && ptr[s] >= need);
+    const held = {}; for (const [s, h] of Object.entries(pos)) { const i = ptr[s]; h.high = Math.max(h.high, series[s].c[i]); held[s] = { qty: h.qty, entry: h.cost / h.qty, entryDate: h.entryDate, high: h.high, days: h.days, weight: h.weight, stopPx: h.stop }; }
+    const month = d.slice(0, 7), rebalanceDay = st.rebalance === 'monthly' ? month !== lastMonth : st.rebalance === 'weekly' ? new Date(d + 'T12:00:00Z').getUTCDay() === 1 : false;
+    const eq0 = value();
+    const acts = st.rebalance === 'none' || rebalanceDay;
+    if (tradable.length && acts) {
+      const ctx = { syms: tradable, data: series, idx, params: p, held, bench, maxW: maxPosPct / 100 };
+      const dec = st.decide(ctx);
+      // exits first
+      for (const s of Object.keys(pos)) if (tradable.includes(s) && !(dec.weights[s] > 0)) trade(s, 'sell', pos[s].qty, series[s].c[ptr[s]], d, 'signal');
+      for (const [s, wgt] of Object.entries(dec.weights)) {
+        if (!(wgt > 0) || !tradable.includes(s) || stoppedToday.has(s)) continue;
+        const px = series[s].c[ptr[s]], want = wgt * eq0, have = (pos[s]?.qty || 0) * px;
+        if (!pos[s] || rebalanceDay) {
+          const diff = want - have;
+          if (Math.abs(diff) > Math.max(eq0 * 0.01, 5)) {
+            if (diff > 0) { const room = cash - 0.5; const usd = Math.min(diff, room); if (usd > 1) trade(s, 'buy', usd / (px + halfSpread(s, px)) * 0.999, px, d, pos[s] ? 'rebalance' : 'signal'); }
+            else trade(s, 'sell', Math.min(pos[s].qty, -diff / px), px, d, 'rebalance');
+          }
+        }
+        if (pos[s]) { pos[s].weight = wgt; const sp = dec.stops[s]; pos[s].stop = sp ? (sp.trail ? Math.max(pos[s].stop || 0, sp.price) : sp.price) : null; }
+      }
+    }
+    if (st.rebalance === 'monthly') lastMonth = month;
+    for (const h of Object.values(pos)) h.days++;
+    const eq = value(); peak = Math.max(peak, eq); maxDD = Math.min(maxDD, eq / peak - 1);
+    if (Object.keys(pos).length) exposureDays++;
+    curve.push([d, eq]);
+  }
+  // benchmark: buy and hold over the same days
+  let bcurve = null;
+  if (bench && series[bench] && curve.length) {
+    const b = series[bench]; let units = null; bcurve = [];
+    for (const [d] of curve) { const i = b.at.get(d) ?? lastIndexOnOrBefore(b.d, d); if (i < 0) { bcurve.push([d, capital]); continue; } if (units == null) units = capital / b.c[i]; bcurve.push([d, units * b.c[i]]); }
+  }
+  return { curve, bcurve, trades, closed, fees, spreadCost, maxDD, exposure: curve.length ? exposureDays / curve.length : 0, open: Object.entries(pos).map(([s, h]) => ({ sym: s, qty: h.qty, entry: h.cost / h.qty, entryDate: h.entryDate, value: h.qty * series[s].c[ptr[s]] })) };
+}
+function lastIndexOnOrBefore(arr, d) { let lo = 0, hi = arr.length - 1, r = -1; while (lo <= hi) { const m = (lo + hi) >> 1; if (arr[m] <= d) { r = m; lo = m + 1; } else hi = m - 1; } return r; }
+const addIso = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 864e5).toISOString().slice(0, 10);
+const daysBetween = (a, b) => Math.round((Date.parse(b + 'T12:00:00Z') - Date.parse(a + 'T12:00:00Z')) / 864e5);
+function curveStats(curve, periodsPerYear) {
+  if (!curve || curve.length < 2) return null;
+  const v0 = curve[0][1], v1 = curve[curve.length - 1][1], years = Math.max(1 / 365, daysBetween(curve[0][0], curve[curve.length - 1][0]) / 365.25);
+  const rets = []; for (let i = 1; i < curve.length; i++) rets.push(curve[i][1] / curve[i - 1][1] - 1);
+  const mean = rets.reduce((a, b) => a + b, 0) / rets.length, sd = Math.sqrt(rets.reduce((a, r) => a + (r - mean) ** 2, 0) / Math.max(1, rets.length - 1));
+  const down = Math.sqrt(rets.reduce((a, r) => a + Math.min(0, r) ** 2, 0) / Math.max(1, rets.length));
+  let peak = -Infinity, dd = 0, ddStart = null, longest = 0, cur = 0; for (const [, v] of curve) { if (v >= peak) { peak = v; cur = 0; } else cur++; longest = Math.max(longest, cur); dd = Math.min(dd, v / peak - 1); }
+  return { start: v0, end: v1, ret: v1 / v0 - 1, cagr: Math.pow(v1 / v0, 1 / years) - 1, vol: sd * Math.sqrt(periodsPerYear), sharpe: sd > 0 ? mean / sd * Math.sqrt(periodsPerYear) : null, sortino: down > 0 ? mean / down * Math.sqrt(periodsPerYear) : null, maxDD: dd, longestDD: longest, years };
+}
+function monthlyReturns(curve) {
+  const out = {}; let prev = curve[0]?.[1];
+  const last = {}; for (const [d, v] of curve) last[d.slice(0, 7)] = v;
+  for (const m of Object.keys(last).sort()) { out[m] = prev ? last[m] / prev - 1 : 0; prev = last[m]; }
+  return out;
+}
+function summarize(r, periodsPerYear, capital) {
+  const s = curveStats(r.curve, periodsPerYear), b = curveStats(r.bcurve, periodsPerYear);
+  const wins = r.closed.filter(t => t.pnl > 0), losses = r.closed.filter(t => t.pnl <= 0), sum = a => a.reduce((t, x) => t + x, 0);
+  return {
+    stats: s, bench: b, trades: r.trades.length, round: r.closed.length, win: r.closed.length ? wins.length / r.closed.length : null,
+    avgWin: wins.length ? sum(wins.map(t => t.ret)) / wins.length : null, avgLoss: losses.length ? sum(losses.map(t => t.ret)) / losses.length : null,
+    pf: losses.length && sum(losses.map(t => t.pnl)) < 0 ? sum(wins.map(t => t.pnl)) / -sum(losses.map(t => t.pnl)) : null,
+    avgDays: r.closed.length ? sum(r.closed.map(t => t.days)) / r.closed.length : null, fees: r.fees, spreadCost: r.spreadCost, exposure: r.exposure,
+    turnover: capital ? sum(r.trades.map(t => t.qty * t.px)) / capital / Math.max(1, s?.years || 1) : null,
+  };
+}
+const ppy = syms => syms.every(isCrypto) ? 365 : 252;
+const downsamplePts = (pts, n = 260) => { if (pts.length <= n) return pts; const out = [], step = (pts.length - 1) / (n - 1); for (let i = 0; i < n; i++) out.push(pts[Math.round(i * step)]); return out; };
+async function backtest(o) {
+  const key = o.strategy, st = STRATEGIES[key]; if (!st) fail('Pick a strategy');
+  const syms = [...new Set((o.syms || []).map(cleanSym).filter(Boolean))].slice(0, 40); if (!syms.length) fail('Pick at least one symbol');
+  for (const s of syms) if (!assets.has(s)) addAsset(s, CRYPTO_DEFAULT.includes(s) || o.kinds?.[s] === 'crypto' ? 'crypto' : 'stock');
+  const params = cleanParams(key, o.params), years = clamp(num(o.years, 3), 1, 8), capital = clamp(num(o.capital, 10000), 100, 1e8);
+  const bench = benchFor(syms);
+  const { data, missing } = await loadUniverse([...new Set([...syms, bench])]);
+  const usable = syms.filter(s => data[s]); if (!usable.length) fail('No price history for those symbols right now');
+  const lastDates = usable.map(s => data[s].d[data[s].d.length - 1]).sort(); const end = lastDates[lastDates.length - 1];
+  const start = addIso(end, -Math.round(years * 365.25));
+  const firstDates = usable.map(s => data[s].d[0]).sort();
+  const args = { key, params, syms: usable, data, start, end, capital, profile: o.profile || 'robinhood', route: o.route || 'mm', maxPosPct: clamp(num(o.maxPosPct, 100), 5, 100), bench };
+  const r = runBacktest(args), P = ppy(usable), sum = summarize(r, P, capital);
+  const out = {
+    strategy: key, name: st.name, params, syms: usable, missing, bench, start: r.curve[0]?.[0] || start, end, capital, years,
+    shortHistory: usable.filter(s => data[s].d[0] > start).map(s => ({ sym: s, from: data[s].d[0] })),
+    ...sum, curve: downsamplePts(r.curve), bcurve: r.bcurve ? downsamplePts(r.bcurve) : null, monthly: monthlyReturns(r.curve),
+    recent: r.closed.slice(-40).reverse(), open: r.open, firstData: firstDates[0], benchSym: bench,
+  };
+  // Out-of-sample check: tune on the first 70% of the period, then test those settings on the last 30% they never saw.
+  if (o.robust !== false && r.curve.length > 200 && Object.keys(st.grid).length) {
+    const days = r.curve.map(x => x[0]), split = days[Math.floor(days.length * 0.7)];
+    const combos = gridCombos(st.grid).slice(0, 18);
+    let best = null;
+    for (const g of combos) {
+      const pp = { ...params, ...g }; if (key === 'trend' && pp.fast >= pp.slow) continue;
+      const rr = runBacktest({ ...args, params: pp, end: split }), ss = curveStats(rr.curve, P);
+      if (ss && (!best || (ss.sharpe ?? -9) > (best.s.sharpe ?? -9))) best = { g, s: ss };
+    }
+    if (best) {
+      const oosBest = curveStats(runBacktest({ ...args, params: { ...params, ...best.g }, start: split }).curve, P);
+      const oosYours = curveStats(runBacktest({ ...args, start: split }).curve, P);
+      const oosBench = r.bcurve ? curveStats(r.bcurve.filter(x => x[0] >= split), P) : null;
+      const isYours = curveStats(r.curve.filter(x => x[0] < split), P);
+      const pass = oosYours && oosBench ? (oosYours.sharpe ?? 0) > 0.3 && (oosYours.ret > oosBench.ret || (oosYours.sharpe ?? 0) > (oosBench.sharpe ?? 0)) : false;
+      out.robust = { split, tuned: best.g, inSample: { best: best.s, yours: isYours }, outSample: { best: oosBest, yours: oosYours, bench: oosBench }, pass,
+        verdict: !oosYours ? 'Not enough data to check.' : pass ? 'Held up on data it was not tuned on: it beat or matched the benchmark on risk-adjusted terms in the last 30% of the period.' : (oosYours.ret > 0 ? 'Made money on unseen data but did not beat simply holding the benchmark. Treat it as a diversifier, not an edge.' : 'Lost money on the data it was not tuned on. Do not trust the full-period result.') };
+    }
+  }
+  return out;
+}
+function gridCombos(grid) {
+  const keys = Object.keys(grid); let out = [{}];
+  for (const k of keys) { const next = []; for (const o of out) for (const v of grid[k]) next.push({ ...o, [k]: v }); out = next; }
+  return out;
+}
+
+// =====================================================================
+// Bots: strategies that trade a wallet by themselves, inside hard limits you set
+// Each bot decides once a day (15 minutes before the stock market closes; crypto every day),
+// checks the news and social mood before buying, keeps stop orders on its positions, and writes down why.
+// =====================================================================
+const MANDATE_DEF = {
+  budget: 0, maxPosPct: 25, dailyLossPct: 5, maxDDPct: 20, maxTradesDay: 12, minTrade: 10, runAt: '15:45', stops: true, notify: 'trades',
+  newsFilter: true, earningsDays: 2, minSentiment: -0.35, blockSevere: true, sellOnSevere: false, tilt: false, flattenOnKill: true,
+};
+function cleanMandate(m = {}, base = MANDATE_DEF) {
+  const o = { ...base };
+  const nums = { budget: [0, 1e9], maxPosPct: [5, 100], dailyLossPct: [0, 50], maxDDPct: [0, 90], maxTradesDay: [1, 100], minTrade: [1, 10000], earningsDays: [0, 10], minSentiment: [-1, 0] };
+  for (const [k, [lo, hi]] of Object.entries(nums)) if (m[k] !== undefined) o[k] = clamp(num(m[k], base[k]), lo, hi);
+  for (const k of ['stops', 'newsFilter', 'blockSevere', 'sellOnSevere', 'tilt', 'flattenOnKill']) if (m[k] !== undefined) o[k] = !!m[k];
+  if (['trades', 'all', 'off'].includes(m.notify)) o.notify = m.notify;
+  if (/^\d\d:\d\d$/.test(m.runAt || '') && m.runAt >= '09:45' && m.runAt <= '15:55') o.runAt = m.runAt;
+  return o;
+}
+const botJson = b => ({ id: b.id, name: b.name, wid: b.wid, strategy: b.strategy, params: jsonOr(b.params, {}), syms: jsonOr(b.syms, []), mandate: { ...MANDATE_DEF, ...jsonOr(b.mandate, {}) }, status: b.status, created: tsMs(b.created), lastRun: tsMs(b.last_run), lastDay: b.last_day, peak: b.peak == null ? null : +b.peak, summary: b.summary, killed: b.killed_reason || null });
+async function botLog(botId, kind, title, body = '', data = null, sym = null) {
+  await Q('insert into bot_log(bot_id,kind,title,body,data,sym) values($1,$2,$3,$4,$5,$6)', [botId, kind, String(title).slice(0, 200), String(body || '').slice(0, 4000), data ? JSON.stringify(data) : null, sym]).catch(e => warn('bot log', e.message));
+}
+// Today's bars with the live price as today's close.
+function withLive(b, sym) {
+  const q = prices.get(sym), today = isCrypto(sym) ? new Date().toISOString().slice(0, 10) : etDate();
+  const out = { sym, d: b.d.slice(), o: b.o.slice(), h: b.h.slice(), l: b.l.slice(), c: b.c.slice(), v: b.v.slice(), memo: {} };
+  if (!q?.p) return { bars: out, live: false };
+  const n = out.d.length - 1;
+  if (out.d[n] === today) { out.c[n] = q.p; out.h[n] = Math.max(out.h[n], q.p); out.l[n] = Math.min(out.l[n], q.p); }
+  else if (out.d[n] < today) { out.d.push(today); out.o.push(q.open || q.p); out.h.push(Math.max(q.hi || q.p, q.p)); out.l.push(Math.min(q.lo || q.p, q.p)); out.c.push(q.p); out.v.push(0); }
+  return { bars: out, live: true };
+}
+const running = new Set();
+async function runBot(id, { manual = false, dry = false } = {}) {
+  if (running.has(id)) fail('This bot is already deciding. Give it a moment.');
+  running.add(id);
+  try { return await runBotInner(id, { manual, dry }); } finally { running.delete(id); if (!dry) broadcast({ t: 'evt', e: 'bot', id }); }
+}
+async function runBotInner(id, { manual, dry }) {
+  const b = await row('select * from bots where id=$1', [id]); if (!b) fail('That bot is gone', 404);
+  const bot = botJson(b), st = STRATEGIES[bot.strategy], m = bot.mandate, state = jsonOr(b.state, {});
+  const w = await walletRow(bot.wid);
+  if (w.archived) fail('The bot\'s wallet is archived');
+  const real = isReal(w), prof = profOf(w), sess = sessionAt(prof);
+  const pos = await positions(bot.wid), acct = await accountInfo(bot.wid, { w, pos });
+  const equity = acct.equity, today = etDate(), mine = new Set(bot.syms);
+  const capital = m.budget > 0 ? Math.min(m.budget, equity) : equity;
+  const log = { rows: [], orders: [], skips: [], risk: [] };
+  // ---- risk limits first ----
+  let dayStart = +b.day_start || equity, peak = Math.max(+b.peak || equity, equity);
+  if (b.day_date !== today) dayStart = equity;
+  const dd = peak ? equity / peak - 1 : 0, dayRet = dayStart ? equity / dayStart - 1 : 0;
+  let noBuys = false;
+  if (m.maxDDPct > 0 && dd <= -m.maxDDPct / 100) {
+    const msg = `The wallet is ${pct(dd * 100)} below its peak of ${money(peak)}, past the ${m.maxDDPct}% limit. The bot stopped itself${m.flattenOnKill ? ' and sold its positions' : ''}.`;
+    if (!dry) {
+      await Q("update bots set status='killed', killed_reason=$1, peak=$2 where id=$3", [msg, peak, id]);
+      if (m.flattenOnKill) await flattenBot(bot, 'drawdown limit');
+      await botLog(id, 'risk', 'Drawdown limit hit: bot stopped', msg);
+      await notify('bot', `🛑 ${bot.name} stopped`, msg, { wid: bot.wid, url: '/#/bot/' + id });
+    }
+    return { killed: true, message: msg };
+  }
+  if (m.dailyLossPct > 0 && dayRet <= -m.dailyLossPct / 100) { noBuys = true; log.risk.push(`Down ${pct(dayRet * 100)} today, past the ${m.dailyLossPct}% daily limit: no new buys today.`); }
+  const tradesToday = +(await row("select count(*) n from bot_log where bot_id=$1 and kind='trade' and ts > $2", [id, new Date(etToUtc(...today.split('-').map(Number), 0, 0))])).n;
+  let tradeBudget = Math.max(0, m.maxTradesDay - tradesToday);
+  // ---- data ----
+  const syms = bot.syms.filter(s => isCrypto(s) || sess === 'regular' || manual);
+  const bench = benchFor(bot.syms);
+  const { data, missing } = await loadUniverse([...new Set([...bot.syms, bench])]);
+  const series = {}, idx = {};
+  for (const s of Object.keys(data)) { const r = withLive(data[s], s); series[s] = r.bars; idx[s] = r.bars.d.length - 1; }
+  const need = st.need(bot.params);
+  const tradable = syms.filter(s => series[s] && idx[s] >= need && priceOf(s));
+  const stoppedToday = new Set((await rows("select distinct sym from trd where wid=$1 and side='sell' and otype in ('stop','trail') and ts > $2", [bot.wid, new Date(etToUtc(...today.split('-').map(Number), 0, 0))])).map(x => x.sym));
+  const held = {};
+  for (const p of pos) if (mine.has(p.sym)) {
+    const s0 = state[p.sym] || {}; const c = priceOf(p.sym) || p.avg;
+    const entryDate = s0.entryDate || etDate(p.since), ser = series[p.sym];
+    const days = ser ? ser.d.filter(d => d > entryDate).length : (s0.days || 0);
+    held[p.sym] = { qty: p.qty, entry: p.avg, entryDate, high: Math.max(s0.high || 0, c), days, weight: s0.weight, stopPx: s0.stopPx };
+  }
+  const month = today.slice(0, 7), rebalanceDue = st.rebalance === 'none' || !state._lastRebalance || (st.rebalance === 'monthly' ? state._lastRebalance.slice(0, 7) !== month : true) || manual;
+  const ctx = { syms: tradable, data: series, idx, params: bot.params, held, bench, maxW: m.maxPosPct / 100 };
+  const dec = rebalanceDue ? st.decide(ctx) : { weights: Object.fromEntries(Object.entries(held).map(([s, h]) => [s, h.weight || (h.qty * (priceOf(s) || h.entry)) / capital])), stops: {}, notes: Object.fromEntries(Object.keys(held).map(s => [s, 'Holding until the next monthly rebalance.'])) };
+  if (!rebalanceDue) log.risk.push(`${st.name} rebalances monthly; next on the first trading day of next month. Holding as is.`);
+  // ---- news and social check before buying ----
+  const buzz = {};
+  const wantBuy = Object.entries(dec.weights).filter(([s, wt]) => wt > 0 && tradable.includes(s));
+  if (m.newsFilter && S.f_buzz !== false) {
+    const list = [...new Set([...wantBuy.map(([s]) => s), ...Object.keys(held), ...tradable])].slice(0, 24);
+    for (let i = 0; i < list.length; i += 4) await Promise.all(list.slice(i, i + 4).map(s => Promise.race([buzzFor(s), sleep(15000).then(() => null)]).then(x => { if (x) buzz[s] = x; }).catch(() => {})));
+  }
+  const decisions = {};
+  for (const s of new Set([...tradable, ...Object.keys(held)])) {
+    const want = dec.weights[s] > 0 ? dec.weights[s] : 0, px = priceOf(s), have = (held[s]?.qty || 0) * (px || 0), bz = buzz[s];
+    const d = { sym: s, note: dec.notes[s] || (tradable.includes(s) ? '' : isCrypto(s) ? 'No fresh price yet.' : 'Stock market is closed; stocks are only traded in regular hours.'), want, have, buzz: bz ? buzzLine(bz) : null, flags: bz?.flags || [], action: 'hold', why: [] };
+    let wt = want;
+    if (bz && m.newsFilter && wt * capital > have + 1) {
+      const up = bz.upcoming.find(u => u.k === 'earnings');
+      if (m.earningsDays > 0 && up && up.tradingDays <= m.earningsDays) { wt = have / capital; d.why.push(`Skipped buying: earnings ${up.tradingDays <= 0 ? 'today' : `in ${up.tradingDays} trading day${up.tradingDays === 1 ? '' : 's'}`}. Prices can jump either way on the report.`); }
+      else if (m.blockSevere && bz.flags.includes('severe_news')) { wt = have / capital; d.why.push(`Skipped buying: serious news (${bz.events.filter(e => e.k === 'severe').map(e => '"' + e.title.slice(0, 90) + '"').join(', ')}).`); }
+      else if (bz.count >= 5 && bz.sentiment <= m.minSentiment) { wt = have / capital; d.why.push(`Skipped buying: the mood is negative (${bz.sentiment.toFixed(2)} across ${bz.count} items).`); }
+      else if (m.tilt && bz.count >= 5) { const k = clamp(0.75 + bz.sentiment * 0.5, 0.5, 1); if (k < 0.99) { wt = Math.max(have / capital, wt * k); d.why.push(`Sized down to ${Math.round(k * 100)}% because of the news mood.`); } }
+    }
+    if (bz && held[s] && m.sellOnSevere && bz.flags.includes('severe_news')) { wt = 0; d.why.push('Selling: serious negative news and "sell on bad news" is on.'); }
+    if (stoppedToday.has(s) && !held[s] && wt > 0) { wt = 0; d.why.push('Not buying back today: its stop loss sold it earlier today.'); }
+    if (noBuys && wt * capital > have) { wt = have / capital; d.why.push('No new buys today: the daily loss limit was hit.'); }
+    d.target = wt; decisions[s] = d;
+  }
+  // ---- orders: sells first to free cash, then buys ----
+  const placeOrder = async (s, side, o, label) => {
+    if (dry) { log.orders.push({ sym: s, side, ...o, dry: true, label }); return { dry: true }; }
+    if (tradeBudget <= 0) { log.skips.push(`${s}: daily trade limit (${m.maxTradesDay}) reached.`); return null; }
+    try {
+      let r;
+      if (!isCrypto(s) && sessionAt(prof) !== 'regular' && real) { const q = await addLimit(bot.wid, s, { side, kind: 'moo', amount: o.usd ?? o.qty ?? o.pct, units: o.usd ? 'usd' : o.qty ? 'qty' : 'pct', why: 'bot: ' + bot.name }); r = { queued: true, id: q.id }; }
+      else r = await execTrade(bot.wid, s, side, { ...o, why: 'bot: ' + bot.name.slice(0, 40), auto: true, bot: true, note: label });
+      tradeBudget--;
+      const text = r.queued ? `${side === 'buy' ? 'Buy' : 'Sell'} queued for the open` : `${side === 'buy' ? 'Bought' : 'Sold'} ${+r.qty.toFixed(6)} ${s} at ${pxStr(r.price)}${r.pnl != null ? ` (${r.pnl >= 0 ? '+' : ''}${money(r.pnl)})` : ''}`;
+      log.orders.push({ sym: s, side, text, label, fill: r.queued ? null : { qty: r.qty, price: r.price, fee: r.fee, pnl: r.pnl } });
+      await botLog(id, 'trade', text, label, { side, fill: r.queued ? null : { qty: r.qty, price: r.price, fee: r.fee, pnl: r.pnl, id: r.id } }, s);
+      return r;
+    } catch (e) { log.skips.push(`${s}: ${e.message}`); await botLog(id, 'error', `Couldn't ${side} ${s}`, e.message, null, s); return null; }
+  };
+  for (const d of Object.values(decisions)) {
+    const px = priceOf(d.sym); if (!px || !held[d.sym]) continue;
+    if (!(isCrypto(d.sym) || tradable.includes(d.sym))) continue;
+    const targetV = d.target * capital, diff = targetV - d.have;
+    if (d.target <= 0) { d.action = 'sell'; await placeOrder(d.sym, 'sell', { pct: 100 }, `${st.short}: ${d.why[0] || d.note}`); delete state[d.sym]; }
+    else if (rebalanceDue && st.rebalance !== 'none' && -diff > Math.max(m.minTrade, capital * 0.01)) { d.action = 'trim'; await placeOrder(d.sym, 'sell', { qty: Math.min(held[d.sym].qty, -diff / px) }, `${st.short}: rebalance down to ${pct0n(d.target)} of the wallet`); }
+  }
+  for (const d of Object.values(decisions).sort((a, b) => b.target - a.target)) {
+    if (!(d.target > 0) || !tradable.includes(d.sym)) continue;
+    const px = priceOf(d.sym), targetV = d.target * capital, diff = targetV - d.have;
+    const isNew = !held[d.sym];
+    if (!isNew && !(rebalanceDue && st.rebalance !== 'none')) continue;
+    if (diff <= Math.max(m.minTrade, capital * 0.01)) continue;
+    const a2 = dry ? acct : await accountInfo(bot.wid);
+    const bp = isCrypto(d.sym) || !marginable(d.sym, px) ? a2.bpCrypto : a2.bp;
+    const usd = Math.floor(Math.min(diff, bp * 0.995) * 100) / 100;
+    if (usd < m.minTrade) { d.why.push(`Not enough buying power for this (${money(bp)} left).`); continue; }
+    d.action = isNew ? 'buy' : 'add';
+    await placeOrder(d.sym, 'buy', { usd }, `${st.short}: ${d.note}${d.why.length ? ' ' + d.why.join(' ') : ''}`.slice(0, 480));
+  }
+  // ---- protective stops ----
+  if (!dry && m.stops) {
+    const pnow = await positions(bot.wid);
+    for (const p of pnow) {
+      if (!mine.has(p.sym)) continue;
+      const sp = dec.stops[p.sym] || (state[p.sym]?.stopPx ? { price: state[p.sym].stopPx, trail: false } : null); if (!sp || !(sp.price > 0)) continue;
+      const prevStop = state[p.sym]?.stopPx, stopPx = sp.trail && prevStop ? Math.max(prevStop, sp.price) : sp.price, cur = priceOf(p.sym);
+      if (!(stopPx < cur * 0.995)) continue;
+      const existing = (condOrders.get(p.sym) || []).find(o => o.wid === bot.wid && (o.kind === 'stop' || o.kind === 'trail'));
+      if (existing && Math.abs(existing.price / stopPx - 1) < 0.005) { state[p.sym] = { ...(state[p.sym] || {}), stopPx }; continue; }
+      try { await addCondOrder(bot.wid, p.sym, 'stop', { price: stopPx, pct: 100 }); state[p.sym] = { ...(state[p.sym] || {}), stopPx }; } catch (e) { log.skips.push(`${p.sym} stop: ${e.message}`); }
+    }
+  }
+  // ---- remember what it holds and why ----
+  if (!dry) {
+    const pnow = await positions(bot.wid);
+    for (const p of pnow) if (mine.has(p.sym)) {
+      const s0 = state[p.sym] || {}, d = decisions[p.sym];
+      state[p.sym] = { ...s0, entryDate: s0.entryDate || today, high: Math.max(s0.high || 0, priceOf(p.sym) || 0), days: held[p.sym] ? held[p.sym].days : 0, lastDay: today, weight: d?.target || s0.weight };
+    }
+    for (const s of Object.keys(state)) if (!s.startsWith('_') && !pnow.some(p => p.sym === s)) delete state[s];
+    if (rebalanceDue && st.rebalance !== 'none') state._lastRebalance = today;
+    const bought = log.orders.filter(o => o.side === 'buy').map(o => o.sym), sold = log.orders.filter(o => o.side === 'sell').map(o => o.sym);
+    const summary = log.orders.length ? [bought.length ? 'Bought ' + bought.join(', ') : '', sold.length ? 'sold ' + sold.join(', ') : ''].filter(Boolean).join('; ') : 'No changes';
+    await Q('update bots set state=$1, last_run=now(), last_day=$2, peak=$3, day_start=$4, day_date=$5, summary=$6 where id=$7', [JSON.stringify(state), today, peak, dayStart, today, summary, id]);
+    const rows = Object.values(decisions).map(d => ({ sym: d.sym, action: d.action, want: round(d.want, 4), target: round(d.target, 4), have: round(d.have, 2), note: d.note, why: d.why, buzz: d.buzz, flags: d.flags }));
+    await botLog(id, 'decision', `${manual ? 'Manual run' : 'Daily decision'}: ${summary}`, [...log.risk, ...log.skips].join('\n'), { rows, equity, capital, dd, dayRet, regime: ctx.regime || null, missing });
+    if (m.notify === 'all' || (m.notify === 'trades' && log.orders.length)) await notify('bot', `🤖 ${bot.name}: ${summary}`, log.orders.map(o => `${o.text}. ${o.label || ''}`.trim()).join('\n').slice(0, 600) || [...log.risk, ...log.skips].join(' ') || 'Nothing to do today.', { wid: bot.wid, url: '/#/bot/' + id });
+  }
+  return { dry, equity, capital, dd, dayRet, regime: ctx.regime || null, rows: Object.values(decisions), orders: log.orders, risk: log.risk, skips: log.skips, missing, session: sess };
+}
+const pct0n = v => (v * 100).toFixed(0) + '%';
+async function flattenBot(bot, why) {
+  const out = [];
+  for (const p of await positions(bot.wid)) {
+    if (!bot.syms.includes(p.sym)) continue;
+    try {
+      if (!isCrypto(p.sym) && sessionAt(profOf(walletMeta.get(bot.wid))) !== 'regular') { await addLimit(bot.wid, p.sym, { side: 'sell', kind: 'moo', amount: 100, units: 'pct', why: 'bot: ' + why }); out.push(`${p.sym} (queued for the open)`); }
+      else { const f = await execTrade(bot.wid, p.sym, 'sell', { pct: 100, why: 'bot: ' + why, auto: true, force: true }); out.push(`${+f.qty.toFixed(6)} ${p.sym}`); }
+    } catch (e) { out.push(`${p.sym} failed: ${e.message}`); }
+  }
+  await Q("delete from ord where wid=$1 and sym = any($2::text[])", [bot.wid, bot.syms]).catch(() => {}); await loadOrders();
+  await botLog(bot.id, 'trade', 'Sold everything', `${why}: ${out.join(', ') || 'nothing to sell'}`);
+  return out;
+}
+// Every minute: run bots whose time has come.
+async function botScheduler() {
+  const p = etParts(), hm = String(p.h).padStart(2, '0') + ':' + String(p.mi).padStart(2, '0'), today = etDate();
+  for (const b of await rows("select * from bots where status='running'")) {
+    const m = { ...MANDATE_DEF, ...jsonOr(b.mandate, {}) };
+    const syms = jsonOr(b.syms, []), trading = isTradingDay(p.y, p.m, p.d), early = trading && earlyClose(p.y, p.m, p.d);
+    const runAt = early && m.runAt > '12:45' ? '12:45' : m.runAt; // half days close at 1pm
+    if (b.last_day === today || hm < runAt || running.has(b.id)) continue;
+    if (!syms.some(isCrypto) && market().state !== 'open') continue; // stock-only bots trade in regular hours; a missed day is skipped
+    runBot(b.id).catch(async e => { warn('bot', b.id, e.message); await botLog(b.id, 'error', 'The daily decision failed', e.message); await Q('update bots set last_day=$1 where id=$2', [today, b.id]).catch(() => {}); });
+  }
+}
+
+// Stop losses and queued orders fill on their own; put them in the bot's journal too.
+fillCbs.push(async f => {
+  const list = (await rows("select * from bots where wid=$1", [f.wid])).map(botJson).filter(b => b.syms.includes(f.sym)); if (!list.length) return;
+  const t = await row('select why, otype from trd where id=$1', [f.id]); if (!t) return;
+  const bot = list[0], viaBot = String(t.why || '').startsWith('bot:');
+  if (viaBot && t.otype !== 'market') return;
+  const label = t.otype === 'stop' ? 'Stop loss' : t.otype === 'trail' ? 'Trailing stop' : viaBot ? 'Queued order' : (t.why || 'manual');
+  if (viaBot && running.has(bot.id)) return; // logged by the run itself
+  const text = `${label}: ${f.side === 'buy' ? 'bought' : 'sold'} ${+f.qty.toFixed(6)} ${f.sym} at ${pxStr(f.price)}${f.pnl != null ? ` (${f.pnl >= 0 ? '+' : ''}${money(f.pnl)})` : ''}`;
+  await botLog(bot.id, 'trade', text, viaBot ? 'Filled when the market opened.' : t.otype === 'stop' || t.otype === 'trail' ? 'The protective stop was hit.' : 'Traded outside the bot.', { side: f.side, fill: { qty: f.qty, price: f.price, fee: f.fee, pnl: f.pnl, id: f.id }, outside: !viaBot }, f.sym);
+  if ((t.otype === 'stop' || t.otype === 'trail') && bot.mandate.notify !== 'off') await notify('bot', `🤖 ${bot.name}: ${label.toLowerCase()} hit on ${f.sym}`, text, { wid: f.wid, sym: f.sym, url: '/#/bot/' + bot.id });
+});
+
+// =====================================================================
 // Login
 // =====================================================================
 let tokenSalt = '';
@@ -3137,6 +3879,160 @@ POST('/api/broker/link', auth, async req => brokerLink(req.body.confirm));
 POST('/api/broker/sync', auth, async () => { await brokerSync(); return brokerJson(); });
 
 // =====================================================================
+// Bots, strategy lab and the news/social scanner
+// =====================================================================
+const botsOn = () => { if (S.f_bots === false) fail('Bots are switched off in Settings → Features'); };
+GET('/api/strategies', auth, () => ({ strategies: strategiesJson(), universes: UNIVERSES, mandate: MANDATE_DEF, buzz: { on: S.f_buzz !== false, sources: buzzStatus, reddit: !!REDDIT.id } }));
+const btCache = new Map();
+POST('/api/backtest', auth, async req => {
+  botsOn();
+  const b = req.body || {}, key = JSON.stringify([b.strategy, b.params, b.syms, b.years, b.capital, b.profile, b.maxPosPct, b.robust]);
+  const hit = btCache.get(key); if (hit && Date.now() - hit.t < 30 * 60e3) return hit.v;
+  const v = await backtest(b);
+  btCache.set(key, { t: Date.now(), v }); if (btCache.size > 40) btCache.delete(btCache.keys().next().value);
+  return v;
+});
+async function cleanBotSyms(list, kinds = {}) {
+  const syms = [...new Set((list || []).map(cleanSym).filter(Boolean))].slice(0, 30);
+  if (!syms.length) fail('Pick at least one thing for the bot to trade');
+  const bad = [];
+  await Promise.all(syms.map(s => {
+    const kind = kinds[s] === 'crypto' || (kinds[s] !== 'stock' && CRYPTO_DEFAULT.includes(s)) ? 'crypto' : kinds[s] === 'stock' ? 'stock' : (assets.has(s) ? kindOf(s) : 'stock');
+    return trackAsset(s, kind).catch(() => bad.push(s));
+  }));
+  if (bad.length) fail(`Couldn't find a price for ${bad.join(', ')}. Check the symbol${bad.length > 1 ? 's' : ''}.`);
+  return syms;
+}
+async function botCard(b) {
+  const bot = botJson(b), w = await row('select * from wallets where id=$1', [b.wid]);
+  if (!w) return { ...bot, wallet: null };
+  const pos = await positions(b.wid), value = +w.cash + marketValue(pos);
+  const mine = pos.filter(p => bot.syms.includes(p.sym));
+  return { ...bot, wallet: { id: w.id, name: w.name, emoji: w.emoji, color: w.color, profile: w.profile, archived: w.archived }, value, start: +w.start_bal, ret: (value / +w.start_bal - 1) * 100, day: dayChange(pos),
+    holding: mine.map(p => p.sym), next: nextRunOf(bot), invested: mine.reduce((t, p) => t + p.qty * (priceOf(p.sym) || p.avg), 0), cash: +w.cash, dd: bot.peak ? value / bot.peak - 1 : 0 };
+}
+GET('/api/bots', auth, async () => {
+  const list = await rows('select * from bots order by id');
+  return { bots: await Promise.all(list.map(botCard)), on: S.f_bots !== false };
+});
+GET('/api/bots/:id', auth, async req => {
+  const b = await row('select * from bots where id=$1', [+req.params.id]); if (!b) fail('That bot is gone', 404);
+  const card = await botCard(b), state = jsonOr(b.state, {});
+  const pos = (await positions(b.wid)).map(p => {
+    const c = priceOf(p.sym) || p.avg, s0 = state[p.sym] || {}, stop = (condOrders.get(p.sym) || []).find(o => o.wid === b.wid && (o.kind === 'stop' || o.kind === 'trail'));
+    return { ...p, price: c, value: p.qty * c, pl: (c - p.avg) * p.qty, plPct: (c / p.avg - 1) * 100, mine: card.syms.includes(p.sym), entryDate: s0.entryDate || null, stop: stop ? orderJson(stop).stop : null, weight: s0.weight || null };
+  });
+  const log = (await rows('select * from bot_log where bot_id=$1 order by id desc limit 60', [b.id])).map(logJson);
+  const last = await row("select * from bot_log where bot_id=$1 and kind='decision' order by id desc limit 1", [b.id]);
+  const queued = [...limOrders.values()].flat().filter(l => l.wid === b.wid).map(l => ({ id: l.id, sym: l.sym, side: l.side, kind: l.kind, amt: l.amt, units: l.units }));
+  return { ...card, positions: pos, log, last: last ? logJson(last) : null, queued, strategyInfo: strategiesJson()[card.strategy] || null };
+});
+const logJson = r => ({ id: r.id, ts: tsMs(r.ts), kind: r.kind, sym: r.sym, title: r.title, body: r.body, data: jsonOr(r.data) });
+function nextRunOf(bot) {
+  if (bot.status !== 'running') return null;
+  const crypto = bot.syms.some(isCrypto), [hh, mm] = bot.mandate.runAt.split(':').map(Number);
+  for (let k = 0; k < 10; k++) {
+    const t = Date.now() + k * 864e5, p = etParts(t), day = etDate(t);
+    if (k === 0 && bot.lastDay === day) continue;
+    if (!crypto && !isTradingDay(p.y, p.m, p.d)) continue;
+    const at = etToUtc(p.y, p.m, p.d, hh, mm);
+    return k === 0 && at < Date.now() ? Date.now() + 60e3 : at;
+  }
+  return null;
+}
+GET('/api/bots/:id/log', auth, async req => {
+  const before = +req.query.before || 2e9, kind = req.query.kind || null;
+  return (await rows(`select * from bot_log where bot_id=$1 and id < $2 ${kind ? 'and kind=$3' : ''} order by id desc limit 80`, kind ? [+req.params.id, before, kind] : [+req.params.id, before])).map(logJson);
+});
+POST('/api/bots', auth, async req => {
+  botsOn();
+  const b = req.body || {}, st = STRATEGIES[b.strategy]; if (!st) fail('Pick a strategy');
+  if (+(await row('select count(*) n from bots')).n >= 20) fail('You can have up to 20 bots');
+  const name = String(b.name || st.name).trim().slice(0, 30) || st.name;
+  const syms = await cleanBotSyms(b.syms, b.kinds || {}), params = cleanParams(b.strategy, b.params), mandate = cleanMandate(b.mandate || {});
+  let wid = +b.wallet || 0;
+  if (!wid) {
+    if (+(await row('select count(*) n from wallets')).n >= 25) fail('You have 25 wallets already. Pick an existing wallet for this bot or archive one.');
+    const start = clamp(num(b.start, 10000), 100, 1e9);
+    const w = await row(`insert into wallets(name,emoji,color,cash,start_bal,sort,profile,acct,lot_method,crypto_route) values($1,'🤖',$2,$3,$3,(select coalesce(max(sort),0)+1 from wallets),$4,$5,'fifo','mm') returning *`,
+      [name.slice(0, 30), COLORS.includes(b.color) ? b.color : 'grape', start, PROFILE_KEYS.includes(b.profile) ? b.profile : 'robinhood', ACCTS.includes(b.acct) ? b.acct : 'instant']);
+    wid = w.id; await loadWalletMeta(); await snapshot(wid);
+  } else {
+    const w = await walletRow(wid); if (w.archived) fail('That wallet is archived');
+    if (w.broker) fail('Bots trade practice and simulated wallets for now. Your broker wallet is left alone.');
+    const others = (await rows("select * from bots where wid=$1 and status<>'killed'", [wid])).map(botJson);
+    const overlap = others.flatMap(o => o.syms.filter(s => syms.includes(s)));
+    if (overlap.length) fail(`Another bot in this wallet already trades ${[...new Set(overlap)].join(', ')}. Give each bot its own symbols or its own wallet.`);
+  }
+  const acct = await accountInfo(wid);
+  const r = await row('insert into bots(name,wid,strategy,params,syms,mandate,status,peak,day_start,day_date,state) values($1,$2,$3,$4,$5,$6,$7,$8,$8,$9,$10) returning *',
+    [name, wid, b.strategy, JSON.stringify(params), JSON.stringify(syms), JSON.stringify(mandate), b.paused ? 'paused' : 'running', acct.equity, etDate(), '{}']);
+  await botLog(r.id, 'info', 'Bot created', `${st.name} on ${syms.join(', ')}. Decides daily at ${mandate.runAt} ET${syms.some(isCrypto) ? ' (crypto every day)' : ' on trading days'}.`, { params, mandate });
+  await refreshUserSyms();
+  // The first decision reads news for every symbol, which can take a while; it runs in the background
+  // unless the caller asks to wait for it.
+  let first = null;
+  if (b.runNow && b.wait) first = await runBot(r.id, { manual: true }).catch(e => ({ error: e.message }));
+  else if (b.runNow) runBot(r.id, { manual: true }).catch(async e => { await botLog(r.id, 'error', 'The first decision failed', e.message); broadcast({ t: 'evt', e: 'bot', id: r.id }); });
+  return { bot: await botCard(await row('select * from bots where id=$1', [r.id])), first, deciding: !!(b.runNow && !b.wait) };
+});
+PATCH('/api/bots/:id', auth, async req => {
+  const b = await row('select * from bots where id=$1', [+req.params.id]); if (!b) fail('That bot is gone', 404);
+  const bot = botJson(b), x = req.body || {}, sets = [], vals = [];
+  const set = (k, v) => { vals.push(v); sets.push(`${k}=$${vals.length}`); };
+  if (x.name !== undefined) set('name', String(x.name).trim().slice(0, 30) || bot.name);
+  if (x.params) set('params', JSON.stringify(cleanParams(bot.strategy, { ...bot.params, ...x.params })));
+  if (x.mandate) set('mandate', JSON.stringify(cleanMandate(x.mandate, bot.mandate)));
+  if (x.syms) set('syms', JSON.stringify(await cleanBotSyms(x.syms, x.kinds || {})));
+  const changes = [];
+  if (x.status && ['running', 'paused'].includes(x.status) && x.status !== bot.status) {
+    set('status', x.status); changes.push(x.status === 'running' ? 'Resumed' : 'Paused');
+    if (x.status === 'running' && bot.status === 'killed') { const a = await accountInfo(bot.wid); set('peak', a.equity); set('killed_reason', null); changes[changes.length - 1] = 'Restarted after the drawdown stop (peak reset to today)'; }
+  }
+  if (!sets.length) return botCard(b);
+  vals.push(b.id); await Q(`update bots set ${sets.join(',')} where id=$${vals.length}`, vals);
+  const what = [x.name !== undefined && 'name', x.params && 'settings', x.mandate && 'limits', x.syms && 'symbols'].filter(Boolean);
+  await botLog(b.id, 'info', changes[0] || 'Settings changed', what.length ? 'Changed ' + what.join(', ') : '', x.params || x.mandate ? { params: x.params, mandate: x.mandate } : null);
+  await refreshUserSyms();
+  return botCard(await row('select * from bots where id=$1', [b.id]));
+});
+DEL('/api/bots/:id', auth, async req => {
+  const b = await row('select * from bots where id=$1', [+req.params.id]); if (!b) return { ok: true };
+  if (req.query.flatten === '1') await flattenBot(botJson(b), 'bot deleted');
+  await Q('delete from bot_log where bot_id=$1', [b.id]); await Q('delete from bots where id=$1', [b.id]);
+  await refreshUserSyms();
+  return { ok: true };
+});
+POST('/api/bots/:id/run', auth, async req => { botsOn(); return runBot(+req.params.id, { manual: true, dry: !!req.body?.dry }); });
+POST('/api/bots/:id/flatten', auth, async req => {
+  const b = await row('select * from bots where id=$1', [+req.params.id]); if (!b) fail('That bot is gone', 404);
+  const sold = await flattenBot(botJson(b), 'you asked it to sell everything');
+  if (req.body?.pause !== false) await Q("update bots set status='paused' where id=$1 and status='running'", [b.id]);
+  return { sold };
+});
+// ---- news and social scanner ----
+GET('/api/buzz/:sym', auth, async req => {
+  if (S.f_buzz === false) fail('The news scanner is switched off in Settings → Features');
+  const sym = cleanSym(req.params.sym); if (!sym) fail('Bad symbol');
+  return buzzFor(sym);
+});
+GET('/api/buzz', auth, async req => {
+  if (S.f_buzz === false) return { items: [], off: true };
+  let syms = String(req.query.syms || '').split(',').map(cleanSym).filter(Boolean);
+  if (!syms.length) {
+    const held = (await rows('select distinct p.sym from pos p join wallets w on w.id=p.wid where not w.archived')).map(x => x.sym);
+    const watch = (await rows('select sym from watch')).map(x => x.sym);
+    const bots = (await rows("select syms from bots where status='running'")).flatMap(x => jsonOr(x.syms, []));
+    syms = [...new Set([...held, ...watch, ...bots])];
+  }
+  syms = syms.slice(0, 16);
+  const out = [];
+  for (let i = 0; i < syms.length; i += 4) await Promise.all(syms.slice(i, i + 4).map(s => Promise.race([buzzFor(s), sleep(20000).then(() => null)]).then(b => { if (b) out.push({ ...buzzSummary(b), line: buzzLine(b), top: b.items.slice(0, 3) }); }).catch(() => {})));
+  const rank = x => (x.flags.includes('severe_news') ? 0 : x.flags.includes('earnings_soon') ? 1 : x.flags.includes('negative_event') ? 2 : x.flags.includes('attention_spike') ? 3 : 5) - Math.abs(x.sentiment);
+  return { items: out.sort((a, b) => rank(a) - rank(b)), sources: buzzStatus, reddit: !!REDDIT.id };
+});
+
+// =====================================================================
 // Background jobs
 // =====================================================================
 fillCbs.push(async f => {
@@ -3233,6 +4129,8 @@ function startJobs() {
   every(60e3, marginDaily, 'margin interest');
   every(fast ? 5e3 : 60e3, marginWatch, 'margin');
   every(fast ? 3000 : 5000, pollExtended, 'extended hours');
+  every(fast ? 5e3 : 60e3, () => { if (S.f_bots !== false) return botScheduler(); }, 'bots');
+  every(3600e3, () => Q("delete from bot_log where ts < now() - interval '2 years'"), 'bot log cleanup');
   every(3600e3, () => Q("delete from settle where settles < now() - interval '7 days'"), 'settlement cleanup');
   if (BROKER) { every(15e3, () => brokerSync(), 'broker'); every(30e3, () => { adSync(); if (BROKER.wid) tuConnect(); }, 'broker streams'); setTimeout(() => brokerSync().then(() => { if (BROKER.wid) tuConnect(); }).catch(() => {}), 3000); }
   every(3600e3, async () => { await thinSnapshots(); await Q('delete from notifs where id not in (select id from notifs order by id desc limit 500)'); }, 'cleanup');
