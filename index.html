@@ -3649,8 +3649,8 @@ PAGES.bot = {
     onSeg(p.body, 'bor', r => { p.range = r; store.set('botRange', r); this.loadChart(p); });
     raf(() => placeThumbs(p.body));
     this.loadChart(p);
-    holdButton($('#bot-run', p.body), () => ACT.botRun(), 600, SET().confirmStyle === 'none' ? 'tap' : 'hold');
-    holdButton($('#bot-flat', p.body), () => ACT.botFlatten(), 900, 'hold');
+    $('#bot-run', p.body).addEventListener('click', e => ACT.botRun(e.currentTarget));
+    $('#bot-flat', p.body).addEventListener('click', async e => { const b = e.currentTarget; if (await confirmBox({ title: 'Sell everything?', msg: 'The bot sells all of its positions now (stocks wait for the open if the market is closed) and pauses itself.', ok: 'Sell everything', danger: true })) ACT.botFlatten(b); });
   },
   async loadChart(p) {
     try {
@@ -3684,8 +3684,9 @@ ACT.botPreview = async el => {
   } catch (e) { toastErr(e); }
   busy(el, false);
 };
-ACT.botRun = async () => {
-  const p = curBot(); if (!p) return;
+ACT.botRun = async btn => {
+  const p = curBot(); if (!p || btn?.classList?.contains('is-busy')) return;
+  busy(btn, true);
   try {
     toast('Deciding…', { kind: 'info', ms: 1500 });
     const r = await post(`bots/${p.id}/run`, {});
@@ -3693,6 +3694,7 @@ ACT.botRun = async () => {
     else toast(r.orders.length ? `${r.orders.length} order${r.orders.length === 1 ? '' : 's'}` : 'No changes needed', { sub: r.orders.map(o => o.text).join('\n') || [...r.risk, ...r.skips].join('\n') || 'Everything already matches the strategy.' });
     await loadState({ quiet: true }); p.load();
   } catch (e) { toastErr(e); }
+  busy(btn, false);
 };
 ACT.botFlatten = async () => {
   const p = curBot(); if (!p) return;
@@ -3898,7 +3900,7 @@ PAGES.newbot = {
     $('#nb-wid', p.body)?.addEventListener('change', e => { m.wallet = +e.target.value; });
     $('#nb-now', p.body).addEventListener('click', e => { e.currentTarget.classList.toggle('on'); m.runNow = e.currentTarget.classList.contains('on'); });
     $('#nb-test', p.body).addEventListener('click', e => this.test(p, e.currentTarget));
-    holdButton($('#nb-go', p.body), () => this.create(p), 700, SET().confirmStyle === 'none' ? 'tap' : 'hold');
+    $('#nb-go', p.body).addEventListener('click', () => this.create(p));
   },
   async test(p, btn) {
     this.save(p); const m = p.m, out = $('#nb-out', p.body); busy(btn, true);
@@ -3911,6 +3913,8 @@ PAGES.newbot = {
   },
   async create(p) {
     this.save(p); const m = p.m, btn = $('#nb-go', p.body);
+    if (btn.classList.contains('is-busy')) return;
+    if (!m.syms.length) { toast('Add at least one symbol for it to trade', { kind: 'err' }); return; }
     busy(btn, true);
     try {
       const r = await post('bots', { name: m.name, strategy: m.strategy, syms: m.syms, params: m.params, mandate: m.mandate, wallet: m.wallet || undefined, start: m.start, profile: m.profile, runNow: m.runNow });

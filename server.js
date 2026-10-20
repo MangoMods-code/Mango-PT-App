@@ -2686,8 +2686,10 @@ async function googleNews(sym) {
 }
 async function finnhubNews(sym) {
   if (!FINNHUB_KEY) return [];
+  // Google News covers headlines too; skip Finnhub when its queue is busy so prices keep flowing.
+  if (!cache.get('news:' + sym)?.v && fhQueue.length > 6) return [];
   try {
-    const list = isCrypto(sym) ? await assetNews(sym) : await assetNews(sym);
+    const list = await Promise.race([assetNews(sym), sleep(4000).then(() => { throw new Error('Finnhub is busy'); })]);
     buzzStatus.finnhub = { ok: true, t: Date.now() };
     return list.map(n => ({ src: 'news', via: n.source, t: n.t, title: n.title, summary: n.summary, url: n.url }));
   } catch (e) { buzzStatus.finnhub = { ok: false, t: Date.now(), err: e.message }; return []; }
@@ -2719,10 +2721,25 @@ async function reddit(sym) {
     return (j.data?.children || []).map(c => c.data).map(p => ({ src: 'social', via: 'r/' + p.subreddit, t: p.created_utc * 1000, title: String(p.title || '').slice(0, 280), summary: String(p.selftext || '').slice(0, 300), url: 'https://www.reddit.com' + p.permalink, likes: p.score || 0 }));
   }).catch(e => { buzzStatus.reddit = { ok: false, t: Date.now(), err: e.message }; return []; });
 }
+// Upcoming earnings for every company in one request (cached 6 hours), so scanning many stocks
+// doesn't use up the Finnhub limit that live prices also need.
+async function earningsCal() {
+  return cached('earncal', 6 * 3600e3, async () => {
+    const d = await fhApi(`calendar/earnings?from=${etDate()}&to=${etDate(Date.now() + 30 * 864e5)}`, 1);
+    const m = {};
+    for (const x of (d?.earningsCalendar || []).sort((a, b) => a.date.localeCompare(b.date))) if (x.symbol && !m[x.symbol]) m[x.symbol] = { date: x.date, hour: x.hour, eps: x.epsEstimate };
+    return m;
+  });
+}
+async function earningsFor(sym) {
+  const ins = cache.get('ins:' + sym)?.v; // the stock page already looked it up
+  if (ins?.next?.date >= etDate()) return { next: ins.next };
+  try { const m = await Promise.race([earningsCal(), sleep(6000).then(() => null)]); return m ? { next: m[sym] || null } : null; } catch (e) { return null; }
+}
 // ---------- the summary ----------
 async function buzzFor(sym) {
   return cached('buzz:' + sym, 10 * 60e3, async () => {
-    const [fh, gn, st, rd, ins] = await Promise.all([finnhubNews(sym), googleNews(sym), stocktwits(sym), reddit(sym), isCrypto(sym) ? null : assetInsights(sym).catch(() => null)]);
+    const [fh, gn, st, rd, ins] = await Promise.all([finnhubNews(sym), googleNews(sym), stocktwits(sym), reddit(sym), isCrypto(sym) ? null : earningsFor(sym)]);
     const now = Date.now(), seen = new Set(), items = [];
     for (const it of [...fh, ...gn, ...st, ...rd]) {
       const key = it.title.toLowerCase().replace(/\W+/g, ' ').slice(0, 70);
@@ -3220,7 +3237,7 @@ async function runBotInner(id, { manual, dry }) {
   const wantBuy = Object.entries(dec.weights).filter(([s, wt]) => wt > 0 && tradable.includes(s));
   if (m.newsFilter && S.f_buzz !== false) {
     const list = [...new Set([...wantBuy.map(([s]) => s), ...Object.keys(held), ...tradable])].slice(0, 24);
-    for (let i = 0; i < list.length; i += 4) await Promise.all(list.slice(i, i + 4).map(s => Promise.race([buzzFor(s), sleep(15000).then(() => null)]).then(x => { if (x) buzz[s] = x; }).catch(() => {})));
+    for (let i = 0; i < list.length; i += 8) await Promise.all(list.slice(i, i + 8).map(s => Promise.race([buzzFor(s), sleep(12000).then(() => null)]).then(x => { if (x) buzz[s] = x; }).catch(() => {})));
   }
   const decisions = {};
   for (const s of new Set([...tradable, ...Object.keys(held)])) {
@@ -3321,6 +3338,7 @@ async function flattenBot(bot, why) {
 }
 // Every minute: run bots whose time has come.
 async function botScheduler() {
+  if (FINNHUB_KEY && S.f_buzz !== false) earningsCal().catch(() => {}); // keep the earnings calendar warm
   const p = etParts(), hm = String(p.h).padStart(2, '0') + ':' + String(p.mi).padStart(2, '0'), today = etDate();
   for (const b of await rows("select * from bots where status='running'")) {
     const m = { ...MANDATE_DEF, ...jsonOr(b.mandate, {}) };
@@ -3949,6 +3967,7 @@ POST('/api/bots', auth, async req => {
   const b = req.body || {}, st = STRATEGIES[b.strategy]; if (!st) fail('Pick a strategy');
   if (+(await row('select count(*) n from bots')).n >= 20) fail('You can have up to 20 bots');
   const name = String(b.name || st.name).trim().slice(0, 30) || st.name;
+  if (FINNHUB_KEY && S.f_buzz !== false) earningsCal().catch(() => {});
   const syms = await cleanBotSyms(b.syms, b.kinds || {}), params = cleanParams(b.strategy, b.params), mandate = cleanMandate(b.mandate || {});
   let wid = +b.wallet || 0;
   if (!wid) {
