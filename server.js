@@ -3361,7 +3361,7 @@ function withLive(b, sym) {
 const running = new Set();
 async function runBot(id, { manual = false, dry = false } = {}) {
   if (running.has(id)) fail('This bot is already deciding. Give it a moment.');
-  running.add(id);
+  running.add(id); if (!dry) broadcast({ t: 'evt', e: 'bot', id, deciding: true });
   try { return await runBotInner(id, { manual, dry }); } finally { running.delete(id); if (!dry) broadcast({ t: 'evt', e: 'bot', id }); }
 }
 async function runBotInner(id, { manual, dry }) {
@@ -4382,14 +4382,64 @@ function healthOf(bot, state, extra = {}) {
   if (FINNHUB_KEY && feeds.stocks.ok === false && market().state === 'open' && bot.syms.some(x => !isCrypto(x))) issues.push({ k: 'stocks', text: 'The live stock price feed is down right now.' });
   return { ok: !issues.some(i => !i.minor), issues, checked: hh.t || null };
 }
+// What a bot is doing right now, in plain words: one headline, one detail line, and a tone for its color.
+function tradingDaysToMonthEnd() { const p = etParts(); let [y, m, d] = [p.y, p.m, p.d], n = 0; for (let i = 0; i < 25; i++) { const nx = nextTradingDay(y, m, d); if (nx[1] !== p.m) break; [y, m, d] = nx; n++; } return n; }
+const listSyms = (a, n = 3) => a.slice(0, n).join(', ') + (a.length > n ? ` +${a.length - n}` : '');
+function botActivity(bot, ctx) {
+  const { holding, last, queued, state, invested, value, health, deciding } = ctx, st = STRATEGIES[bot.strategy] || {};
+  const rows = last?.data?.rows || [], today = etDate(), ranToday = bot.lastDay === today;
+  const skipped = rows.filter(r => (r.why || []).some(w => /^Skipped buying/.test(w)));
+  const skipWhy = r => { const w = (r.why || []).find(x => /^Skipped buying/.test(x)) || ''; return /earnings/.test(w) ? 'earnings' : /serious news/.test(w) ? 'bad news' : /mood/.test(w) ? 'gloomy mood' : 'news'; };
+  const skipText = skipped.length ? `Skipped ${skipped.slice(0, 2).map(r => `${r.sym} (${skipWhy(r)})`).join(', ')}${skipped.length > 2 ? ` +${skipped.length - 2}` : ''}` : '';
+  const pctIn = value > 0 ? Math.round(invested / value * 100) : 0;
+  const A = (k, text, sub, tone = 'up', pulse = false) => ({ k, text, sub, tone, pulse });
+  // states that override everything
+  if (deciding) return A('deciding', 'Deciding right now', `Reading the charts${bot.mandate.newsFilter ? ' and the news' : ''} for ${bot.syms.length} symbol${bot.syms.length === 1 ? '' : 's'}`, 'ac', true);
+  if (bot.status === 'killed') return A('killed', 'Stopped itself', bot.killed ? bot.killed.split('. ')[0] + '.' : 'It hit its drop limit. Restart it when you are ready.', 'dn');
+  if (ctx.broker && S.realHalt) return A('halted', 'Stopped by the kill switch', holding.length ? `Still holding ${listSyms(holding)}; resume in Alpaca controls` : 'Resume in Alpaca controls', 'dn');
+  if (bot.status === 'paused') return A('paused', 'Paused', holding.length ? `Holding ${listSyms(holding)} but making no new decisions` : 'In cash, making no new decisions', '');
+  if (health && !health.ok) { const miss = health.issues.find(i => i.k === 'missed'); if (miss) return A('catchup', 'Catching up on a missed day', 'It decides again at the next chance', 'ac'); }
+  if (queued.length) return A('queued', `Waiting for the open to ${queued.every(q => q.side === 'buy') ? 'buy' : queued.every(q => q.side === 'sell') ? 'sell' : 'trade'} ${listSyms([...new Set(queued.map(q => q.sym))])}`, 'Its orders go in when the market opens', 'ac');
+  if (!bot.lastDay) return A('new', 'Getting ready', 'Its first decision is coming up', 'ac');
+  if (/daily limit/.test(last?.body || '') && ranToday) return A('cooldown', 'Taking a breather', 'It hit today\'s loss limit, so it is only selling until tomorrow', 'dn');
+  // Autopilot
+  if (st.auto) {
+    const alloc = state._alloc || {}, n = Object.keys(alloc).length, risk = state._risk || {};
+    if (!n) return A('sitout', 'Sitting out in cash', 'None of its strategies has a good enough record right now', '');
+    if (risk.brake) return A('brake', 'Brake on, holding half', `It is ${Math.round(Math.abs(bot.peak ? value / bot.peak - 1 : 0) * 100)}% below its high and waits to recover`, 'dn');
+    const top = (state._board || []).filter(t => t.alloc > 0).sort((a, b) => b.alloc - a.alloc)[0];
+    const def = risk.stocksOff || risk.cryptoOff ? ` · safety switch on for ${[risk.stocksOff && 'stocks', risk.cryptoOff && 'crypto'].filter(Boolean).join(' and ')}` : risk.scale < 0.999 ? ` · holding ${Math.round(risk.scale * 100)}% of the plan, markets are choppy` : '';
+    return A('auto', `Running ${n} strateg${n === 1 ? 'y' : 'ies'}, ${pctIn}% invested`, `Biggest: ${top ? top.label + ' ' + Math.round(top.alloc * 100) + '%' : '–'}${def}`, risk.stocksOff || risk.cryptoOff ? 'ac' : 'up');
+  }
+  // what the strategy is doing, by strategy
+  const has = holding.length > 0, hs = listSyms(holding), regime = last?.data?.regime || '';
+  const did = (last?.title || '').replace(/^(Daily decision|Manual run): /, ''), sub = skipText || (ranToday ? (/^No changes/.test(did) || !did ? 'Checked today, nothing to change' : 'Today: ' + did.replace(/^./, c => c.toLowerCase()).replace(/^bought/, 'bought')) : '');
+  switch (bot.strategy) {
+    case 'trend': return has ? A('hold', `Riding the uptrend in ${hs}`, sub || 'Trailing stops follow each one up', 'up') : A('wait', 'In cash, waiting for an uptrend', sub || `Nothing in its list is trending up right now`, '');
+    case 'momentum': return has ? A('hold', `Holding this month's leaders: ${hs}`, sub || 'It reshuffles on the first trading day of next month', 'up') : A('wait', /below/.test(regime) ? 'Playing defense in cash' : 'In cash, nothing is rising', /below/.test(regime) ? `The market filter says stay out: ${regime}` : (sub || 'It checks again next month'), '');
+    case 'rsi2': return has ? A('hold', `Waiting for ${hs} to bounce`, sub || 'It sells on the first bounce or after 10 days', 'up') : A('wait', 'Watching for a sharp dip to buy', sub || `Nothing in ${bot.syms.length} symbols has dipped hard enough yet`, '');
+    case 'snapback': return has ? A('hold', `Waiting for ${hs} to snap back`, sub || 'It sells when the price gets back to its average', 'up') : A('wait', 'Watching for an overreaction', sub || 'It buys when something in an uptrend falls far below its band', '');
+    case 'breakout': return has ? A('hold', `Riding the breakout in ${hs}`, sub || 'It sells if price falls to its 20-day low or its stop', 'up') : A('wait', 'Watching for a breakout', sub || 'It buys a close above the 55-day high', '');
+    case 'drift': return has ? A('hold', `Riding the news jump in ${hs}`, sub || 'It holds each one about a month', 'up') : A('wait', 'Watching for big news jumps', sub || 'It buys a strong jump on heavy volume', '');
+    case 'dual': return has ? (holding.every(x => SAFE.has(x)) ? A('hold', `Playing defense in ${hs}`, sub || 'Stocks are not beating bonds right now', 'ac') : A('hold', `Risk on: holding ${hs}`, sub || 'The strongest asset is beating bonds', 'up')) : A('wait', 'Sitting in cash', sub || 'Stocks and bonds are both falling', '');
+    case 'lowvol': return has ? A('hold', `Holding the calm ones: ${hs}`, sub || 'It reshuffles next month', 'up') : A('wait', 'In cash, nothing calm is rising', sub || 'It checks again next month', '');
+    case 'tom': { const left = tradingDaysToMonthEnd(); return has ? A('hold', `In the month-turn window with ${hs}`, 'It sells a few days into the new month', 'up') : A('wait', 'Waiting for the turn of the month', left <= 0 ? 'The window opens today' : `The window opens in ${left} trading day${left === 1 ? '' : 's'}`, ''); }
+    case 'hold': return has ? A('hold', `Holding ${hs}`, sub || 'It rebalances once a month', 'up') : A('wait', 'Buying the mix next', sub || 'Waiting for prices', '');
+    default: return has ? A('hold', `Holding ${hs}`, sub, 'up') : A('wait', 'In cash, watching', sub, '');
+  }
+}
 async function botCard(b) {
   const bot = botJson(b), w = await row('select * from wallets where id=$1', [b.wid]);
   if (!w) return { ...bot, wallet: null };
   const snaps = (await rows("select ts, eq from snap where wid=$1 and ts > now() - interval '30 days' order by ts", [b.wid])).map(r => [tsMs(r.ts), +r.eq]);
   const pos = await positions(b.wid), value = +w.cash + marketValue(pos);
   const mine = pos.filter(p => bot.syms.includes(p.sym));
-  return { ...bot, wallet: { id: w.id, name: w.name, emoji: w.emoji, color: w.color, profile: w.profile, archived: w.archived, broker: w.broker || null }, value, start: +w.start_bal, ret: (value / +w.start_bal - 1) * 100, day: dayChange(pos),
+  const out = { ...bot, wallet: { id: w.id, name: w.name, emoji: w.emoji, color: w.color, profile: w.profile, archived: w.archived, broker: w.broker || null }, value, start: +w.start_bal, ret: (value / +w.start_bal - 1) * 100, day: dayChange(pos),
     holding: mine.map(p => p.sym), next: nextRunOf(bot), health: healthOf(bot, jsonOr(b.state, {}), { lastError: await row("select ts, title, body from bot_log where bot_id=$1 and kind='error' order by id desc limit 1", [b.id]).then(r => r && { ts: tsMs(r.ts), title: r.title, body: r.body }) }), invested: mine.reduce((t, p) => t + p.qty * (priceOf(p.sym) || p.avg), 0), cash: +w.cash, dd: bot.peak ? value / bot.peak - 1 : 0, spark: downsamplePts(snaps.concat([[Date.now(), value]]), 32).map(x => round(x[1], 2)) };
+  // plain-words status
+  const lastR = await row("select * from bot_log where bot_id=$1 and kind='decision' order by id desc limit 1", [b.id]);
+  out.activity = botActivity(bot, { holding: out.holding, last: lastR && logJson(lastR), queued: [...limOrders.values()].flat().filter(l => l.wid === b.wid && bot.syms.includes(l.sym)), state: jsonOr(b.state, {}), invested: out.invested, value, health: out.health, deciding: running.has(b.id), broker: !!w.broker });
+  return out;
 }
 GET('/api/bots', auth, async () => {
   const list = await rows('select * from bots order by id');

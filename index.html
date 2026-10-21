@@ -889,6 +889,24 @@ button.tile:active { transform: scale(.98); }
 .bot-meta .tag { flex: none; white-space: nowrap; }
 .bot-meta .next-cap { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* plain-words status */
+.bot-act { display: flex; gap: 9px; align-items: flex-start; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); min-width: 0; }
+.bot-act > i { width: 8px; height: 8px; border-radius: 50%; flex: none; margin-top: 6px; background: var(--mu2); }
+.bot-act.tone-up > i { background: var(--up); } .bot-act.tone-dn > i { background: var(--dn); } .bot-act.tone-ac > i { background: var(--ac); }
+.bot-act.pulse > i { animation: bot-pulse 1.4s infinite; box-shadow: 0 0 0 0 color-mix(in srgb, var(--ac) 55%, transparent); }
+.ba-t { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.ba-t b { font-size: 14.5px; font-weight: 700; line-height: 1.3; }
+.ba-t span { font-size: 13px; color: var(--mu); line-height: 1.35; }
+.bot-act.tone-dn b { color: var(--dn); }
+.bot-act.big { margin: 0; padding: 12px 14px; border: 0; border-radius: var(--r); background: var(--card); box-shadow: var(--hi); }
+.bot-act.big b { font-size: 16px; }
+.bot-act.big > i { margin-top: 7px; }
+.bot-card .bot-meta { margin-top: 8px; padding-top: 0; border-top: 0; }
+.bot-card .bot-meta:not(:has(.tag)) .grow { display: none; }
+.bot-next { display: flex; align-items: center; gap: 6px; margin: 8px 4px 0; }
+.bot-next svg { width: 14px; height: 14px; }
+@media (prefers-reduced-motion: reduce) { .bot-act.pulse > i { animation: none; } }
+
 /* ---------- Paper / Alpaca sides ---------- */
 .space-sw { display: inline-flex; gap: 4px; padding: 4px; border-radius: 14px; background: var(--card); box-shadow: var(--hi); margin: 2px 0 10px; }
 .space-sw button { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: 10px; font-size: 14px; font-weight: 650; color: var(--mu); transition: background .2s, color .2s; }
@@ -3600,6 +3618,9 @@ async function brokerBox(el) {
 // Bots: strategies that trade a wallet by themselves, the strategy lab and the news radar
 // ===================================================================
 const BOT_ST = { running: ['Running', 'up'], paused: ['Paused', ''], killed: ['Stopped by its limit', 'dn'] };
+// The plain-words status the server works out; falls back to the old one for older data.
+const actOf = b => b.activity || { text: (BOT_ST[b.status] || [b.status])[0], sub: '', tone: (BOT_ST[b.status] || [, ''])[1] };
+const actLine = (b, cls_ = '') => { const a = actOf(b); return `<div class="bot-act ${cls_} tone-${a.tone || 'mu'} ${a.pulse ? 'pulse' : ''}"><i></i><div class="ba-t"><b>${h(a.text)}</b>${a.sub ? `<span>${h(a.sub)}</span>` : ''}</div></div>`; };
 const FLAG_INFO = { earnings_soon: ['Earnings soon', 'ac'], severe_news: ['Serious news', 'dn'], negative_event: ['Bad news', 'dn'], negative_mood: ['Gloomy mood', 'dn'], positive_mood: ['Upbeat mood', 'up'], attention_spike: ['Lots of attention', 'ac'] };
 const flagChips = (flags = []) => flags.length ? `<div class="flag-row">${flags.map(f => FLAG_INFO[f] ? `<span class="tag ${FLAG_INFO[f][1]}">${FLAG_INFO[f][0]}</span>` : '').join('')}</div>` : '';
 let STRATS = null;
@@ -3652,7 +3673,7 @@ VIEWS.bots = {
     pullToRefresh(el, () => this.load(true));
     on('state', debounce(() => { if (App.tab === 'bots' && Date.now() - (this.t || 0) > 20e3) this.load(); }, 900));
     on('unread', () => { if (App.tab === 'bots') this.load(); });
-    on('bot', debounce(() => { if (App.tab === 'bots') this.load(); }, 500));
+    on('bot', debounce(() => { if (App.tab === 'bots') this.load(); }, 300));
     this.load();
   },
   update() { if (Date.now() - (this.t || 0) > 8e3) this.load(); },
@@ -3693,11 +3714,12 @@ VIEWS.bots = {
   },
 };
 function botCard(b, st) {
-  const s = st[b.strategy] || { name: b.strategy, icon: 'bot' }, [stl, stc] = BOT_ST[b.status] || [b.status, ''];
+  const s = st[b.strategy] || { name: b.strategy, icon: 'bot' };
   return `<button class="bot-card" data-act="go" data-to="bot/${b.id}">
     <div class="bot-top"><div class="bot-ava ${b.status}" style="--hue:${hueOf(b.strategy)}">${icon(s.icon)}</div><div class="main"><div class="title">${h(b.name)}</div><div class="sub">${h(s.name)} · ${b.syms.length} symbol${b.syms.length === 1 ? '' : 's'}</div></div>
       ${b.spark?.length > 2 ? sparkSvg(b.spark, { w: 64, h: 30, cls: 'spark bot-spark', base: b.start }) : ''}<div class="trail col"><b class="n priv">${money(b.value || 0)}</b><span class="n ${cls(b.ret)}">${pct(b.ret)}</span></div></div>
-    <div class="bot-meta"><span class="bot-st ${stc}"><i></i>${stl}</span>${b.wallet?.broker ? '<span class="tag ac">Alpaca</span>' : ''}${b.health && !b.health.ok ? `<span class="tag dn">${icon('info')}Needs a look</span>` : `<span class="ellip">${b.holding.length ? 'Holding ' + b.holding.slice(0, 4).join(', ') + (b.holding.length > 4 ? ` +${b.holding.length - 4}` : '') : 'All cash'}</span>`}<span class="grow"></span><span class="t-cap next-cap">${b.status === 'running' ? h(nextRunText(b.next).replace(/^Decides /, '').replace(/^./, c => c.toUpperCase())) : b.lastRun ? 'Last ran ' + timeAgo(b.lastRun) : ''}</span></div></button>`;
+    ${actLine(b)}
+    <div class="bot-meta">${b.wallet?.broker ? '<span class="tag ac">Alpaca</span>' : ''}${b.health && !b.health.ok ? `<span class="tag dn">${icon('info')}Needs a look</span>` : ''}<span class="grow"></span><span class="t-cap next-cap">${b.status === 'running' ? h(nextRunText(b.next).replace(/^Decides /, 'Next look ')) : b.lastRun ? 'Last ran ' + timeAgo(b.lastRun) : ''}</span></div></button>`;
 }
 function moodBar(v) {
   const w = Math.min(50, Math.abs(v) * 50);
@@ -3730,7 +3752,7 @@ PAGES.bot = {
     const keepScroll = p.scroller.scrollTop;
     p.body.innerHTML = `
       <div class="bot-hero"><div class="bot-ava lg ${b.status}" style="--hue:${hueOf(b.strategy)}">${icon(st.icon)}</div><div class="grow"><button class="bot-name" data-act="botRename" aria-label="Rename this bot"><h1 class="t-display" style="margin:0">${h(b.name)}</h1>${icon('edit')}</button><div class="t-sub">${h(st.name)} · ${h(b.wallet?.emoji || '')} ${h(b.wallet?.name || 'wallet')}${b.broker ? ` · ${b.live ? '<span class="real-badge">REAL MONEY</span>' : 'Alpaca paper'}` : ''}</div></div></div>
-      <div class="bot-status mt12"><span class="bot-st ${stc}"><i></i>${stl}</span><span class="t-foot">${b.status === 'running' ? h(nextRunText(b.next)) : b.status === 'killed' ? h(b.killed || '') : 'Paused: no new decisions until you resume it.'}</span></div>
+      <div class="mt12">${actLine(b, 'big')}</div>${b.status === 'running' && b.next ? `<div class="t-foot bot-next">${icon('clock')}${h(nextRunText(b.next))}</div>` : ''}
       ${healthCard(b)}
       <div class="a-price mt12"><span class="priv">${money(b.value || 0)}</span></div><div class="a-chg ${cls(b.ret)}">${money((b.value || 0) - (b.start || 0), { sign: true })} (${pct(b.ret)}) since it started</div>
       <div class="chart-wrap" id="bot-chart"></div>
