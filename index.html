@@ -959,6 +959,9 @@ button.tile:active { transform: scale(.98); }
 .rc-head { margin-top: 8px; padding: 18px 16px 10px; border-radius: var(--r-xl); background: radial-gradient(120% 120% at 0 0, color-mix(in srgb, var(--bar-c, var(--ac)) 22%, transparent), transparent 65%), var(--card); box-shadow: var(--hi); }
 .rc-eq { font-family: var(--font-num); font-weight: 750; font-size: 38px; letter-spacing: -.03em; margin: 2px 0; }
 
+#login-face { margin-top: 10px; width: 100%; }
+.login-or { text-align: center; font-size: 13px; color: var(--mu); margin: 8px 0 0; }
+
 /* ---------- motion ---------- */
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--up) 55%, transparent); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
@@ -1261,11 +1264,12 @@ async function api(path, o = {}) {
   const url = '/api/' + path + (App.W && !/[?&]w=/.test(path) ? qs + 'w=' + App.W : '');
   let r;
   try {
-    r = await fetch(url, { method, headers: { 'Content-Type': 'application/json', ...(App.T ? { Authorization: 'Bearer ' + App.T } : {}) }, body: o.body ? JSON.stringify(o.body) : undefined, signal: o.signal });
+    r = await fetch(url, { method, headers: { 'Content-Type': 'application/json', ...(App.T ? { Authorization: 'Bearer ' + App.T } : {}), ...(App.step && App.step.until > Date.now() ? { 'X-Step': App.step.t } : {}) }, body: o.body ? JSON.stringify(o.body) : undefined, signal: o.signal });
   } catch (e) { if (e.name === 'AbortError') throw e; throw new ApiError("Can't reach Mango. Check your connection.", 0); }
   if (o.raw) return r;
   let j = {}; try { j = await r.json(); } catch (e) {}
   if (r.status === 401 && path !== 'login') { logout(true); throw new ApiError('Please log in again', 401); }
+  if (r.status === 428 && j.step && !o.stepped) { App.step = null; await faceStep(); return api(path, { ...o, stepped: true }); } // Face ID, then try once more
   if (!r.ok) throw new ApiError(j.error || 'Something went wrong', r.status);
   return j;
 }
@@ -4224,6 +4228,7 @@ const spaceSwitch = () => `<div class="space-sw" role="tablist" aria-label="Pape
 ACT.space = el => setSpace(el.dataset.sp);
 async function setSpace(sp) {
   if ((sp === 'real') === isRealSpace()) return;
+  if (sp === 'real' && brokerW() && SET().faceReal !== false) { try { const n = (await api('passkey/available')).count; if (n) await faceStep(); } catch (e) { toastErr(e); return; } }
   if (sp === 'real') store.set('wallet:paper', App.W);
   store.set('space', sp);
   pickSpaceWallet();
@@ -4334,6 +4339,123 @@ ACT.promote = async el => {
 };
 
 // ===================================================================
+// Face ID (passkeys) and backups
+// ===================================================================
+const hasPasskeyApi = () => !!(window.PublicKeyCredential && navigator.credentials?.create);
+const b64uEnc = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const b64uDec = s => { s = String(s).replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u.buffer; };
+const faceWord = () => /iPhone|iPad|Mac/.test(navigator.userAgent) ? 'Face ID' : 'your device lock';
+// Ask the phone to sign a challenge. Returns what the server needs to check it.
+async function passkeyGet(opts) {
+  const cred = await navigator.credentials.get({ publicKey: { challenge: b64uDec(opts.challenge), rpId: opts.rpId, userVerification: 'required', timeout: 60000, allowCredentials: (opts.allow || []).map(id => ({ type: 'public-key', id: b64uDec(id) })) } });
+  const r = cred.response;
+  return { id: cred.id, clientDataJSON: b64uEnc(r.clientDataJSON), authenticatorData: b64uEnc(r.authenticatorData), signature: b64uEnc(r.signature) };
+}
+// A fresh Face ID check for real money and account changes; good for 10 minutes.
+App.step = null;
+async function faceStep() {
+  if (App.step && App.step.until > Date.now() + 5000) return true;
+  if (!hasPasskeyApi()) throw new ApiError('This browser can\'t use Face ID. Turn off "Ask for Face ID" in Settings → Face ID and backups, from a device that can.', 400);
+  const opts = await post('passkey/step-options');
+  let a; try { a = await passkeyGet(opts); } catch (e) { throw new ApiError('Face ID was cancelled', 400); }
+  const r = await post('passkey/step', a);
+  App.step = { t: r.step, until: r.until };
+  return true;
+}
+async function faceLogin() {
+  const err = $('#login-err'), btn = $('#login-face'); err.textContent = '';
+  busy(btn, true);
+  try {
+    const opts = await api('passkey/login-options', { method: 'POST', body: {} });
+    let a; try { a = await passkeyGet(opts); } catch (e) { busy(btn, false); err.textContent = `${faceWord()} was cancelled. Try again or use your password.`; return; }
+    const r = await api('passkey/login', { method: 'POST', body: a });
+    setToken(r.token); App.step = { t: r.step, until: Date.now() + 9.5 * 60e3 };
+    await loadState();
+  } catch (x) { busy(btn, false); err.textContent = x.message; return; }
+  busy(btn, false); startApp();
+}
+// Show the Face ID button on the login screen when a passkey exists.
+async function setupLoginFace() {
+  if (!hasPasskeyApi()) return;
+  try {
+    const r = await fetch('/api/passkey/available').then(x => x.json());
+    if (!r.count || $('#login-face')) return;
+    const b = document.createElement('button'); b.type = 'button'; b.id = 'login-face'; b.className = 'btn btn-quiet btn-lg'; b.innerHTML = `${icon('lock')}Log in with ${faceWord()}`;
+    $('#login-go').after(b); b.addEventListener('click', faceLogin);
+    const or = document.createElement('p'); or.className = 'login-or'; or.textContent = 'or use your password above'; b.after(or);
+  } catch (e) {}
+}
+setupLoginFace();
+
+PAGES.security = {
+  mount(p) {
+    p.title('Face ID and backups', true);
+    p.body.innerHTML = `<div class="sk sk-block mt16"></div><div class="sk sk-block mt12"></div>`;
+    p.load = async () => { try { const [keys, bk] = await Promise.all([api('passkeys'), api('backups')]); p.keys = keys; p.bk = bk; this.draw(p); } catch (e) { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; } };
+    p.load();
+  },
+  draw(p) {
+    const keys = p.keys, bk = p.bk, fw = faceWord(), on = SET().faceReal !== false;
+    const kb = n => n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+    const kindLabel = k => ({ auto: 'Nightly', manual: 'Made by you', 'before-restore': 'Before a restore' })[k] || k;
+    p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Face ID and backups</h1>
+      <div class="section-h"><h2>${fw === 'Face ID' ? 'Face ID' : 'Passkey'}</h2>${keys.length ? `<span class="tag up">On</span>` : ''}</div>
+      ${keys.length ? `<div class="group">${keys.map(k => `<div class="cell"><div class="lead">${icon('lock')}</div><div class="main"><div class="title">${h(k.name)}</div><div class="sub">Added ${fmtDate(k.created)}${k.last ? ' · last used ' + timeAgo(k.last) : ''}</div></div><button class="icon-btn" data-x="delkey" data-id="${h(k.id)}" aria-label="Remove">${icon('trash')}</button></div>`).join('')}
+        <div class="cell"><div class="main"><div class="title">Ask for ${fw} for real money</div><div class="sub">Alpaca orders, moving bots to Alpaca, password changes, restores and logging out everywhere. Good for 10 minutes each time. The kill switch never asks.</div></div>${sw(on, 'id="sec-real"')}</div></div>
+        <button class="btn btn-quiet btn-block mt12" data-x="addkey">${icon('plus')}Add another device</button>`
+        : `<div class="card"><p class="t-sub" style="margin:0 0 12px">Log in with ${fw} instead of typing your password, and have Mango ask for ${fw} before anything that touches real money or your account. Your face never leaves your phone; Mango only stores a key that can check a signature.</p><button class="btn btn-primary btn-block btn-lg" data-x="addkey" ${hasPasskeyApi() ? '' : 'disabled'}>${icon('lock')}Set up ${fw}</button>${hasPasskeyApi() ? '' : '<p class="note">This browser can\'t make passkeys. Open Mango from the Home Screen on your iPhone.</p>'}</div>`}
+      <p class="note">Your password still works as a backup way in. Passkeys are tied to this web address; if the app's address ever changes, set ${fw} up again.</p>
+      <div class="section-h"><h2>Backups</h2></div>
+      <div class="group"><div class="cell"><div class="main"><div class="title">Back up every night</div><div class="sub">Around 3 AM. Keeps the last 7 nights.</div></div>${sw(bk.on, 'id="sec-auto"')}</div></div>
+      <div class="btns mt12"><button class="btn btn-quiet" data-x="now">${icon('refresh')}Back up now</button><button class="btn btn-primary" data-x="dl">${icon('download')}Download a copy</button></div>
+      <p class="note">Saved backups live in your Railway database, which protects against mistakes. A downloaded copy (save it to Files or iCloud) also protects against losing the database itself. It holds every wallet, bot, trade and setting; prices come back by themselves.</p>
+      ${bk.list.length ? `<div class="section-h"><h2>Saved</h2><span class="t-foot">${bk.list.length}</span></div><div class="group">${bk.list.map(b => `<div class="cell"><div class="lead">${icon('database')}</div><div class="main"><div class="title">${fmtDT(b.ts)}</div><div class="sub">${kindLabel(b.kind)} · ${kb(b.size)}</div></div><button class="btn btn-sm btn-quiet" data-x="dlid" data-id="${b.id}">${icon('download')}</button><button class="btn btn-sm btn-quiet" data-x="restore" data-id="${b.id}">Restore</button></div>`).join('')}</div>` : ''}
+      <button class="btn btn-quiet btn-block mt12" data-x="upload">${icon('upload')}Restore from a downloaded file</button><input type="file" id="sec-file" accept=".gz,application/gzip" hidden>`;
+    $('#sec-real', p.body)?.addEventListener('click', async e => { const el = e.currentTarget, v = !el.classList.contains('on'); try { await saveSetting({ faceReal: v }); el.classList.toggle('on', v); } catch (x) { toastErr(x); } });
+    $('#sec-auto', p.body).addEventListener('click', e => { const el = e.currentTarget, v = !el.classList.contains('on'); el.classList.toggle('on', v); saveSetting({ autoBackup: v }); });
+    $('#sec-file', p.body).addEventListener('change', async e => {
+      const f = e.target.files[0]; if (!f) return;
+      const buf = await f.arrayBuffer(); let bin = ''; const u = new Uint8Array(buf); for (let i = 0; i < u.length; i += 32768) bin += String.fromCharCode(...u.subarray(i, i + 32768));
+      this.restore(p, { file: btoa(bin) }, f.name); e.target.value = '';
+    });
+    p.body.onclick = async e => {
+      const b = e.target.closest('[data-x]'); if (!b) return; const x = b.dataset.x;
+      try {
+        if (x === 'addkey') await this.addKey(p);
+        if (x === 'delkey') { if (!(await confirmBox({ title: 'Remove this device?', msg: `It won't be able to log in with ${faceWord()} anymore.`, ok: 'Remove', danger: true }))) return; await del('passkeys/' + encodeURIComponent(b.dataset.id)); toast('Removed'); p.load(); }
+        if (x === 'now') { busy(b, true); const r = await post('backups'); busy(b, false); toast('Backup saved', { sub: kb(r.size) }); p.load(); }
+        if (x === 'dl' || x === 'dlid') await this.download(x === 'dlid' ? b.dataset.id : null);
+        if (x === 'restore') this.restore(p, { id: +b.dataset.id }, fmtDT(bk.list.find(k => k.id === +b.dataset.id)?.ts));
+        if (x === 'upload') $('#sec-file', p.body).click();
+      } catch (err) { busy(b, false); toastErr(err); }
+    };
+  },
+  async addKey(p) {
+    const o = await post('passkey/register-options');
+    let cred;
+    try {
+      cred = await navigator.credentials.create({ publicKey: { challenge: b64uDec(o.challenge), rp: o.rp, user: { id: b64uDec(o.user.id), name: o.user.name, displayName: o.user.displayName }, pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }], authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' }, attestation: 'none', timeout: 60000, excludeCredentials: (o.exclude || []).map(c => ({ type: 'public-key', id: b64uDec(c.id) })) } });
+    } catch (e) { if (e.name === 'InvalidStateError') throw new ApiError('This device is already set up.', 400); throw new ApiError(`${faceWord()} setup was cancelled.`, 400); }
+    const name = /iPhone/.test(navigator.userAgent) ? 'iPhone' : /iPad/.test(navigator.userAgent) ? 'iPad' : /Mac/.test(navigator.userAgent) ? 'Mac' : /Windows/.test(navigator.userAgent) ? 'Windows PC' : 'This device';
+    await post('passkey/register', { name, clientDataJSON: b64uEnc(cred.response.clientDataJSON), attestationObject: b64uEnc(cred.response.attestationObject) });
+    toast(`${faceWord()} is set up`, { sub: 'Next time, log in without your password.' });
+    p.load();
+  },
+  async download(id) {
+    const r = await api('backup/download' + (id ? '?id=' + id : ''), { raw: true });
+    if (!r.ok) throw new ApiError('Download failed', r.status);
+    const blob = await r.blob(), url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = `mango-backup-${new Date().toISOString().slice(0, 10)}.json.gz`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+    toast('Backup downloaded', { sub: 'Keep it in Files or iCloud Drive' });
+  },
+  async restore(p, body, label) {
+    const ok = await askText({ title: 'Restore this backup?', msg: `Everything in Mango (wallets, bots, trades, settings) is replaced with the backup from ${label || 'that file'}. A copy of what you have now is saved first. Type RESTORE to continue.`, placeholder: 'RESTORE', ok: 'Restore' });
+    if (ok == null) return;
+    try { toast('Restoring…', { kind: 'info', ms: 2000 }); const r = await post('backup/restore', { ...body, confirm: ok.trim().toUpperCase() }); toast('Backup restored', { sub: `${r.tables} tables from ${fmtDT(r.made)}` }); await loadState(); rerenderAll(); p.load(); } catch (e) { toastErr(e); }
+  },
+};
+
+// ===================================================================
 // Settings
 // ===================================================================
 function applyLook(s) {
@@ -4384,6 +4506,7 @@ PAGES.settings = {
     return `<div class="set-hero"><svg viewBox="0 0 120 120" class="av"><use href="#mango-mark"/></svg><div><div class="t-title">Mango</div><div class="t-foot">Logged in as ${h(S.user || 'you')} · ${(S.wallets || []).filter(w => !w.archived).length} wallet${(S.wallets || []).length === 1 ? '' : 's'}</div></div></div>
       <div class="group mt16">${Object.entries(SECTIONS).map(([k, v]) => rowLink(v.icon, v.title, v.sub, 'settings/' + k)).join('')}</div>
       <div class="group mt16">${rowLink('wallet', 'Wallets', 'Create, rename, reset, move cash', 'wallets')}${rowToggle('hideBalances', 'Hide balances', 'Blur dollar amounts. Press and hold to peek.')}</div>
+      <div class="group mt16">${rowLink('lock', 'Face ID and backups', 'Log in with Face ID, protect real money, save your data', 'security')}</div>
       <div class="group mt16"><button class="cell" data-act="changePass"><div class="lead">${icon('key')}</div><div class="main"><div class="title">Change password</div></div>${icon('right', 'chev')}</button><button class="cell" data-act="logout"><div class="lead">${icon('logout')}</div><div class="main"><div class="title">Log out of this device</div></div></button><button class="cell" data-act="logoutAll"><div class="lead" style="color:var(--dn)">${icon('lock')}</div><div class="main"><div class="title">Log out everywhere</div><div class="sub">Signs out every phone and computer</div></div></button></div>
       <p class="note center">Mango · build ${h(BUILD.slice(0, 7))} · ${S.broker?.on && S.broker.env === 'live' ? 'a live Alpaca account is connected' : 'practice money only'}</p>`;
   },

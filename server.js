@@ -96,7 +96,7 @@ const server = http.createServer(async (req, res) => {
   const m = req.path.match(r.re); req.params = {};
   r.keys.forEach((k, i) => { try { req.params[k] = decodeURIComponent(m[i + 1]); } catch (e) { req.params[k] = m[i + 1]; } });
   try {
-    req.body = ['POST', 'PATCH', 'PUT', 'DELETE'].includes(method) ? await readBody(req) : {};
+    req.body = ['POST', 'PATCH', 'PUT', 'DELETE'].includes(method) ? await readBody(req, req.path === '/api/backup/restore' ? 60 * 1024 * 1024 : undefined) : {};
     let out;
     for (const h of r.handlers) { out = await h(req, res); if (res.headersSent) return; }
     if (out === undefined) out = { ok: true };
@@ -104,7 +104,7 @@ const server = http.createServer(async (req, res) => {
   } catch (e) {
     const status = e.status || 500;
     if (status >= 500) warn(req.method, req.path, e.stack || e.message);
-    send(req, res, status, { error: status >= 500 ? 'Something went wrong on the server. Try again in a moment.' : e.message });
+    send(req, res, status, { error: status >= 500 ? 'Something went wrong on the server. Try again in a moment.' : e.message, ...(e.step ? { step: true } : {}) });
   }
 });
 
@@ -271,6 +271,13 @@ const MIGRATIONS = [
   },
   // 4: daily price history kept in the database, so bots keep working when a data source is down
   async c => { await c.query('create table if not exists bars(sym text primary key, data text not null, t timestamptz not null default now(), src text)'); },
+  // 5: Face ID / passkeys, and automatic backups
+  async c => {
+    await c.query(`
+      create table if not exists passkeys(id text primary key, pub text not null, alg int not null, counter bigint not null default 0, name text, rp text, created timestamptz not null default now(), last_used timestamptz);
+      create table if not exists backups(id serial primary key, ts timestamptz not null default now(), kind text not null default 'auto', size int not null, data text not null, note text);
+    `);
+  },
 ];
 
 async function migrate() {
@@ -293,7 +300,7 @@ const DEF = {
   confirmStyle: 'hold', confirmBuy: false, confirmSell: true, cashAPY: 0, startBalance: 10000,
   // notifications
   pushAlerts: true, pushOrders: true, notifySummary: true, notifyMoves: true, moveThreshold: 5,
-  notifyAchv: true, notifyGames: true, pushBots: true, botWeekly: true, pushReal: true, realDailyLossPct: 3, realHalt: false, quietStart: '', quietEnd: '',
+  notifyAchv: true, notifyGames: true, pushBots: true, botWeekly: true, pushReal: true, realDailyLossPct: 3, realHalt: false, faceReal: true, autoBackup: true, quietStart: '', quietEnd: '',
   // look and feel
   hideBalances: false, showCents: true, compactNums: false, defaultRange: '1D', defaultChart: 'Candles',
   theme: 'mango', accent: 'mango', plColors: 'classic', roundedNums: true, reduceMotion: false, celebrate: true,
@@ -3842,6 +3849,7 @@ function auth(req) {
   const t = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   if (!tokenValid(t)) fail('Please log in again', 401);
   req.token = t;
+  stepCheck(req); // a fresh Face ID check for real money and account changes, once Face ID is set up
 }
 
 POST('/api/login', async req => {
@@ -4661,6 +4669,204 @@ POST('/api/bots/:id/promote', auth, async req => {
 });
 
 // =====================================================================
+// Face ID (passkeys, WebAuthn) and backups
+// Passkeys: the phone keeps a private key behind Face ID; the server stores only the public key and
+// checks a signature over a one-time challenge. No password crosses the network.
+// =====================================================================
+// ---------- a small CBOR reader (enough for WebAuthn) ----------
+function cborDecode(buf, pos = 0) {
+  const head = buf[pos++], major = head >> 5, info = head & 31;
+  const readLen = () => { if (info < 24) return info; if (info === 24) return buf[pos++]; if (info === 25) { const v = buf.readUInt16BE(pos); pos += 2; return v; } if (info === 26) { const v = buf.readUInt32BE(pos); pos += 4; return v; } if (info === 27) { const v = Number(buf.readBigUInt64BE(pos)); pos += 8; return v; } throw new Error('CBOR length'); };
+  if (major === 0) { const v = readLen(); return [v, pos]; }
+  if (major === 1) { const v = readLen(); return [-1 - v, pos]; }
+  if (major === 2) { const n = readLen(); const v = buf.subarray(pos, pos + n); return [Buffer.from(v), pos + n]; }
+  if (major === 3) { const n = readLen(); const v = buf.toString('utf8', pos, pos + n); return [v, pos + n]; }
+  if (major === 4) { const n = readLen(), a = []; for (let i = 0; i < n; i++) { const [v, p] = cborDecode(buf, pos); a.push(v); pos = p; } return [a, pos]; }
+  if (major === 5) { const n = readLen(), m = new Map(); for (let i = 0; i < n; i++) { const [k, p1] = cborDecode(buf, pos); const [v, p2] = cborDecode(buf, p1); m.set(k, v); pos = p2; } return [m, pos]; }
+  if (major === 6) { readLen(); return cborDecode(buf, pos); }
+  if (major === 7) { if (info === 20) return [false, pos]; if (info === 21) return [true, pos]; if (info === 22 || info === 23) return [null, pos]; if (info === 25) return [0, pos + 2]; if (info === 26) return [buf.readFloatBE(pos), pos + 4]; if (info === 27) return [buf.readDoubleBE(pos), pos + 8]; }
+  throw new Error('CBOR type ' + major);
+}
+const b64u = b => Buffer.from(b).toString('base64url');
+const fromB64u = s => Buffer.from(String(s || ''), 'base64url');
+function coseToJwk(cose) {
+  const kty = cose.get(1), alg = cose.get(3);
+  if (kty === 2) { if (cose.get(-1) !== 1) throw new Error('Only P-256 keys are supported'); return { alg: alg || -7, jwk: { kty: 'EC', crv: 'P-256', x: b64u(cose.get(-2)), y: b64u(cose.get(-3)) } }; }
+  if (kty === 3) return { alg: alg || -257, jwk: { kty: 'RSA', n: b64u(cose.get(-1)), e: b64u(cose.get(-2)) } };
+  throw new Error('Unsupported key type');
+}
+function parseAuthData(ad) {
+  const out = { rpIdHash: ad.subarray(0, 32), flags: ad[32], counter: ad.readUInt32BE(33) };
+  if (out.flags & 0x40) {
+    const credLen = ad.readUInt16BE(53), credId = ad.subarray(55, 55 + credLen);
+    const [cose] = cborDecode(ad, 55 + credLen);
+    out.credId = credId; out.cose = cose;
+  }
+  return out;
+}
+// The site's name for passkeys (its host name) and the exact origin the browser must report.
+function rpOf(req) {
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  const name = host.replace(/:\d+$/, ''), local = /^(localhost|127\.0\.0\.1)$/.test(name);
+  const proto = local ? 'http' : 'https';
+  return { id: name, origins: [`${proto}://${host}`, `https://${name}`] };
+}
+const pkChallenges = new Map(); // challenge -> { kind, t }
+function newChallenge(kind) { const c = b64u(crypto.randomBytes(32)); pkChallenges.set(c, { kind, t: Date.now() }); for (const [k, v] of pkChallenges) if (Date.now() - v.t > 5 * 60e3) pkChallenges.delete(k); return c; }
+function checkClient(req, clientDataJSON, kind) {
+  const cd = JSON.parse(fromB64u(clientDataJSON).toString('utf8')), rp = rpOf(req);
+  if (cd.type !== (kind === 'reg' ? 'webauthn.create' : 'webauthn.get')) fail('That Face ID response was for something else.');
+  const ch = pkChallenges.get(cd.challenge); if (!ch || (kind === 'reg') !== (ch.kind === 'reg')) fail('That Face ID request expired. Try again.', 401);
+  pkChallenges.delete(cd.challenge);
+  if (!rp.origins.includes(cd.origin)) fail('Face ID was used from a different website.', 401);
+  return { rp, kind: ch.kind };
+}
+const passkeyCount = async () => +(await row('select count(*) n from passkeys')).n;
+GET('/api/passkey/available', async () => ({ count: await passkeyCount() }));
+GET('/api/passkeys', auth, async () => (await rows('select id, name, created, last_used from passkeys order by created')).map(r => ({ id: r.id, name: r.name, created: tsMs(r.created), last: tsMs(r.last_used) })));
+POST('/api/passkey/register-options', auth, async req => {
+  if (await passkeyCount() >= 10) fail('You can have up to 10 passkeys');
+  const rp = rpOf(req), existing = (await rows('select id from passkeys')).map(r => ({ type: 'public-key', id: r.id }));
+  return { challenge: newChallenge('reg'), rp: { name: 'Mango', id: rp.id }, user: { id: b64u(Buffer.from('mango-' + APP_USER)), name: APP_USER, displayName: 'Mango' }, exclude: existing };
+});
+POST('/api/passkey/register', auth, async req => {
+  const b = req.body || {}, { rp } = checkClient(req, b.clientDataJSON, 'reg');
+  const [att] = cborDecode(fromB64u(b.attestationObject));
+  const ad = parseAuthData(att.get('authData'));
+  if (!ad.rpIdHash.equals(crypto.createHash('sha256').update(rp.id).digest())) fail('That passkey is for a different website.');
+  if (!(ad.flags & 0x01) || !(ad.flags & 0x04)) fail('Face ID didn\'t confirm it was you. Try again.');
+  if (!ad.credId) fail('No key came back from Face ID.');
+  const { alg, jwk } = coseToJwk(ad.cose);
+  crypto.createPublicKey({ key: jwk, format: 'jwk' }); // throws if the key is malformed
+  const id = b64u(ad.credId), name = String(b.name || 'This iPhone').slice(0, 40);
+  await Q('insert into passkeys(id,pub,alg,counter,name,rp) values($1,$2,$3,$4,$5,$6) on conflict(id) do nothing', [id, JSON.stringify(jwk), alg, ad.counter, name, rp.id]);
+  await refreshPasskeysOn();
+  return { ok: true, id };
+});
+async function verifyAssertion(req, b, kind) {
+  checkClient(req, b.clientDataJSON, kind);
+  const pk = await row('select * from passkeys where id=$1', [b.id]); if (!pk) fail('That passkey isn\'t set up on Mango anymore. Log in with your password.', 401);
+  const rp = rpOf(req), ad = fromB64u(b.authenticatorData), info = parseAuthData(ad);
+  if (!info.rpIdHash.equals(crypto.createHash('sha256').update(rp.id).digest())) fail('That passkey is for a different website.', 401);
+  if (!(info.flags & 0x01) || !(info.flags & 0x04)) fail('Face ID didn\'t confirm it was you.', 401);
+  const data = Buffer.concat([ad, crypto.createHash('sha256').update(fromB64u(b.clientDataJSON)).digest()]);
+  const key = crypto.createPublicKey({ key: JSON.parse(pk.pub), format: 'jwk' });
+  const ok = crypto.verify('sha256', data, key, fromB64u(b.signature));
+  if (!ok) fail('Face ID check failed.', 401);
+  if (+pk.counter > 0 && info.counter > 0 && info.counter <= +pk.counter) fail('That passkey looks copied. Log in with your password.', 401);
+  await Q('update passkeys set counter=$1, last_used=now() where id=$2', [info.counter, pk.id]);
+  return pk;
+}
+POST('/api/passkey/login-options', async req => { rateLimit(clientIp(req)); return { challenge: newChallenge('login'), rpId: rpOf(req).id }; });
+POST('/api/passkey/login', async req => {
+  const ip = clientIp(req); rateLimit(ip);
+  await verifyAssertion(req, req.body || {}, 'login');
+  tries.delete(ip);
+  return { token: newToken(), step: newStep() };
+});
+// Step-up: a fresh Face ID check, good for 10 minutes, for anything touching real money or the account.
+const STEP_MS = 10 * 60e3;
+const newStep = () => sign('s' + (Date.now() + STEP_MS));
+function stepValid(t) { t = String(t || ''); const e = t.split('.')[0]; if (!/^s\d+$/.test(e) || +e.slice(1) < Date.now()) return false; return safeEq(sign(e), t); }
+POST('/api/passkey/step-options', auth, async req => ({ challenge: newChallenge('step'), rpId: rpOf(req).id, allow: (await rows('select id from passkeys')).map(r => r.id) }));
+POST('/api/passkey/step', auth, async req => { await verifyAssertion(req, req.body || {}, 'step'); return { step: newStep(), until: Date.now() + STEP_MS }; });
+DEL('/api/passkeys/:id', auth, async req => { await Q('delete from passkeys where id=$1', [req.params.id]); await refreshPasskeysOn(); return { ok: true }; });
+// Which requests need a fresh Face ID check (only once a passkey exists and the setting is on).
+let passkeysOn = false;
+async function refreshPasskeysOn() { passkeysOn = (await passkeyCount().catch(() => 0)) > 0; }
+setInterval(() => refreshPasskeysOn(), 60e3);
+function needsStep(req) {
+  if (req.method === 'GET') return false;
+  const p = req.path, w = walletMeta.get(+(req.query.w || req.body?.w || 0));
+  if (/^\/api\/passkey\//.test(p) || p === '/api/login' || p === '/api/real/kill') return false; // the kill switch never waits
+  if (p.startsWith('/api/passkeys/') || p === '/api/backup/restore' || p === '/api/password' || p === '/api/logout-all' || p === '/api/import' || p === '/api/real/resume' || p === '/api/broker/link' || /^\/api\/bots\/\d+\/promote$/.test(p)) return true;
+  if (p === '/api/settings' && (req.body?.faceReal === false || req.body?.faceReal === 'false')) return true;
+  if (/^\/api\/bots\/\d+$/.test(p) && req.method === 'PATCH' && req.body?.mandate?.allowLive) return true;
+  if (w?.broker && ['/api/trade', '/api/order', '/api/limit'].includes(p) && req.method === 'POST') return true;
+  if (w?.broker && /^\/api\/order\/[^/]+$/.test(p) && req.method === 'PATCH') return true;
+  return false;
+}
+function stepCheck(req) {
+  if (!passkeysOn || S.faceReal === false || !needsStep(req)) return;
+  if (stepValid(req.headers['x-step'])) return;
+  throw Object.assign(new HttpError(428, 'Confirm with Face ID to do this.'), { step: true });
+}
+
+// ---------- backups ----------
+const BACKUP_SKIP = new Set(['backups', 'bars', 'prices']); // price data comes back on its own
+async function backupTables() { return (await rows("select table_name t from information_schema.tables where table_schema='public' and table_type='BASE TABLE' order by 1")).map(r => r.t).filter(t => !BACKUP_SKIP.has(t)); }
+async function makeBackup() {
+  const out = { app: 'mango', v: 1, made: new Date().toISOString(), schema: +(await kvGet('schema', '0')), tables: {} };
+  for (const t of await backupTables()) {
+    const cols = (await rows("select column_name c from information_schema.columns where table_schema='public' and table_name=$1 order by ordinal_position", [t])).map(r => r.c);
+    const data = (await pool.query(`select * from "${t}"`)).rows;
+    out.tables[t] = { cols, rows: data.map(r => cols.map(c => r[c] instanceof Date ? r[c].toISOString() : Buffer.isBuffer(r[c]) ? { $b: r[c].toString('base64') } : r[c])) };
+  }
+  return zlib.gzipSync(Buffer.from(JSON.stringify(out)), { level: 9 });
+}
+async function saveBackup(kind = 'auto', note = null) {
+  const gz = await makeBackup();
+  await Q('insert into backups(kind,size,data,note) values($1,$2,$3,$4)', [kind, gz.length, gz.toString('base64'), note]); // stored as text so any Postgres client handles it
+  await Q("delete from backups where kind='auto' and id not in (select id from backups where kind='auto' order by id desc limit 7)");
+  await Q("delete from backups where kind<>'auto' and id not in (select id from backups where kind<>'auto' order by id desc limit 5)");
+  return gz.length;
+}
+async function restoreBackup(gz) {
+  let d; try { d = JSON.parse(zlib.gunzipSync(gz).toString('utf8')); } catch (e) { fail('That file isn\'t a Mango backup.'); }
+  if (d.app !== 'mango' || !d.tables) fail('That file isn\'t a Mango backup.');
+  const cur = +(await kvGet('schema', '0'));
+  if (d.schema > cur) fail('That backup is from a newer version of Mango. Update the app first.');
+  await saveBackup('before-restore', 'Saved automatically before a restore');
+  const tables = await backupTables();
+  await tx(async c => {
+    for (const t of tables) if (d.tables[t]) await c.query(`delete from "${t}"`);
+    for (const [t, v] of Object.entries(d.tables)) {
+      if (!tables.includes(t) || !v.rows.length) continue;
+      const have = new Set((await c.query("select column_name c from information_schema.columns where table_schema='public' and table_name=$1", [t])).rows.map(r => r.c));
+      const idx = v.cols.map((c, i) => [c, i]).filter(([c]) => have.has(c));
+      for (let i = 0; i < v.rows.length; i += 400) {
+        const chunk = v.rows.slice(i, i + 400), vals = [], ph = [];
+        for (const r of chunk) { ph.push('(' + idx.map(([, k]) => { const x = r[k]; vals.push(x && typeof x === 'object' && x.$b ? Buffer.from(x.$b, 'base64') : x !== null && typeof x === 'object' ? JSON.stringify(x) : x); return '$' + vals.length; }).join(',') + ')'); }
+        await c.query(`insert into "${t}"(${idx.map(([c]) => `"${c}"`).join(',')}) values ${ph.join(',')}`, vals);
+      }
+      // keep id counters past the restored rows
+      const seq = have.has('id') ? (await c.query("select pg_get_serial_sequence($1, 'id') s", [t])).rows[0]?.s : null;
+      if (seq) await c.query(`select setval($1, greatest((select coalesce(max(id), 0) from "${t}"), 1))`, [seq]);
+    }
+  });
+  await migrate(); // brings an older backup up to today's version
+  await loadSettings(); await loadOrders(); await refreshUserSyms(); await refreshPasskeysOn();
+  return { tables: Object.keys(d.tables).length, made: d.made };
+}
+GET('/api/backups', auth, async () => ({ on: S.autoBackup !== false, list: (await rows('select id, ts, kind, size, note from backups order by id desc')).map(r => ({ id: r.id, ts: tsMs(r.ts), kind: r.kind, size: r.size, note: r.note })) }));
+POST('/api/backups', auth, async () => ({ size: await saveBackup('manual', 'Made by you') }));
+GET('/api/backup/download', auth, async (req, res) => {
+  const saved = req.query.id ? (await row('select data from backups where id=$1', [+req.query.id]))?.data : null, gz = req.query.id ? (saved ? Buffer.from(saved, 'base64') : null) : await makeBackup();
+  if (!gz) fail('That backup is gone', 404);
+  send(req, res, 200, gz, 'application/gzip', { 'Content-Encoding': 'identity', 'Content-Disposition': `attachment; filename="mango-backup-${etDate()}.json.gz"` });
+});
+POST('/api/backup/restore', auth, async req => {
+  const b = req.body || {};
+  if (b.confirm !== 'RESTORE') fail('Type RESTORE to confirm. Everything in Mango is replaced by the backup.');
+  let gz;
+  if (b.id) { const d = (await row('select data from backups where id=$1', [+b.id]))?.data; gz = d ? Buffer.from(d, 'base64') : null; }
+  else if (b.file) gz = Buffer.from(String(b.file), 'base64');
+  if (!gz) fail('Pick a backup to restore');
+  const r = await restoreBackup(gz);
+  broadcast({ t: 'evt', e: 'settings' });
+  return r;
+});
+// Every night around 3 AM New York time.
+async function backupJob() {
+  if (S.autoBackup === false) return;
+  const p = etParts(), today = etDate();
+  if (p.h < 3 || (await kvGet('job_backup')) === today) return;
+  await kvSet('job_backup', today);
+  const size = await saveBackup('auto');
+  log(`Backup saved (${Math.round(size / 1024)} KB)`);
+}
+
+// =====================================================================
 // Background jobs
 // =====================================================================
 fillCbs.push(async f => {
@@ -4758,6 +4964,7 @@ function startJobs() {
   every(fast ? 5e3 : 60e3, marginWatch, 'margin');
   every(fast ? 3000 : 5000, pollExtended, 'extended hours');
   every(fast ? 5e3 : 60e3, () => { if (S.f_bots !== false) return botScheduler(); }, 'bots');
+  every(fast ? 5e3 : 10 * 60e3, backupJob, 'backups');
   every(3600e3, () => Q("delete from bot_log where ts < now() - interval '2 years'"), 'bot log cleanup');
   every(3600e3, () => Q("delete from settle where settles < now() - interval '7 days'"), 'settlement cleanup');
   if (BROKER) { every(15e3, () => brokerSync(), 'broker'); every(30e3, () => { adSync(); if (BROKER.wid) tuConnect(); }, 'broker streams'); setTimeout(() => brokerSync().then(() => { if (BROKER.wid) tuConnect(); }).catch(() => {}), 3000); }
@@ -4954,7 +5161,7 @@ process.on('unhandledRejection', e => warn('unhandled', e && (e.stack || e.messa
   loadIndex();
   await migrate();
   tokenSalt = (await kvGet('token_salt', '')) || '';
-  await loadSettings(); await loadAssets(); await loadPriceCache(); await loadOrders(); await loadAlerts(); await initPush();
+  await loadSettings(); await refreshPasskeysOn(); await loadAssets(); await loadPriceCache(); await loadOrders(); await loadAlerts(); await initPush();
   await refreshUserSyms(); await walletsSummary();
   server.listen(PORT, () => log(`🥭 Mango is running on port ${PORT} · build ${BUILD} · ${FINNHUB_KEY ? 'stocks on' : 'stocks off (no FINNHUB_KEY)'}${BROKER ? ` · Alpaca ${BROKER.env}` : ''}`));
   cbConnect(); fhConnect(); if (BROKER) adConnect(); startJobs();
