@@ -278,6 +278,14 @@ const MIGRATIONS = [
       create table if not exists backups(id serial primary key, ts timestamptz not null default now(), kind text not null default 'auto', size int not null, data text not null, note text);
     `);
   },
+  // 6: the Council's votes, checked a week later
+  async c => {
+    await c.query(`
+      create table if not exists council(id serial primary key, ts timestamptz not null default now(), bot_id int not null, sym text not null, action text not null, price numeric, votes text not null,
+        yes int not null default 0, no int not null default 0, chair text, settle_at timestamptz not null, settled boolean not null default false, result numeric, right_ text);
+      create index if not exists council_b on council(bot_id, id desc);
+    `);
+  },
 ];
 
 async function migrate() {
@@ -3339,13 +3347,13 @@ function gridCombos(grid) {
 // =====================================================================
 const MANDATE_DEF = {
   budget: 0, maxPosPct: 25, dailyLossPct: 5, maxDDPct: 20, maxTradesDay: 12, minTrade: 10, runAt: '15:45', stops: true, notify: 'trades',
-  newsFilter: true, earningsDays: 2, minSentiment: -0.35, blockSevere: true, sellOnSevere: false, tilt: false, flattenOnKill: true, allowLive: false, liveCap: 0,
+  newsFilter: true, earningsDays: 2, minSentiment: -0.35, blockSevere: true, sellOnSevere: false, tilt: false, flattenOnKill: true, allowLive: false, liveCap: 0, councilVeto: false,
 };
 function cleanMandate(m = {}, base = MANDATE_DEF) {
   const o = { ...base };
   const nums = { liveCap: [0, 1e7], budget: [0, 1e9], maxPosPct: [5, 100], dailyLossPct: [0, 50], maxDDPct: [0, 90], maxTradesDay: [1, 100], minTrade: [1, 10000], earningsDays: [0, 10], minSentiment: [-1, 0] };
   for (const [k, [lo, hi]] of Object.entries(nums)) if (m[k] !== undefined) o[k] = clamp(num(m[k], base[k]), lo, hi);
-  for (const k of ['stops', 'newsFilter', 'blockSevere', 'sellOnSevere', 'tilt', 'flattenOnKill', 'allowLive']) if (m[k] !== undefined) o[k] = !!m[k];
+  for (const k of ['stops', 'newsFilter', 'blockSevere', 'sellOnSevere', 'tilt', 'flattenOnKill', 'allowLive', 'councilVeto']) if (m[k] !== undefined) o[k] = !!m[k];
   if (['trades', 'all', 'off'].includes(m.notify)) o.notify = m.notify;
   if (/^\d\d:\d\d$/.test(m.runAt || '') && m.runAt >= '09:45' && m.runAt <= '15:55') o.runAt = m.runAt;
   return o;
@@ -3353,6 +3361,7 @@ function cleanMandate(m = {}, base = MANDATE_DEF) {
 const botJson = b => ({ id: b.id, name: b.name, wid: b.wid, strategy: b.strategy, params: jsonOr(b.params, {}), syms: jsonOr(b.syms, []), mandate: { ...MANDATE_DEF, ...jsonOr(b.mandate, {}) }, status: b.status, created: tsMs(b.created), lastRun: tsMs(b.last_run), lastDay: b.last_day, peak: b.peak == null ? null : +b.peak, summary: b.summary, killed: b.killed_reason || null });
 async function botLog(botId, kind, title, body = '', data = null, sym = null) {
   await Q('insert into bot_log(bot_id,kind,title,body,data,sym) values($1,$2,$3,$4,$5,$6)', [botId, kind, String(title).slice(0, 200), String(body || '').slice(0, 4000), data ? JSON.stringify(data) : null, sym]).catch(e => warn('bot log', e.message));
+  broadcast({ t: 'evt', e: 'hq', ev: { kind, botId, title: String(title).slice(0, 140), sym, side: data?.side || null, pnl: data?.fill?.pnl ?? null, ts: Date.now() } });
 }
 // Today's bars with the live price as today's close.
 function withLive(b, sym) {
@@ -3430,6 +3439,8 @@ async function runBotInner(id, { manual, dry }) {
   // ---- news and social check before buying ----
   const buzz = {};
   const wantBuy = Object.entries(dec.weights).filter(([s, wt]) => wt > 0 && tradable.includes(s));
+  const phase = p => { if (!dry) broadcast({ t: 'evt', e: 'hq', ev: { kind: 'phase', phase: p, botId: id, ts: Date.now() } }); };
+  phase('news');
   if (m.newsFilter && S.f_buzz !== false) {
     const list = [...new Set([...wantBuy.map(([s]) => s), ...Object.keys(held), ...tradable])].slice(0, 24);
     for (let i = 0; i < list.length; i += 8) await Promise.all(list.slice(i, i + 8).map(s => Promise.race([buzzFor(s), sleep(12000).then(() => null)]).then(x => { if (x) buzz[s] = x; }).catch(() => {})));
@@ -3451,6 +3462,18 @@ async function runBotInner(id, { manual, dry }) {
     if (noBuys && wt * capital > have) { wt = have / capital; d.why.push('No new buys today: the daily loss limit was hit.'); }
     d.target = wt; decisions[s] = d;
   }
+  // ---- the council: six kinds of evidence vote on each buy and sell ----
+  phase('council');
+  const sessions = [];
+  for (const d of Object.values(decisions).sort((a, b) => b.want - a.want)) {
+    const buying = d.want * capital > d.have + Math.max(m.minTrade, 1), selling = d.have > 0 && !(d.target > 0);
+    if (!(buying || selling) || sessions.length >= 12 || !series[d.sym]) continue;
+    const bz = buzz[d.sym], up = bz?.upcoming?.find(u => u.k === 'earnings') || null;
+    const s = councilSession(bot, d, series, bz, up, m, capital);
+    if (m.councilVeto && buying && d.target * capital > d.have + 1 && s.no > s.yes) { d.target = d.have / capital; d.why.push(`Skipped buying: the council voted ${s.yes}–${s.no} against, and council veto is on.`); }
+    d.council = s; sessions.push(d);
+  }
+  phase('trade');
   // ---- orders: sells first to free cash, then buys ----
   const placeOrder = async (s, side, o, label) => {
     if (dry) { log.orders.push({ sym: s, side, ...o, dry: true, label }); return { dry: true }; }
@@ -3503,6 +3526,8 @@ async function runBotInner(id, { manual, dry }) {
     d.action = isNew ? 'buy' : 'add';
     await placeOrder(d.sym, 'buy', { usd }, `${st.short}: ${d.note}${d.why.length ? ' ' + d.why.join(' ') : ''}`.slice(0, 480));
   }
+  for (const d of sessions) d.council.chair = chairLine(d, d.council);
+  if (!dry) for (const d of sessions) await saveCouncil(id, d, d.council, priceOf(d.sym));
   // ---- protective stops ----
   if (!dry && m.stops) {
     const pnow = await positions(bot.wid);
@@ -3535,11 +3560,12 @@ async function runBotInner(id, { manual, dry }) {
     const summary = log.orders.length ? [bought.length ? 'Bought ' + bought.join(', ') : '', sold.length ? 'sold ' + sold.join(', ') : ''].filter(Boolean).join('; ') : 'No changes';
     state._health = { t: Date.now(), missing, noPrice: bot.syms.filter(x => !priceOf(x)), news: m.newsFilter && S.f_buzz !== false ? { checked: Object.keys(buzz).length, wanted: Math.min(24, new Set([...wantBuy.map(([x]) => x), ...Object.keys(held), ...tradable]).size) } : null, problems: log.skips.length, saved: dataHealth.saved.syms.filter(x => bot.syms.includes(x)) };
     await Q('update bots set state=$1, last_run=now(), last_day=$2, peak=$3, day_start=$4, day_date=$5, summary=$6 where id=$7', [JSON.stringify(state), today, peak, dayStart, today, summary, id]);
-    const rows = Object.values(decisions).map(d => ({ sym: d.sym, action: d.action, want: round(d.want, 4), target: round(d.target, 4), have: round(d.have, 2), note: d.note, why: d.why, buzz: d.buzz, flags: d.flags }));
+    const rows = Object.values(decisions).map(d => ({ sym: d.sym, action: d.action, want: round(d.want, 4), target: round(d.target, 4), have: round(d.have, 2), note: d.note, why: d.why, buzz: d.buzz, flags: d.flags, council: d.council || null }));
     if (dec.report) { await botLog(id, 'report', dec.report.title, dec.report.body, dec.report.data); await notify('bot', `🧭 ${bot.name}: ${dec.report.title.toLowerCase()}`, dec.report.body.split('\n').filter(l => !/: none/.test(l)).slice(0, 5).join('\n') || 'Holding cash: no strategy is working well enough right now.', { wid: bot.wid, url: '/#/bot/' + id }); }
     await botLog(id, 'decision', `${manual ? 'Manual run' : 'Daily decision'}: ${summary}`, [...log.risk, ...log.skips].join('\n'), { rows, equity, capital, dd, dayRet, regime: ctx.regime || null, missing });
     if (m.notify === 'all' || (m.notify === 'trades' && log.orders.length)) await notify(brk ? 'real' : 'bot', `${brk ? (liveMoney ? '🔴 LIVE · ' : '🔵 Alpaca · ') : '🤖 '}${bot.name}: ${summary}`, log.orders.map(o => `${o.text}. ${o.label || ''}`.trim()).join('\n').slice(0, 600) || [...log.risk, ...log.skips].join(' ') || 'Nothing to do today.', { wid: bot.wid, url: '/#/bot/' + id });
   }
+  phase('done');
   return { dry, equity, capital, dd, dayRet, regime: ctx.regime || null, rows: Object.values(decisions), orders: log.orders, risk: log.risk, skips: log.skips, missing, session: sess };
 }
 const pct0n = v => (v * 100).toFixed(0) + '%';
@@ -4867,6 +4893,131 @@ async function backupJob() {
 }
 
 // =====================================================================
+// The Council and Mango HQ
+// Before a bot buys (or sells), six characters each look at one kind of real evidence and vote.
+// Big Mango, the chair, announces what the bot actually does: its strategy and limits decide,
+// and an optional "council veto" lets a majority NO stop a buy. Every vote is checked a week later,
+// so "Who called it?" shows which kind of evidence has really been right.
+// =====================================================================
+const COUNCIL = [
+  { k: 'surfer', name: 'Surfer', role: 'Trend', color: '#4EA8FF' },
+  { k: 'rocket', name: 'Rocket', role: 'Momentum', color: '#FF7A45' },
+  { k: 'scoop', name: 'Scoop', role: 'News', color: '#F5C542' },
+  { k: 'shield', name: 'Shield', role: 'Risk', color: '#9AA6B8' },
+  { k: 'prof', name: 'Professor', role: 'Value stats', color: '#3DDC97' },
+  { k: 'doubt', name: 'Doubt', role: 'Contrarian', color: '#B48CFF' },
+];
+const pick = (arr, seed) => arr[Math.abs(seed) % arr.length];
+const seedOf = s => [...String(s)].reduce((a, c) => a * 31 + c.charCodeAt(0), 7) >>> 0;
+// Each member looks at its own evidence and says YES, NO or PASS, with a line in its own voice.
+function councilVotes(sym, b, ctx = {}) {
+  const i = b?.c?.length - 1, out = [], sd = seedOf(sym + (b?.d?.[i] || ''));
+  if (!(i >= 30)) return COUNCIL.map(m => ({ k: m.k, vote: 'pass', conf: 0, line: 'Not enough history to say.' }));
+  const c = b.c[i], s50 = IND.sma(b.c, 50, i), s200 = i >= 200 ? IND.sma(b.c, 200, i) : null, atr = IND.atr(b, 14, i, b.memo) || c * 0.02;
+  const r63 = IND.ret(b.c, 63, i), r5 = IND.ret(b.c, 5, i), rsi = IND.rsi(b.c, 14, i, b.memo);
+  const v20 = IND.vol(b.c, 20, i), v250 = i > 252 ? IND.vol(b.c, 250, i) : null;
+  const m20 = IND.sma(b.c, 20, i); let dev = 0; for (let k = i - 19; k <= i; k++) dev += (b.c[k] - m20) ** 2; const z = (c - m20) / (Math.sqrt(dev / 20) || 1);
+  const bz = ctx.buzz, up = ctx.earnings;
+  // Surfer: is it trending up?
+  if (s200 && c > s200 && s50 > s200) out.push({ k: 'surfer', vote: 'yes', conf: clamp((c / s200 - 1) * 5, 0.3, 1), line: pick([`Above the 200-day by ${pf(c / s200 - 1, 0)}. Ride the wave.`, `Clean uptrend. Surf's up.`, `Fast average over slow, price over both. I'm in.`], sd) });
+  else if (s200 && c < s200) out.push({ k: 'surfer', vote: 'no', conf: clamp((1 - c / s200) * 5, 0.3, 1), line: pick([`Under its 200-day. No wave to ride.`, `Downtrend. I don't paddle into rocks.`], sd) });
+  else out.push({ k: 'surfer', vote: c > s50 ? 'yes' : 'pass', conf: 0.3, line: c > s50 ? 'Above the 50-day, trend is young.' : 'Flat water. Nothing to ride yet.' });
+  // Rocket: momentum, absolute and against the market
+  const bm = ctx.benchRet63;
+  if (r63 != null && r63 > 0.04 && (bm == null || r63 > bm)) out.push({ k: 'rocket', vote: 'yes', conf: clamp(r63 * 4, 0.3, 1), line: pick([`${pf(r63, 0)} in 3 months${bm != null ? `, beating the market's ${pf(bm, 0)}` : ''}. To the moon.`, `Strong 3-month run. Winners keep winning.`], sd + 1) });
+  else if (r63 != null && r63 < -0.03) out.push({ k: 'rocket', vote: 'no', conf: clamp(-r63 * 4, 0.3, 1), line: `${pf(r63, 0)} in 3 months. That's no rocket.` });
+  else out.push({ k: 'rocket', vote: 'pass', conf: 0.2, line: r63 == null ? 'Too new to judge.' : `Only ${pf(r63, 1)} in 3 months. Meh.` });
+  // Scoop: the news
+  if (!bz || bz.count < 3) out.push({ k: 'scoop', vote: 'pass', conf: 0, line: pick(['Quiet out there. No story.', 'Nothing on the wire.'], sd + 2) });
+  else if (bz.flags.includes('severe_news')) out.push({ k: 'scoop', vote: 'no', conf: 1, line: `Breaking: "${(bz.events.find(e => e.k === 'severe')?.title || 'serious trouble').slice(0, 70)}". Stay away.` });
+  else if (bz.sentiment <= -0.2) out.push({ k: 'scoop', vote: 'no', conf: clamp(-bz.sentiment * 2, 0.3, 1), line: `The mood is ${bz.sentiment.toFixed(2)} across ${bz.count} stories. People are gloomy.` });
+  else if (bz.sentiment >= 0.15) out.push({ k: 'scoop', vote: 'yes', conf: clamp(bz.sentiment * 2, 0.3, 1), line: `Good press: ${bz.sentiment >= 0 ? '+' : ''}${bz.sentiment.toFixed(2)} across ${bz.count} stories${bz.events[0] ? `, ${bz.events[0].label.toLowerCase()}` : ''}.` });
+  else out.push({ k: 'scoop', vote: 'pass', conf: 0.2, line: `Mixed headlines (${bz.sentiment.toFixed(2)}). No scoop.` });
+  // Shield: what could hurt
+  const hot = v250 && v20 > v250 * 1.6, earnSoon = up && up.tradingDays <= 3;
+  if (earnSoon) out.push({ k: 'shield', vote: 'no', conf: 0.9, line: `Earnings ${up.tradingDays <= 0 ? 'today' : `in ${up.tradingDays} day${up.tradingDays === 1 ? '' : 's'}`}. Coin flip with a big move. Pass.` });
+  else if (hot) out.push({ k: 'shield', vote: 'no', conf: clamp(v20 / v250 - 1, 0.3, 1), line: `Swinging ${(v20 / v250).toFixed(1)}x harder than usual. Too wild.` });
+  else if (ctx.weight > 0.3) out.push({ k: 'shield', vote: 'no', conf: 0.6, line: `That would be ${Math.round(ctx.weight * 100)}% of the wallet in one name. Too much.` });
+  else out.push({ k: 'shield', vote: 'yes', conf: 0.4, line: pick(['Risk looks normal. Stop loss ready.', 'Calm enough. I can protect this one.'], sd + 3) });
+  // Professor: stretched or cheap?
+  if (rsi != null && rsi > 75) out.push({ k: 'prof', vote: 'no', conf: clamp((rsi - 70) / 20, 0.3, 1), line: `RSI ${rsi.toFixed(0)}. Statistically overbought.` });
+  else if (z < -1.5) out.push({ k: 'prof', vote: 'yes', conf: clamp(-z / 3, 0.3, 1), line: `${Math.abs(z).toFixed(1)} standard deviations under its average. Cheap, by the numbers.` });
+  else if (z > 2) out.push({ k: 'prof', vote: 'no', conf: clamp(z / 3, 0.3, 1), line: `${z.toFixed(1)} standard deviations above average. Expensive today.` });
+  else out.push({ k: 'prof', vote: rsi != null && rsi < 60 ? 'yes' : 'pass', conf: 0.3, line: `RSI ${rsi == null ? '–' : rsi.toFixed(0)}, ${z >= 0 ? '+' : ''}${z.toFixed(1)}σ. Fair price.` });
+  // Doubt: against the crowd
+  if (r5 != null && r5 * c > 2.5 * atr) out.push({ k: 'doubt', vote: 'no', conf: 0.6, line: pick([`Up ${pf(r5, 0)} in a week. We're chasing.`, `Everyone already bought this. Who's left?`], sd + 4) });
+  else if (bz?.flags?.includes('attention_spike') && bz.sentiment > 0.2) out.push({ k: 'doubt', vote: 'no', conf: 0.5, line: `${bz.attention}x the usual hype. Smells like a top.` });
+  else if (r5 != null && r5 < 0 && s200 && c > s200 && -r5 * c > 1.5 * atr) out.push({ k: 'doubt', vote: 'yes', conf: 0.6, line: `Everyone's scared after a ${pf(r5, 0)} week, but the trend is fine. I like it.` });
+  else out.push({ k: 'doubt', vote: 'pass', conf: 0.2, line: pick(['Nothing to argue with. Suspicious.', 'I have no objection. For now.'], sd + 5) });
+  return out.map(v => ({ ...v, conf: round(v.conf, 2) }));
+}
+const tally = votes => ({ yes: votes.filter(v => v.vote === 'yes').length, no: votes.filter(v => v.vote === 'no').length });
+// Run a council session for one decision. Returns what the bot will record and show.
+function councilSession(bot, d, series, buzz, earnings, m, capital) {
+  const votes = councilVotes(d.sym, series[d.sym], { buzz, earnings, weight: d.want, benchRet63: series.SPY ? IND.ret(series.SPY.c, 63, series.SPY.c.length - 1) : null });
+  const t = tally(votes);
+  return { votes, yes: t.yes, no: t.no };
+}
+function chairLine(d, s) {
+  const t = `${s.yes}–${s.no}`;
+  if (d.action === 'buy' || d.action === 'add') return s.no > s.yes ? `Overruled ${t}: the strategy says buy, and it's within the limits.` : `Approved ${t}. Buying ${Math.round(d.target * 100)}% of the wallet.`;
+  if (d.action === 'sell' || d.action === 'trim') return `Selling. ${d.why[0] || d.note || 'The strategy says it is time.'}`;
+  const skip = (d.why || []).find(w => /^Skipped|^Not buying|^No new buys/.test(w));
+  if (skip) return `Rejected ${t}. ${skip.replace(/^Skipped buying: /, '').replace(/^./, c => c.toUpperCase())}`;
+  return `Holding ${t}. Nothing to do.`;
+}
+async function saveCouncil(botId, d, s, px) {
+  const settle = Date.now() + 7 * 864e5;
+  const r = await row('insert into council(bot_id,sym,action,price,votes,yes,no,chair,settle_at) values($1,$2,$3,$4,$5,$6,$7,$8,$9) returning id', [botId, d.sym, d.action === 'hold' && d.want > d.target + 1e-6 ? 'skip' : d.action, px, JSON.stringify(s.votes), s.yes, s.no, s.chair, new Date(settle)]).catch(e => { warn('council', e.message); return null; });
+  if (r) broadcast({ t: 'evt', e: 'hq', ev: { kind: 'council', botId, id: r.id, sym: d.sym } });
+  return r?.id;
+}
+// A week later: was each member right? YES is right if the price went up, NO if it didn't.
+async function settleCouncil() {
+  for (const r of await rows("select * from council where not settled and settle_at <= now() order by id limit 200")) {
+    const now = priceOf(r.sym); if (!now || !(+r.price > 0)) continue;
+    const ret = now / +r.price - 1, votes = jsonOr(r.votes, []), right = {};
+    for (const v of votes) if (v.vote !== 'pass') right[v.k] = v.vote === 'yes' ? ret > 0 : ret <= 0;
+    await Q('update council set settled=true, result=$1, right_=$2 where id=$3', [round(ret, 5), JSON.stringify(right), r.id]);
+  }
+}
+const councilJson = r => ({ id: r.id, ts: tsMs(r.ts), botId: r.bot_id, sym: r.sym, action: r.action, price: +r.price, votes: jsonOr(r.votes, []), yes: r.yes, no: r.no, chair: r.chair, settled: r.settled, result: r.result == null ? null : +r.result, right: jsonOr(r.right_, null), settleAt: tsMs(r.settle_at) });
+GET('/api/council', auth, async req => {
+  const bot = +req.query.bot || null, lim = clamp(num(req.query.limit, 20), 1, 100), before = +req.query.before || 2e9;
+  return (await rows(`select * from council where id < $1 ${bot ? 'and bot_id=$3' : ''} order by id desc limit $2`, bot ? [before, lim, bot] : [before, lim])).map(councilJson);
+});
+GET('/api/council/board', auth, async req => {
+  const bot = +req.query.bot || null;
+  const list = (await rows(`select * from council where settled ${bot ? 'and bot_id=$1' : ''} order by id desc limit 2000`, bot ? [bot] : [])).map(councilJson);
+  const members = COUNCIL.map(m => { let calls = 0, right = 0; for (const s of list) if (s.right && m.k in s.right) { calls++; if (s.right[m.k]) right++; } return { ...m, calls, right, acc: calls ? right / calls : null }; });
+  // What a council veto would have done: buys it would have blocked, and skips it wanted to buy.
+  const blocked = list.filter(s => (s.action === 'buy' || s.action === 'add') && s.no > s.yes), wanted = list.filter(s => s.action === 'skip' && s.yes > s.no);
+  const avg = a => a.length ? a.reduce((t, s) => t + s.result, 0) / a.length : null;
+  const pending = +(await row(`select count(*) n from council where not settled ${bot ? 'and bot_id=$1' : ''}`, bot ? [bot] : [])).n;
+  return { members: members.sort((a, b) => (b.acc ?? -1) - (a.acc ?? -1)), settled: list.length, pending, veto: { blocked: blocked.length, blockedAvg: avg(blocked), wanted: wanted.length, wantedAvg: avg(wanted) }, chair: { calls: list.filter(s => s.action !== 'hold').length } };
+});
+GET('/api/council/members', auth, () => COUNCIL);
+
+// ---------- Mango HQ: everything the floor needs in one call ----------
+GET('/api/hq', auth, async () => {
+  const list = await rows("select * from bots order by id");
+  const cards = await Promise.all(list.map(botCard));
+  const events = (await rows("select l.*, b.name bname from bot_log l join bots b on b.id=l.bot_id where l.ts > now() - interval '3 days' order by l.id desc limit 80")).map(r => ({ ...logJson(r), botId: r.bot_id, bot: r.bname, data: undefined }));
+  const council = (await rows('select * from council order by id desc limit 12')).map(councilJson);
+  let totalPL = 0, day = 0; for (const c of cards) { totalPL += (c.value || 0) - (c.start || 0); day += c.day?.change || 0; }
+  const spy = prices.get('SPY'), btc = prices.get('BTC');
+  const held = [...new Set(cards.flatMap(c => c.holding || []))].slice(0, 16);
+  const tick = ['SPY', 'QQQ', 'BTC', ...held].filter((s, i, a) => a.indexOf(s) === i).map(s => { const q = prices.get(s); return q?.p ? { sym: s, p: q.p, ch: q.prev ? (q.p / q.prev - 1) * 100 : 0 } : null; }).filter(Boolean);
+  const trades = +(await row("select count(*) n from bot_log where kind='trade' and ts > $1", [new Date(etToUtc(...etDate().split('-').map(Number), 0, 0))])).n;
+  return {
+    bots: cards.map(c => ({ id: c.id, name: c.name, strategy: c.strategy, status: c.status, activity: c.activity, holding: c.holding, value: c.value, ret: c.ret, day: c.day, spark: c.spark, broker: !!c.wallet?.broker, auto: !!STRATEGIES[c.strategy]?.auto, deciding: running.has(c.id), next: c.next, tryouts: STRATEGIES[c.strategy]?.auto ? (jsonOr(list.find(x => x.id === c.id)?.state, {})._board || []).map(t => ({ k: t.k, label: t.label, alloc: t.alloc, eligible: t.eligible })) : null })),
+    events, council, members: COUNCIL, tick, trades,
+    market: { ...market(), spy: spy?.prev ? (spy.p / spy.prev - 1) * 100 : null, btc: btc?.prev ? (btc.p / btc.prev - 1) * 100 : null },
+    vault: { total: totalPL, day }, alarm: { halt: !!S.realHalt, killed: cards.filter(c => c.status === 'killed').map(c => c.name), brake: cards.filter(c => c.activity?.k === 'brake').map(c => c.name), cooldown: cards.filter(c => c.activity?.k === 'cooldown').map(c => c.name) },
+  };
+});
+
+// =====================================================================
 // Background jobs
 // =====================================================================
 fillCbs.push(async f => {
@@ -4965,6 +5116,7 @@ function startJobs() {
   every(fast ? 3000 : 5000, pollExtended, 'extended hours');
   every(fast ? 5e3 : 60e3, () => { if (S.f_bots !== false) return botScheduler(); }, 'bots');
   every(fast ? 5e3 : 10 * 60e3, backupJob, 'backups');
+  every(fast ? 5e3 : 30 * 60e3, settleCouncil, 'council');
   every(3600e3, () => Q("delete from bot_log where ts < now() - interval '2 years'"), 'bot log cleanup');
   every(3600e3, () => Q("delete from settle where settles < now() - interval '7 days'"), 'settlement cleanup');
   if (BROKER) { every(15e3, () => brokerSync(), 'broker'); every(30e3, () => { adSync(); if (BROKER.wid) tuConnect(); }, 'broker streams'); setTimeout(() => brokerSync().then(() => { if (BROKER.wid) tuConnect(); }).catch(() => {}), 3000); }

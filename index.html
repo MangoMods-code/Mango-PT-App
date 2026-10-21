@@ -962,6 +962,121 @@ button.tile:active { transform: scale(.98); }
 #login-face { margin-top: 10px; width: 100%; }
 .login-or { text-align: center; font-size: 13px; color: var(--mu); margin: 8px 0 0; }
 
+/* ---------- Mango HQ ---------- */
+.hq-page .page-body { padding: 0; margin-top: 0; overflow: hidden; position: relative; }
+.hq-page .page-body > .inner { max-width: none; height: 100%; }
+.hq-page .page-head { background: linear-gradient(rgba(10, 7, 22, .78), rgba(10, 7, 22, 0)); backdrop-filter: none; -webkit-backdrop-filter: none; border-bottom: 0; }
+.hq { position: absolute; inset: 0; overflow: hidden; background: #0C0820; touch-action: none; user-select: none; -webkit-user-select: none; color: #F3EEFF; }
+.hq canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.hq-ov { position: absolute; inset: 0; pointer-events: none; }
+.hq-ov > * { position: absolute; left: 0; top: 0; will-change: transform; }
+
+.hq-top { position: absolute; z-index: 3; left: 0; right: 0; top: calc(var(--safe-t) + 50px); padding: 0 calc(12px + var(--safe-r)) 0 calc(12px + var(--safe-l)); display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; }
+.hq-top > * { pointer-events: auto; }
+.hq-top .seg { background: rgba(20, 14, 42, .82); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); width: min(340px, 100%); }
+.hq-stats { display: flex; gap: 6px; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.hq-stats::-webkit-scrollbar { display: none; }
+.hq-stats > div { flex: none; padding: 6px 10px; border-radius: 12px; background: rgba(20, 14, 42, .82); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .07); }
+.hq-stats span { display: block; font-size: 10.5px; color: #A79CC6; }
+.hq-stats b { font-size: 14px; font-weight: 750; }
+
+/* room signs */
+.hq-room { pointer-events: auto; transform-origin: 0 0; display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px 3px 7px; border-radius: 8px; font-size: 11px; font-weight: 750; color: #fff; background: rgba(12, 8, 26, .72); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 55%, transparent), 0 0 14px color-mix(in srgb, var(--c) 35%, transparent); white-space: nowrap; transition: opacity .25s; }
+.hq-room::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--c); box-shadow: 0 0 6px var(--c); }
+.hq-room small { font-size: 10px; color: var(--c); font-weight: 800; }
+.hq-room small:empty { display: none; }
+
+/* bot name tags */
+.hq-tag { translate: -50% -100%; font-size: 10.5px; font-weight: 750; padding: 1px 6px; border-radius: 6px; background: rgba(12, 8, 26, .7); color: #fff; white-space: nowrap; border-bottom: 2px solid var(--c); max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+.hq-tag.sel { background: var(--c); color: #120C24; }
+
+/* speech bubbles */
+.hq-bub { translate: -50% -100%; max-width: 210px; width: max-content; padding: 7px 10px; border-radius: 13px; background: #FFFDF6; color: #1B1430; font-size: 12px; line-height: 1.3; font-weight: 600; box-shadow: 0 6px 18px rgba(0, 0, 0, .35); animation: hq-pop .32s cubic-bezier(.3, 1.5, .5, 1) both; }
+.hq-bub::after { content: ''; position: absolute; left: 50%; bottom: -5px; width: 10px; height: 10px; background: inherit; transform: translateX(-50%) rotate(45deg); border-radius: 2px; }
+.hq-bub.buy, .hq-bub.good, .hq-bub.yes { background: #D6FBE9; }
+.hq-bub.sell, .hq-bub.bad, .hq-bub.no { background: #FFE0E6; }
+.hq-bub.line { font-size: 11.5px; }
+.hq-bub.out { animation: hq-out .3s ease both; }
+@keyframes hq-pop { from { opacity: 0; scale: .6; } }
+@keyframes hq-out { to { opacity: 0; scale: .85; } }
+
+/* council case card */
+.hq-case { position: absolute; z-index: 3; left: 50%; transform: translateX(-50%); bottom: calc(var(--safe-b) + 50px); width: min(380px, calc(100% - 24px)); padding: 12px 14px; border-radius: 18px; background: rgba(22, 14, 40, .9); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: inset 0 0 0 1px rgba(255, 159, 28, .35), 0 12px 32px rgba(0, 0, 0, .4); }
+.hc-q .t-cap { color: #FFB86B; display: block; }
+.hc-q b { font-size: 17px; font-weight: 800; }
+.hc-tally { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; margin-top: 8px; font-weight: 800; font-size: 13px; }
+.hc-tally i { height: 8px; border-radius: 4px; background: linear-gradient(90deg, #3DDC97 calc(var(--y) / max(1, var(--y) + var(--n)) * 100%), #FF5C77 0); opacity: calc(.25 + (var(--y) + var(--n)) * .15); transition: all .3s; }
+.hc-tally .up { color: #3DDC97; } .hc-tally .dn { color: #FF5C77; }
+.hc-stamp { margin: 10px 0 2px; display: inline-block; padding: 3px 12px; border: 3px solid currentColor; border-radius: 8px; font-weight: 900; letter-spacing: .08em; font-size: 18px; rotate: -6deg; animation: hq-stamp .45s cubic-bezier(.2, 1.6, .4, 1) both; }
+.hc-stamp.up { color: #3DDC97; } .hc-stamp.dn { color: #FF5C77; } .hc-stamp.ac { color: #FFD646; }
+@keyframes hq-stamp { from { scale: 2.4; opacity: 0; } }
+.hc-chair { display: flex; gap: 6px; font-size: 12.5px; color: #E6DDF8; margin: 6px 0 0; }
+.hc-chair svg { width: 14px; height: 14px; flex: none; color: #FF9F1C; margin-top: 2px; }
+.hq-case .t-foot { color: #A79CC6; margin: 6px 0 0; }
+
+/* who called it */
+.hq-board { position: absolute; z-index: 3; right: calc(10px + var(--safe-r)); top: calc(var(--safe-t) + 150px); width: min(230px, 46vw); padding: 10px 12px; border-radius: 16px; background: rgba(22, 14, 40, .86); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08); max-height: 46%; overflow-y: auto; }
+.hb-h { cursor: pointer; } .hb-h b { font-size: 14px; display: flex; align-items: center; justify-content: space-between; gap: 6px; } .hb-h b svg { width: 14px; height: 14px; transition: rotate .2s; }
+.hq-board.min { width: auto; } .hq-board.min > :not(.hb-h), .hq-board.min .hb-h .t-cap { display: none; } .hq-board.min .hb-h b svg { rotate: -90deg; } .hb-h .t-cap { display: block; color: #A79CC6; margin-bottom: 6px; }
+.hb-row { display: grid; grid-template-columns: 1fr 44px 34px; gap: 6px; align-items: center; padding: 4px 0; }
+.hb-n { font-size: 12.5px; font-weight: 750; color: var(--c); line-height: 1.1; }
+.hb-n small { display: block; font-size: 10px; color: #8E81A8; font-weight: 600; }
+.hb-row i { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, .1); overflow: hidden; }
+.hb-row em { display: block; height: 100%; background: var(--c); border-radius: 3px; }
+.hb-row b { font-size: 12px; text-align: right; }
+.hq-board .t-foot { color: #A79CC6; font-size: 11.5px; }
+
+/* tapped character */
+.hq-card { position: absolute; z-index: 4; left: 50%; transform: translateX(-50%); bottom: calc(var(--safe-b) + 50px); width: min(380px, calc(100% - 24px)); padding: 14px; border-radius: 18px; background: rgba(22, 14, 40, .95); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1), 0 12px 32px rgba(0, 0, 0, .45); animation: hq-up .28s ease both; }
+@keyframes hq-up { from { opacity: 0; translate: 0 14px; } }
+.hk-h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; border-left: 4px solid var(--c, #FF9F1C); padding-left: 8px; }
+.hk-h b { font-size: 17px; font-weight: 800; } .hk-h .t-cap { color: #A79CC6; }
+.hk-act { display: flex; gap: 10px; margin: 10px 0; align-items: flex-start; }
+.hk-act > i { width: 9px; height: 9px; border-radius: 50%; margin-top: 5px; flex: none; background: #8E81A8; }
+.hk-act > i.tone-up { background: #3DDC97; } .hk-act > i.tone-dn { background: #FF5C77; } .hk-act > i.tone-ac { background: #FFD646; }
+.hk-act b { display: block; font-size: 14px; } .hk-act span { font-size: 12.5px; color: #B8ADD6; }
+.hq-card .t-foot { color: #B8ADD6; }
+.hq-card .btns { display: flex; gap: 8px; } .hq-card .btns .btn { flex: 1; }
+.hq-card .btn-quiet { background: rgba(255, 255, 255, .1); color: #fff; }
+
+.hq-alarm { position: absolute; z-index: 3; left: 50%; transform: translateX(-50%); top: calc(var(--safe-t) + 150px); display: flex; gap: 6px; align-items: center; padding: 6px 12px; border-radius: 12px; background: rgba(216, 50, 75, .9); color: #fff; font-size: 12.5px; font-weight: 700; animation: hq-alarm 1.4s ease-in-out infinite; white-space: nowrap; max-width: calc(100% - 24px); }
+.hq-alarm span { overflow: hidden; text-overflow: ellipsis; }
+.hq-alarm svg { width: 15px; height: 15px; flex: none; }
+@keyframes hq-alarm { 50% { box-shadow: 0 0 24px rgba(255, 92, 119, .8); } }
+
+.hq-tools { position: absolute; z-index: 3; left: calc(10px + var(--safe-l)); bottom: calc(var(--safe-b) + 50px); display: flex; flex-direction: column; gap: 8px; }
+.hq-tools .icon-btn { background: rgba(20, 14, 42, .85); color: #CFC4EE; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08); }
+.hq-tools .icon-btn.on { color: #FFD646; box-shadow: inset 0 0 0 1px rgba(255, 214, 70, .5); }
+.hq:has(.hq-case:not(.hidden)) .hq-tools, .hq:has(.hq-card:not(.hidden)) .hq-tools { display: none; }
+
+.hq-ticker { position: absolute; z-index: 3; left: 0; right: 0; bottom: 0; padding-bottom: var(--safe-b); height: calc(var(--safe-b) + 32px); background: rgba(8, 5, 18, .92); border-top: 1px solid rgba(255, 159, 28, .35); overflow: hidden; }
+.tk-run { display: flex; gap: 22px; width: max-content; height: 32px; align-items: center; font-size: 12px; animation: hq-tick 40s linear infinite; padding-left: 12px; }
+.tk-run b { color: #fff; } .tk-run span { color: #CFC4EE; white-space: nowrap; }
+.tk-run i { font-style: normal; font-weight: 700; } .tk-run .up { color: #3DDC97; } .tk-run .dn { color: #FF5C77; }
+@keyframes hq-tick { to { transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) { .tk-run, .hq-alarm { animation: none; } .hq-bub { animation: none; } }
+
+/* entry card on the Bots tab */
+.hq-hero { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; margin: 4px 0 12px; padding: 14px; border-radius: var(--r-xl); color: #fff; background: radial-gradient(90% 140% at 0 100%, rgba(255, 122, 69, .35), transparent 60%), radial-gradient(80% 120% at 100% 0, rgba(78, 168, 255, .3), transparent 60%), #1A1233; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08); }
+.hq-hero .main { flex: 1; min-width: 0; } .hq-hero b { display: block; font-size: 16px; font-weight: 800; } .hq-hero span { font-size: 13px; color: #CFC4EE; }
+.hq-hero > svg { width: 18px; height: 18px; color: #CFC4EE; flex: none; }
+.hq-hero-art { flex: none; width: 56px; height: 46px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 6px; border-radius: 12px; background: #2B2547; transform: perspective(90px) rotateX(38deg) rotateZ(-30deg); }
+.hq-hero-art i { border-radius: 3px; background: var(--hue); box-shadow: 0 2px 0 color-mix(in srgb, var(--hue) 55%, #000); }
+
+/* council votes in a bot's thinking */
+.th-council { margin: 6px 0 0; font-size: 12.5px; }
+.th-council summary { display: flex; gap: 8px; align-items: center; color: var(--tx2); cursor: pointer; list-style: none; }
+.th-council summary::-webkit-details-marker { display: none; }
+.tc-dots { display: inline-flex; gap: 3px; }
+.tc-dots i { width: 9px; height: 9px; border-radius: 50%; box-shadow: inset 0 0 0 2px var(--c); }
+.tc-dots i.v-yes { background: var(--c); } .tc-dots i.v-no { background: transparent; box-shadow: inset 0 0 0 2px var(--c), 0 0 0 1.5px var(--dn, #FF5C77); } .tc-dots i.v-pass { opacity: .4; }
+.tc-line { margin: 5px 0 0; color: var(--tx2); line-height: 1.35; }
+.tc-line b { margin-right: 6px; }
+.tc-v { font-size: 10px; font-weight: 800; padding: 1px 5px; border-radius: 4px; margin-right: 6px; background: var(--card3); }
+.tc-v.v-yes { color: var(--up); } .tc-v.v-no { color: var(--dn); }
+
+.hq:has(.hq-card:not(.hidden)) .hq-case { display: none; }
+
 /* ---------- motion ---------- */
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--up) 55%, transparent); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
@@ -1347,6 +1462,7 @@ function onEvent(d) {
     emit('unread'); reload();
   } else if (d.e === 'fill' || d.e === 'pred' || d.e === 'settings') reload();
   else if (d.e === 'bot') emit('bot', d);
+  else if (d.e === 'hq') emit('hq', d.ev);
   else if (d.e === 'market' && App.S) { App.S.market = d.market; emit('market'); reload(); }
 }
 function netStatus() {
@@ -3662,8 +3778,14 @@ function thinkRows(rows, { all = false } = {}) {
       <div class="th-h">${logo(r.sym, 'logo-sm')}<b>${h(r.sym)}</b><span class="th-act">${a}</span>${r.target > 0 ? `<span class="th-w">${pct0(r.target * 100, 0)} of the wallet</span>` : ''}</div>
       ${r.note ? `<p class="th-note">${h(r.note)}</p>` : ''}
       ${(r.why || []).map(w => `<p class="th-why">${h(w)}</p>`).join('')}
-      ${r.buzz ? `<p class="th-buzz">${icon('radar')}<span>${h(r.buzz)}</span></p>` : ''}${flagChips(r.flags)}</div>`; }).join('')}
+      ${r.buzz ? `<p class="th-buzz">${icon('radar')}<span>${h(r.buzz)}</span></p>` : ''}${councilChips(r.council)}${flagChips(r.flags)}</div>`; }).join('')}
     ${holdLine}${quiet ? `<button class="th-more" data-act="thinkAll">${shown.length ? `See all ${list.length}` : `${quiet} more with nothing to do`} ${icon('down')}</button>` : ''}</div>`;
+}
+const COUNCIL_C = { surfer: '#4EA8FF', rocket: '#FF7A45', scoop: '#F5C542', shield: '#9AA6B8', prof: '#3DDC97', doubt: '#B48CFF' };
+const COUNCIL_N = { surfer: 'Surfer', rocket: 'Rocket', scoop: 'Scoop', shield: 'Shield', prof: 'Professor', doubt: 'Doubt' };
+function councilChips(c) {
+  if (!c?.votes?.length) return '';
+  return `<details class="th-council"><summary><span class="tc-dots">${c.votes.map(v => `<i class="v-${v.vote}" style="--c:${COUNCIL_C[v.k] || '#888'}"></i>`).join('')}</span><span>Council ${c.yes}–${c.no}${c.chair ? ` · ${h(c.chair.split('.')[0])}` : ''}</span></summary>${c.votes.map(v => `<p class="tc-line"><b style="color:${COUNCIL_C[v.k]}">${COUNCIL_N[v.k] || v.k}</b><span class="tc-v v-${v.vote}">${v.vote === 'yes' ? 'YES' : v.vote === 'no' ? 'NO' : 'pass'}</span>${h(v.line)}</p>`).join('')}</details>`;
 }
 ACT.thinkAll = el => { const box = el.closest('.think'), rows = box?._rows; if (rows) box.outerHTML = thinkRows(rows, { all: true }); };
 const mountThink = (root, rows) => { const b = $('.think', root); if (b) b._rows = rows; };
@@ -3703,6 +3825,7 @@ VIEWS.bots = {
         <div class="section-h"><h2>Your bots<span class="count">${bots.length}</span></h2></div><div class="bot-list">${bots.map(b => botCard(b, st)).join('')}</div>`;
     }
     if (!real && !bots.some(b => b.strategy === 'autopilot')) html = autoHero() + html;
+    if (bots.length) html = hqHero(bots) + html;
     html += `<div class="section-h"><h2>Tools</h2></div><div class="group">${bots.length ? menuCell('bars', 'Leaderboard', 'Every bot against simply holding the S&P 500', 'botboard') : ''}${menuCell('flask', 'Strategy lab', 'Test any strategy on up to 8 years of daily prices, with real fees', 'lab')}${feature('buzz') ? menuCell('radar', 'News radar', 'What headlines and social media say about what you own and watch', 'radar') : ''}</div>`;
     $('#bt-body', this.el).innerHTML = html;
     Live.run();
@@ -3767,6 +3890,7 @@ PAGES.bot = {
       <div class="bot-ctl mt8">
         ${b.status === 'running' ? `<button class="btn btn-quiet" data-act="botStatus" data-s="paused">${icon('pause')}Pause</button>` : `<button class="btn btn-quiet" data-act="botStatus" data-s="running">${icon('play')}${b.status === 'killed' ? 'Restart' : 'Resume'}</button>`}
         <button class="btn btn-danger" id="bot-flat">${icon('x')}Sell everything</button></div>
+      <button class="btn btn-quiet btn-block mt8 hq-watch" data-act="go" data-to="hq/floor/${b.id}">${icon('grid')}Watch it in Mango HQ</button>
       <div class="section-h"><h2>Limits</h2><button class="more" data-act="botEdit">Change ${icon('right')}</button></div>
       <div class="card">
         <div class="meter-row"><span>Drop from its high</span><b class="n">${pct0(dd, 1)}${ddLim ? ` of ${ddLim}%` : ''}</b></div>${ddLim ? `<div class="meter"><i style="width:${clamp(dd / ddLim * 100, 0, 100)}%;background:${dd / ddLim > 0.75 ? 'var(--dn)' : dd / ddLim > 0.4 ? 'var(--ac)' : 'var(--up)'}"></i></div>` : ''}
@@ -3897,6 +4021,7 @@ function mandateFields(m, pre) {
   return `<div class="pf-grid">${n('maxPosPct', 'Most in one position (%)')}${n('maxTradesDay', 'Most trades a day')}${n('dailyLossPct', 'Stop buying after a daily loss of (%)', '', 0.5)}${n('maxDDPct', 'Stop the bot after a drop of (%)', '', 1)}</div>
     <div class="group mt12">${t('stops', 'Stop loss on every position', 'Uses the strategy\'s stop, checked all day')}${t('flattenOnKill', 'Sell everything if it stops itself', 'When the drop limit is hit')}</div>
     <div class="group mt12">${t('newsFilter', 'Check news and social media before buying', 'Headlines, StockTwits and Reddit')}${t('blockSevere', 'Skip stocks with serious news', 'Fraud, bankruptcy, halts, investigations')}${t('sellOnSevere', 'Sell on serious news', 'Even if the strategy still likes it')}${t('tilt', 'Size by the mood', 'Buy smaller when the mood is negative')}</div>
+    <div class="group mt12">${t('councilVeto', 'Council veto', 'If most of the Council in Mango HQ votes no, skip the buy')}</div>
     <div class="pf-grid">${n('earningsDays', 'Skip if earnings are within (trading days)')}${n('minSentiment', 'Skip if the mood is below (−1 to 0)', '', 0.05)}</div>
     <div class="field"><span>Decides at (New York time)</span>${seg(pre + '-m-runAt', RUN_TIMES, m.runAt)}</div>
     <div class="field"><span>Notify me</span>${seg(pre + '-m-notify', [['trades', 'When it trades'], ['all', 'Every day'], ['off', 'Never']], m.notify)}</div>
@@ -4215,6 +4340,12 @@ ACT.botRename = async () => {
 // Keep the chosen strategy card in view after the picker is redrawn.
 function showPicked(root) { const on = $('.strat-pick .strat.on', root); if (on) on.parentElement.scrollLeft = Math.max(0, on.offsetLeft - 16); }
 
+function hqHero(bots) {
+  const deciding = bots.filter(b => b.activity?.k === 'deciding' || b.deciding).length;
+  const dots = bots.slice(0, 9).map(b => `<i style="--hue:${hueOf(b.strategy)}"></i>`).join('');
+  return `<button class="hq-hero" data-act="go" data-to="hq"><div class="hq-hero-art" aria-hidden="true">${dots}</div><div class="main"><b>Mango HQ</b><span>${deciding ? `${deciding} bot${deciding === 1 ? ' is' : 's are'} deciding right now` : `Watch your ${bots.length} bot${bots.length === 1 ? '' : 's'} work, and the Council vote on every buy`}</span></div>${icon('right')}</button>`;
+}
+
 // ===================================================================
 // Two sides of the app: Paper (the game: practice wallets, bots, games) and Alpaca (a real account,
 // no games, stricter by default). A switch at the top moves between them; each side only shows its own things.
@@ -4454,6 +4585,459 @@ PAGES.security = {
     try { toast('Restoring…', { kind: 'info', ms: 2000 }); const r = await post('backup/restore', { ...body, confirm: ok.trim().toUpperCase() }); toast('Backup restored', { sub: `${r.tables} tables from ${fmtDT(r.made)}` }); await loadState(); rerenderAll(); p.load(); } catch (e) { toastErr(e); }
   },
 };
+
+// ===================================================================
+// Mango HQ: your bots as little workers on an isometric trading floor, and the Council that votes
+// on every buy. Everything on screen is driven by what the bots really do (their journal, phases and
+// council sessions arrive live over the socket); the art is just a way to watch it.
+// ===================================================================
+const HQ = { on: false };
+// ---------- the world: rooms, furniture, paths (tile units) ----------
+const HQ_ROOMS = {
+  news: { name: 'Newsroom', x: 0, y: 0, w: 6.5, d: 5, floor: '#2B2547', accent: '#F5C542', door: [3.2, 5], node: 'A3', what: 'Reads headlines, StockTwits and earnings dates' },
+  charts: { name: 'Chart room', x: 7, y: 0, w: 6.5, d: 5, floor: '#22304A', accent: '#4EA8FF', door: [10.2, 5], node: 'A10', what: 'Where bots study prices and wait for setups' },
+  lab: { name: 'Lab', x: 14, y: 0, w: 7.5, d: 5, floor: '#1F3A36', accent: '#3DDC97', door: [17.6, 5], node: 'A17', what: 'Autopilot\'s tryouts trade pretend money here' },
+  council: { name: 'Council chamber', x: 0, y: 6.6, w: 7.9, d: 9.4, floor: '#3A2433', accent: '#FF7A45', door: [7.9, 9.6], node: 'V9', what: 'Six voices vote on every buy and sell' },
+  trading: { name: 'Trading desk', x: 9.2, y: 6.6, w: 6.4, d: 4.4, floor: '#272C45', accent: '#B48CFF', door: [12.2, 6.6], node: 'A12', what: 'Orders go out from here' },
+  vault: { name: 'Vault', x: 16.2, y: 6.6, w: 5.3, d: 4.4, floor: '#3A3320', accent: '#FFD646', door: [18.6, 6.6], node: 'A18', what: 'Gold for profit, red crates for losses' },
+  control: { name: 'Control room', x: 9.2, y: 12.4, w: 6.4, d: 3.6, floor: '#3A2228', accent: '#FF5C77', door: [12.2, 12.4], node: 'B12', what: 'Limits, the brake and the kill switch' },
+  lounge: { name: 'Lounge', x: 16.2, y: 12.4, w: 5.3, d: 3.6, floor: '#2A2A3C', accent: '#9C8FBF', door: [18.6, 12.4], node: 'B18', what: 'Paused bots take a nap' },
+};
+const HQ_NODES = { A3: [3.2, 5.8], A10: [10.2, 5.8], A12: [12.2, 5.8], A17: [17.6, 5.8], A18: [18.6, 5.8], J1: [8.55, 5.8], V9: [8.55, 9.6], J2: [8.55, 11.7], B12: [12.2, 11.7], B18: [18.6, 11.7] };
+const HQ_EDGES = [['A3', 'J1'], ['J1', 'A10'], ['A10', 'A12'], ['A12', 'A17'], ['A17', 'A18'], ['J1', 'V9'], ['V9', 'J2'], ['J2', 'B12'], ['B12', 'B18']];
+function hqPath(a, b) { // breadth-first over the corridor graph
+  if (a === b) return [a];
+  const adj = {}; for (const [x, y] of HQ_EDGES) { (adj[x] = adj[x] || []).push(y); (adj[y] = adj[y] || []).push(x); }
+  const prev = { [a]: null }, q = [a];
+  while (q.length) { const n = q.shift(); if (n === b) break; for (const m of adj[n] || []) if (!(m in prev)) { prev[m] = n; q.push(m); } }
+  const out = []; for (let n = b; n != null; n = prev[n]) out.unshift(n); return out[0] === a ? out : [a, b];
+}
+const SEATS = (() => { const cx = 3.9, cy = 11.3, r = 2.35, out = []; for (let i = 0; i < 6; i++) { const t = Math.PI * 0.95 + i * (Math.PI * 1.1 / 5); out.push([cx + Math.cos(t) * r, cy + Math.sin(t) * r * 0.95]); } return out; })();
+const THRONE = [3.9, 14.1], TABLE = [3.9, 11.3];
+// ---------- drawing helpers ----------
+const shade = (hex, f) => { const n = parseInt(hex.slice(1), 16); let r = n >> 16, g = (n >> 8) & 255, b = n & 255; if (f >= 0) { r += (255 - r) * f; g += (255 - g) * f; b += (255 - b) * f; } else { r *= 1 + f; g *= 1 + f; b *= 1 + f; } return `rgb(${r | 0},${g | 0},${b | 0})`; };
+const rgba = (hex, a) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; };
+class Iso {
+  constructor(canvas) { this.c = canvas; this.g = canvas.getContext('2d'); this.zoom = 1; this.ox = 0; this.oy = 0; this.TW = 56; this.TH = 28; this.ZH = 30; }
+  resize() { const r = this.c.getBoundingClientRect(), d = Math.min(2, devicePixelRatio || 1); this.w = r.width; this.h = r.height; this.c.width = r.width * d; this.c.height = r.height * d; this.g.setTransform(d, 0, 0, d, 0, 0); }
+  P(x, y, z = 0) { const s = this.zoom; return [this.w / 2 + this.ox + (x - y) * this.TW / 2 * s, this.h / 2 + this.oy + ((x + y) * this.TH / 2 - z * this.ZH) * s]; }
+  unP(sx, sy) { const s = this.zoom, a = (sx - this.w / 2 - this.ox) / (this.TW / 2 * s), b = (sy - this.h / 2 - this.oy) / (this.TH / 2 * s); return [(a + b) / 2, (b - a) / 2]; }
+  poly(pts, fill, stroke) { const g = this.g; g.beginPath(); pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); if (fill) { g.fillStyle = fill; g.fill(); } if (stroke) { g.strokeStyle = stroke; g.lineWidth = 1; g.stroke(); } }
+  box(x, y, z, w, d, h, col, o = {}) {
+    const P = (a, b, c) => this.P(a, b, c);
+    const top = [P(x, y, z + h), P(x + w, y, z + h), P(x + w, y + d, z + h), P(x, y + d, z + h)];
+    const left = [P(x, y + d, z), P(x + w, y + d, z), P(x + w, y + d, z + h), P(x, y + d, z + h)];
+    const right = [P(x + w, y, z), P(x + w, y + d, z), P(x + w, y + d, z + h), P(x + w, y, z + h)];
+    this.poly(left, o.left || shade(col, -0.28)); this.poly(right, o.right || shade(col, -0.12)); this.poly(top, o.top || shade(col, 0.1), o.edge);
+    return { top, left, right };
+  }
+  tile(x, y, w, d, z, fill, stroke) { const P = (a, b) => this.P(a, b, z); this.poly([P(x, y), P(x + w, y), P(x + w, y + d), P(x, y + d)], fill, stroke); }
+  ellipse(x, y, z, r, fill, stroke, lw = 1) { const [cx, cy] = this.P(x, y, z), s = this.zoom, g = this.g; g.beginPath(); g.ellipse(cx, cy, r * this.TW / 2 * s * 1.41, r * this.TH / 2 * s * 1.41, 0, 0, 7); if (fill) { g.fillStyle = fill; g.fill(); } if (stroke) { g.lineWidth = lw; g.strokeStyle = stroke; g.stroke(); } }
+  glow(x, y, z, r, col, a = 0.5) { const [cx, cy] = this.P(x, y, z), g = this.g, R = r * this.TW * this.zoom; const gr = g.createRadialGradient(cx, cy, 0, cx, cy, R); gr.addColorStop(0, rgba(col, a)); gr.addColorStop(1, rgba(col, 0)); g.save(); g.globalCompositeOperation = 'lighter'; g.fillStyle = gr; g.fillRect(cx - R, cy - R, R * 2, R * 2); g.restore(); }
+}
+// ---------- characters ----------
+class Agent {
+  constructor(o) { Object.assign(this, { x: 12, y: 9, tx: 12, ty: 9, path: [], speed: 2.2, t: Math.random() * 10, room: 'trading', mood: 'ok', sign: null, wait: 0 }, o); }
+  goRoom(room, spot) {
+    const R = HQ_ROOMS[room]; if (!R) return; const from = HQ_ROOMS[this.room];
+    const dest = spot || [R.x + 0.8 + Math.random() * (R.w - 1.6), R.y + 0.8 + Math.random() * (R.d - 1.6)];
+    if (room === this.room && !spot) { this.path = [dest]; return; }
+    const route = hqPath(from?.node || 'A12', R.node).map(n => HQ_NODES[n]);
+    this.path = [from ? from.door : null, ...route, R.door, dest].filter(Boolean); this.room = room;
+  }
+  step(dt) {
+    this.t += dt;
+    if (!this.path.length) { this.wait -= dt; return false; }
+    const [tx, ty] = this.path[0], dx = tx - this.x, dy = ty - this.y, dist = Math.hypot(dx, dy), v = this.speed * dt;
+    if (dist <= v) { this.x = tx; this.y = ty; this.path.shift(); } else { this.x += dx / dist * v; this.y += dy / dist * v; this.face = dx - dy >= 0 ? 1 : -1; }
+    return true;
+  }
+}
+function drawAgent(iso, a, o = {}) {
+  const walking = a.path.length > 0, bob = walking ? Math.abs(Math.sin(a.t * 10)) * 0.08 : Math.sin(a.t * 2) * 0.02;
+  const col = a.color, sz = a.big ? 1.25 : 1, x = a.x - 0.25 * sz, y = a.y - 0.25 * sz, sleep = a.mood === 'sleep';
+  iso.ellipse(a.x, a.y, 0, 0.32 * sz, 'rgba(0,0,0,.28)');
+  if (a.selected) iso.ellipse(a.x, a.y, 0, 0.5 * sz, null, '#FFFFFF', 2);
+  // legs
+  const lg = walking ? Math.sin(a.t * 10) * 0.07 : 0;
+  iso.box(x + 0.08 * sz, y + 0.1 * sz + lg, 0, 0.14 * sz, 0.14 * sz, 0.22 * sz, '#2A2340');
+  iso.box(x + 0.3 * sz, y + 0.26 * sz - lg, 0, 0.14 * sz, 0.14 * sz, 0.22 * sz, '#2A2340');
+  // body and head
+  const bz = 0.22 * sz + bob;
+  iso.box(x, y, bz, 0.5 * sz, 0.5 * sz, (sleep ? 0.3 : 0.42) * sz, col);
+  const hz = bz + (sleep ? 0.3 : 0.42) * sz;
+  const head = iso.box(x + 0.03 * sz, y + 0.03 * sz, hz, 0.44 * sz, 0.44 * sz, 0.36 * sz, col, { top: shade(col, 0.35), left: shade(col, 0.05), right: shade(col, 0.18) });
+  // face on the front-left side
+  const g = iso.g, L = head.left, fx = (L[0][0] + L[1][0]) / 2, fy = (L[0][1] + L[2][1]) / 2, s = iso.zoom * sz;
+  g.fillStyle = '#14101F';
+  if (sleep) { g.fillRect(fx - 6 * s, fy - 2 * s, 4 * s, 1.4 * s); g.fillRect(fx + 2 * s, fy - 2 * s, 4 * s, 1.4 * s); }
+  else { const blink = Math.sin(a.t * 1.7 + a.id) > 0.985; g.fillRect(fx - 5.5 * s, fy - 3.5 * s, 3 * s, blink ? 0.8 * s : 3.4 * s); g.fillRect(fx + 2.5 * s, fy - 3.5 * s, 3 * s, blink ? 0.8 * s : 3.4 * s); }
+  g.strokeStyle = '#14101F'; g.lineWidth = 1.3 * s; g.beginPath();
+  if (a.mood === 'happy') g.arc(fx, fy + 2 * s, 3 * s, 0.15 * Math.PI, 0.85 * Math.PI); else if (a.mood === 'sad') g.arc(fx, fy + 5.5 * s, 3 * s, 1.15 * Math.PI, 1.85 * Math.PI); else { g.moveTo(fx - 2.5 * s, fy + 3 * s); g.lineTo(fx + 2.5 * s, fy + 3 * s); }
+  g.stroke();
+  // accessories
+  const top = iso.P(a.x, a.y, hz + 0.36 * sz);
+  if (a.big) { g.fillStyle = '#FFD646'; const [cx, cy] = top; g.beginPath(); g.moveTo(cx - 9 * s, cy); g.lineTo(cx - 9 * s, cy - 8 * s); g.lineTo(cx - 4 * s, cy - 4 * s); g.lineTo(cx, cy - 10 * s); g.lineTo(cx + 4 * s, cy - 4 * s); g.lineTo(cx + 9 * s, cy - 8 * s); g.lineTo(cx + 9 * s, cy); g.closePath(); g.fill(); }
+  else if (a.hat === 'antenna') { const [cx, cy] = top; g.strokeStyle = shade(col, 0.4); g.lineWidth = 1.5 * s; g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx, cy - 9 * s); g.stroke(); g.fillStyle = a.deciding ? '#FFD646' : shade(col, 0.5); g.beginPath(); g.arc(cx, cy - 10 * s, 2.4 * s, 0, 7); g.fill(); if (a.deciding) iso.glow(a.x, a.y, hz + 0.75 * sz, 0.4, '#FFD646', 0.7); }
+  if (o.persona) drawPersonaBits(iso, a, top, s);
+  if (a.sign) { // YES / NO / PASS sign held up
+    const [cx, cy] = iso.P(a.x + 0.35, a.y - 0.1, hz + 0.75 * sz + Math.max(0, 0.15 - (a.signT || 0)) * 2), c = a.sign === 'yes' ? '#3DDC97' : a.sign === 'no' ? '#FF5C77' : '#8E81A8';
+    g.fillStyle = '#5B4A33'; g.fillRect(cx - 1 * s, cy, 2 * s, 14 * s);
+    g.beginPath(); g.arc(cx, cy - 4 * s, 10 * s, 0, 7); g.fillStyle = c; g.fill(); g.lineWidth = 2 * s; g.strokeStyle = '#fff'; g.stroke();
+    g.fillStyle = '#fff'; g.font = `800 ${7.5 * s}px -apple-system, system-ui, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(a.sign === 'yes' ? 'YES' : a.sign === 'no' ? 'NO' : '–', cx, cy - 3.6 * s);
+  }
+  a.headScreen = iso.P(a.x, a.y, hz + 0.5 * sz + (a.sign ? 0.7 : 0));
+}
+function drawPersonaBits(iso, a, top, s) {
+  const g = iso.g, [cx, cy] = top;
+  if (a.k === 'surfer') { g.fillStyle = '#BEE3FF'; for (let i = -2; i <= 2; i++) { g.beginPath(); g.arc(cx + i * 3.6 * s, cy - 1 * s, 2.6 * s, Math.PI, 0); g.fill(); } }
+  if (a.k === 'rocket') { g.fillStyle = '#FFD7C2'; g.beginPath(); g.moveTo(cx - 7 * s, cy + 1 * s); g.lineTo(cx, cy - 13 * s); g.lineTo(cx + 7 * s, cy + 1 * s); g.closePath(); g.fill(); g.fillStyle = '#FF5C77'; g.beginPath(); g.arc(cx, cy - 5 * s, 2 * s, 0, 7); g.fill(); }
+  if (a.k === 'scoop') { g.fillStyle = '#2A2340'; g.fillRect(cx - 10 * s, cy - 1 * s, 20 * s, 2.4 * s); g.fillRect(cx - 6 * s, cy - 7 * s, 12 * s, 6 * s); g.fillStyle = '#FF5C77'; g.fillRect(cx - 6 * s, cy - 3 * s, 12 * s, 1.6 * s); }
+  if (a.k === 'shield') { const [sx, sy] = iso.P(a.x + 0.45, a.y + 0.2, 0.5); g.fillStyle = '#C9D2DE'; g.beginPath(); g.moveTo(sx - 6 * s, sy - 7 * s); g.lineTo(sx + 6 * s, sy - 7 * s); g.lineTo(sx + 6 * s, sy + 1 * s); g.lineTo(sx, sy + 7 * s); g.lineTo(sx - 6 * s, sy + 1 * s); g.closePath(); g.fill(); g.strokeStyle = '#6E7A8C'; g.lineWidth = 1.5 * s; g.stroke(); }
+  if (a.k === 'prof') { g.strokeStyle = '#14101F'; g.lineWidth = 1.2 * s; const fy = cy + 13 * s; g.strokeRect(cx - 9.5 * s, fy, 6 * s, 4.5 * s); g.strokeRect(cx - 1 * s, fy + 1.5 * s, 6 * s, 4.5 * s); g.fillStyle = '#E8E1F5'; g.fillRect(cx - 3 * s, cy - 3 * s, 6 * s, 3 * s); }
+  if (a.k === 'doubt') { g.strokeStyle = '#14101F'; g.lineWidth = 1.5 * s; g.beginPath(); g.moveTo(cx - 8 * s, cy + 9 * s); g.lineTo(cx - 3 * s, cy + 7 * s); g.moveTo(cx + 1 * s, cy + 8 * s); g.lineTo(cx + 6 * s, cy + 11 * s); g.stroke(); }
+}
+// ---------- the scene ----------
+function drawWorld(iso, st, t) {
+  const g = iso.g, R = HQ_ROOMS;
+  // corridor floor
+  iso.tile(-0.4, -0.4, 22.3, 16.8, 0, '#1A1530');
+  for (const [k, r] of Object.entries(R)) {
+    iso.tile(r.x, r.y, r.w, r.d, 0.001, r.floor);
+    // floor grid
+    g.save(); g.globalAlpha = 0.12; for (let i = 1; i < r.w; i++) { const a = iso.P(r.x + i, r.y, 0), b = iso.P(r.x + i, r.y + r.d, 0); g.beginPath(); g.moveTo(...a); g.lineTo(...b); g.strokeStyle = '#ffffff'; g.lineWidth = 0.6; g.stroke(); } for (let j = 1; j < r.d; j++) { const a = iso.P(r.x, r.y + j, 0), b = iso.P(r.x + r.w, r.y + j, 0); g.beginPath(); g.moveTo(...a); g.lineTo(...b); g.stroke(); } g.restore();
+    // back walls (north and west)
+    iso.box(r.x, r.y - 0.15, 0, r.w, 0.15, 1.1, '#3B3358', { top: shade(r.accent, -0.2) });
+    iso.box(r.x - 0.15, r.y, 0, 0.15, r.d, 1.1, '#342D4E', { top: shade(r.accent, -0.2) });
+    // neon strip
+    const a = iso.P(r.x, r.y - 0.15, 1.1), b = iso.P(r.x + r.w, r.y - 0.15, 1.1); g.save(); g.strokeStyle = r.accent; g.globalAlpha = 0.85; g.lineWidth = 2 * iso.zoom; g.shadowColor = r.accent; g.shadowBlur = 8; g.beginPath(); g.moveTo(...a); g.lineTo(...b); g.stroke(); g.restore();
+  }
+  // Newsroom: desks, a news wall with scrolling bars
+  for (let i = 0; i < 3; i++) { iso.box(0.7 + i * 1.9, 2.2, 0, 1.3, 0.7, 0.45, '#5A4A7A'); iso.box(0.9 + i * 1.9, 2.25, 0.45, 0.7, 0.12, 0.42, '#1E1A2E', { left: '#4EA8FF' }); }
+  { const r = R.news, s = iso.box(r.x + 0.8, r.y + 0.05, 0.7, 4.6, 0.12, 1.4, '#14101F', { left: '#14101F' }); drawScreenBars(iso, s.left, t, '#F5C542', st.headline); }
+  // Chart room: wall of live charts
+  { const r = R.charts; for (let i = 0; i < 3; i++) { const s = iso.box(r.x + 0.4 + i * 2.05, r.y + 0.05, 0.6, 1.8, 0.12, 1.25, '#0E1830', { left: '#0E1830' }); drawScreenLine(iso, s.left, (st.sparks || [])[i], i, t); } for (let i = 0; i < 2; i++) iso.box(r.x + 1.2 + i * 3, r.y + 2.6, 0, 1.6, 0.8, 0.45, '#3C5A86'); }
+  // Lab: tubes for tryouts
+  { const r = R.lab, n = Math.min(12, st.tryouts?.length || 6); for (let i = 0; i < n; i++) { const tx = r.x + 0.6 + (i % 6) * 1.12, ty = r.y + 0.7 + Math.floor(i / 6) * 1.6, tr = st.tryouts?.[i], on = tr && tr.alloc > 0, c = on ? '#3DDC97' : tr && !tr.eligible ? '#FF5C77' : '#5AB8FF'; iso.box(tx, ty, 0, 0.5, 0.5, 0.18, '#2D3B48'); iso.box(tx + 0.08, ty + 0.08, 0.18, 0.34, 0.34, 0.9 + (on ? Math.sin(t * 2 + i) * 0.05 : 0), c, { top: shade(c, 0.4), left: rgba(c, 0.55), right: rgba(c, 0.75) }); if (on) iso.glow(tx + 0.25, ty + 0.25, 1, 0.55, c, 0.35); } }
+  // Council chamber: round table, seats, throne
+  iso.ellipse(TABLE[0], TABLE[1], 0, 3.1, '#2E1E2A'); iso.ellipse(TABLE[0], TABLE[1], 0.02, 3.1, null, '#FF7A45', 1.5 * iso.zoom);
+  iso.ellipse(TABLE[0], TABLE[1], 0.42, 1.6, '#5A3A2E'); iso.ellipse(TABLE[0], TABLE[1], 0.46, 1.6, '#7FD36B'); iso.ellipse(TABLE[0], TABLE[1], 0.47, 1.6, null, '#FFD646', 1.5 * iso.zoom);
+  iso.glow(TABLE[0], TABLE[1], 0.9, 1.1, st.councilGlow || '#FFD646', 0.35 + Math.sin(t * 2) * 0.08);
+  iso.box(THRONE[0] - 0.55, THRONE[1] - 0.3, 0, 1.1, 0.6, 0.35, '#7A2F2F'); iso.box(THRONE[0] - 0.55, THRONE[1] + 0.2, 0.35, 1.1, 0.12, 1.4, '#9A3B3B', { top: '#FFD646' });
+  // Trading desk: terminals, ticker wall
+  { const r = R.trading; for (let i = 0; i < 4; i++) { const dx = r.x + 0.6 + (i % 2) * 3, dy = r.y + 1.2 + Math.floor(i / 2) * 1.7; iso.box(dx, dy, 0, 2, 0.7, 0.45, '#4B4270'); for (let k = 0; k < 2; k++) iso.box(dx + 0.25 + k * 0.9, dy + 0.05, 0.45, 0.6, 0.1, 0.38, '#14101F', { left: Math.sin(t * 3 + i + k) > 0.6 ? '#B48CFF' : '#3DDC97' }); } }
+  // Vault: door and gold
+  { const r = R.vault, door = iso.box(r.x + 3.4, r.y + 0.05, 0, 1.6, 0.2, 1.6, '#6B6B78'); const [cx, cy] = [(door.left[0][0] + door.left[2][0]) / 2, (door.left[0][1] + door.left[2][1]) / 2]; g.beginPath(); g.arc(cx, cy, 16 * iso.zoom, 0, 7); g.fillStyle = '#9AA0AE'; g.fill(); g.strokeStyle = '#4D515C'; g.lineWidth = 3 * iso.zoom; g.stroke(); g.save(); g.translate(cx, cy); g.rotate(t * 0.3); for (let i = 0; i < 4; i++) { g.rotate(Math.PI / 2); g.fillStyle = '#4D515C'; g.fillRect(-1.5 * iso.zoom, 3 * iso.zoom, 3 * iso.zoom, 10 * iso.zoom); } g.restore();
+    const pl = st.vault?.total || 0, n = Math.min(28, Math.round(Math.abs(pl) / 40));
+    for (let i = 0; i < n; i++) { const gx = r.x + 0.6 + (i % 5) * 0.55, gy = r.y + 1.8 + Math.floor(i / 10) * 0.6, gz = Math.floor((i % 10) / 5) * 0.16; if (pl >= 0) iso.box(gx, gy, gz, 0.45, 0.3, 0.16, '#FFC93C', { top: '#FFE68A' }); else iso.box(gx, gy, gz, 0.45, 0.45, 0.3, '#7A2A35'); }
+    if (pl > 0) iso.glow(r.x + 1.8, r.y + 2.4, 0.3, 1.1, '#FFD646', 0.28); }
+  // Control room: lever, beacon, one light per bot
+  { const r = R.control, alarm = st.alarmOn; iso.box(r.x + 0.6, r.y + 0.5, 0, 3.2, 0.7, 0.6, '#3A3042'); (st.bots || []).slice(0, 10).forEach((b, i) => { const c = b.status === 'killed' ? '#FF5C77' : b.status === 'paused' ? '#8E81A8' : b.deciding ? '#FFD646' : '#3DDC97'; iso.box(r.x + 0.75 + i * 0.3, r.y + 0.55, 0.6, 0.18, 0.18, 0.1, c, { top: c }); });
+    iso.box(r.x + 4.5, r.y + 0.6, 0, 0.6, 0.6, 0.5, '#5A4A5A'); iso.box(r.x + 4.72, r.y + 0.82, 0.5, 0.16, 0.16, 0.6, '#BBBBBB'); iso.box(r.x + 4.62, r.y + 0.72, 1.1, 0.36, 0.36, 0.25, st.halt ? '#FF5C77' : '#3DDC97');
+    const bc = alarm ? '#FF5C77' : '#3DDC97'; iso.box(r.x + 5.6, r.y + 0.4, 1.1, 0.4, 0.4, 0.3, bc, { top: shade(bc, 0.4) }); iso.glow(r.x + 5.8, r.y + 0.6, 1.35, alarm ? 1.6 + Math.sin(t * 8) * 0.5 : 0.6, bc, alarm ? 0.6 : 0.25); }
+  // Lounge: couches
+  { const r = R.lounge; iso.box(r.x + 0.5, r.y + 0.4, 0, 2.6, 0.8, 0.4, '#6A4C8C'); iso.box(r.x + 0.5, r.y + 0.3, 0.4, 2.6, 0.2, 0.45, '#7B5AA0'); iso.box(r.x + 3.4, r.y + 1.6, 0, 1.2, 1.2, 0.3, '#4A3B5E'); }
+}
+function drawScreenBars(iso, face, t, col, text) {
+  const g = iso.g, [a, b, c, d] = face; // bottom-left, bottom-right, top-right, top-left
+  g.save(); g.beginPath(); g.moveTo(...a); g.lineTo(...b); g.lineTo(...c); g.lineTo(...d); g.closePath(); g.clip();
+  g.fillStyle = '#120E1E'; g.fill();
+  for (let i = 0; i < 4; i++) { const f = ((t * 0.08 + i * 0.27) % 1), y0 = 0.25 + i * 0.17; const p1 = lerp2(lerp2(a, d, y0), lerp2(b, c, y0), f), p2 = lerp2(lerp2(a, d, y0), lerp2(b, c, y0), Math.min(1, f + 0.35)); g.strokeStyle = i === 0 ? col : rgba('#FFFFFF', 0.35); g.lineWidth = (i === 0 ? 3 : 2) * iso.zoom; g.beginPath(); g.moveTo(...p1); g.lineTo(...p2); g.stroke(); }
+  g.restore();
+  void text;
+}
+function drawScreenLine(iso, face, vals, i, t) {
+  const g = iso.g, [a, b, c, d] = face;
+  g.save(); g.beginPath(); g.moveTo(...a); g.lineTo(...b); g.lineTo(...c); g.lineTo(...d); g.closePath(); g.clip(); g.fillStyle = '#0B1426'; g.fill();
+  const v = vals && vals.length > 2 ? vals : Array.from({ length: 24 }, (_, k) => Math.sin(k * 0.5 + i * 2 + t * 0.6) + k * 0.05);
+  const lo = Math.min(...v), hi = Math.max(...v), up = v[v.length - 1] >= v[0];
+  g.strokeStyle = up ? '#3DDC97' : '#FF5C77'; g.lineWidth = 1.8 * iso.zoom; g.beginPath();
+  v.forEach((x, k) => { const f = k / (v.length - 1), y = 0.15 + 0.7 * ((x - lo) / ((hi - lo) || 1)); const p = lerp2(lerp2(a, b, f), lerp2(d, c, f), y); k ? g.lineTo(...p) : g.moveTo(...p); }); g.stroke(); g.restore();
+}
+const lerp2 = (p, q, f) => [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f];
+
+// ---------- the page ----------
+PAGES.hq = {
+  mount(p, [mode, follow]) {
+    p.el.classList.add('hq-page'); p.title('Mango HQ', true);
+    p.acts(`<button class="icon-btn" data-act="hqInfo" aria-label="What am I looking at">${icon('info')}</button>`);
+    p.body.innerHTML = `<div class="hq" id="hq"><canvas id="hq-c"></canvas><div class="hq-ov" id="hq-ov"></div>
+      <div class="hq-top"><div class="hq-stats" id="hq-stats"></div>${seg('hqm', [['floor', 'Floor'], ['council', 'Council'], ['replay', 'Replay']], mode || 'floor')}</div>
+      <div class="hq-alarm hidden" id="hq-alarm"></div>
+      <div class="hq-case hidden" id="hq-case"></div>
+      <div class="hq-board hidden" id="hq-board"></div>
+      <div class="hq-tools"><button class="icon-btn" id="hq-cine" aria-label="Follow the action">${icon('eye')}</button><button class="icon-btn" id="hq-home" aria-label="Recenter">${icon('target')}</button></div>
+      <div class="hq-card hidden" id="hq-card"></div>
+      <div class="hq-ticker" id="hq-ticker"></div></div>`;
+    const st = p.hq = { mode: mode || 'floor', agents: new Map(), members: [], bubbles: [], parts: [], queue: [], session: null, cine: store.get('hqCine') !== false, t: 0, follow: follow ? +follow : null, calm: reduced() };
+    const cv = $('#hq-c', p.body), iso = st.iso = new Iso(cv);
+    const fit = () => { iso.resize(); this.camHome(p, true); };
+    st.ro = new ResizeObserver(() => { iso.resize(); }); st.ro.observe(cv);
+    raf(() => { fit(); placeThumbs(p.body); });
+    onSeg(p.body, 'hqm', v => this.setMode(p, v));
+    $('#hq-cine', p.body).classList.toggle('on', st.cine);
+    $('#hq-cine', p.body).addEventListener('click', e => { st.cine = !st.cine; store.set('hqCine', st.cine); e.currentTarget.classList.toggle('on', st.cine); toast(st.cine ? 'Following the action' : 'Free camera', { kind: 'info', ms: 1400 }); });
+    $('#hq-home', p.body).addEventListener('click', () => this.camHome(p));
+    this.bindInput(p, cv);
+    // the six council members sit around the table
+    st.members = [];
+    st.chair = new Agent({ k: 'chair', name: 'Big Mango', id: 99, color: '#FF9F1C', big: true, x: THRONE[0], y: THRONE[1] - 0.2, room: 'council', speed: 0 });
+    p.on('bot', () => {});
+    p.cleanups.push(on('hq', ev => this.onEvent(p, ev)));
+    this.load(p).then(() => { if (st.mode !== 'floor') this.setMode(p, st.mode); });
+    p.timer(() => this.load(p, true), 30e3);
+    let last = performance.now();
+    const loop = now => {
+      if (!document.body.contains(cv)) return;
+      const dt = Math.min(0.05, (now - last) / 1000); last = now;
+      if (!document.hidden) this.frame(p, dt);
+      st.rafId = requestAnimationFrame(loop);
+    };
+    st.rafId = requestAnimationFrame(loop);
+    p.cleanups.push(() => { cancelAnimationFrame(st.rafId); st.ro.disconnect(); });
+  },
+  async load(p, quiet) {
+    const st = p.hq;
+    try {
+      const d = await api('hq'); st.data = d;
+      const real = isRealSpace(), bots = d.bots.filter(b => real ? b.broker : !b.broker);
+      st.bots = bots; st.tryouts = bots.find(b => b.auto)?.tryouts || [];
+      if (!st.members.length) st.members = d.members.map((m, i) => new Agent({ ...m, id: 100 + i, persona: true, color: m.color, x: SEATS[i][0], y: SEATS[i][1], room: 'council', speed: 0 }));
+      for (const b of bots) {
+        let a = st.agents.get(b.id);
+        if (!a) { a = new Agent({ id: b.id, bot: b, color: hueOf(b.strategy), big: b.auto, hat: b.auto ? null : 'antenna', name: b.name }); const home = this.homeOf(b); const R = HQ_ROOMS[home]; a.x = R.x + 1 + Math.random() * (R.w - 2); a.y = R.y + 1 + Math.random() * (R.d - 2); a.room = home; st.agents.set(b.id, a); }
+        a.bot = b; a.name = b.name; a.deciding = b.deciding; a.mood = b.status === 'paused' ? 'sleep' : b.status === 'killed' ? 'sad' : b.ret > 0.2 ? 'happy' : b.ret < -2 ? 'sad' : 'ok';
+        if (!a.busy && !quiet) a.goRoom(this.homeOf(b));
+      }
+      for (const id of [...st.agents.keys()]) if (!bots.some(b => b.id === id)) st.agents.delete(id);
+      st.sparks = bots.slice(0, 3).map(b => (b.spark || []).map(x => Array.isArray(x) ? x[1] : x));
+      st.headline = d.events.find(e => e.kind === 'decision')?.title || '';
+      st.alarmOn = d.alarm.halt || d.alarm.killed.length || d.alarm.brake.length || d.alarm.cooldown.length;
+      st.halt = d.alarm.halt;
+      this.drawStats(p); this.drawTicker(p); this.drawAlarm(p);
+      if (!quiet && !st.session && d.council.length) st.queue.push(...d.council.slice(0, 3).reverse().map(c => ({ ...c, replay: true })));
+      if (st.mode === 'council') this.loadBoard(p);
+      if (st.follow && !quiet) { const a = st.agents.get(st.follow); if (a) this.select(p, a); }
+    } catch (e) { if (!quiet) toastErr(e); }
+  },
+  homeOf(b) {
+    const k = b.activity?.k;
+    if (b.status === 'paused') return 'lounge';
+    if (b.status === 'killed' || k === 'halted' || k === 'brake' || k === 'cooldown') return 'control';
+    if (b.auto) return 'lab';
+    if (k === 'hold' || k === 'auto' || k === 'queued') return 'trading';
+    return 'charts';
+  },
+  drawStats(p) {
+    const d = p.hq.data; if (!d) return;
+    const bots = p.hq.bots || [], running = bots.filter(b => b.status === 'running').length, v = d.vault;
+    $('#hq-stats', p.body).innerHTML = `<div><span>Bot P&amp;L</span><b class="n ${cls(v.total)}">${money(v.total, { sign: true })}</b></div><div><span>Today</span><b class="n ${cls(v.day)}">${money(v.day, { sign: true })}</b></div><div><span>Trades today</span><b class="n">${d.trades}</b></div><div><span>Running</span><b class="n">${running}/${bots.length}</b></div>`;
+  },
+  drawTicker(p) {
+    const d = p.hq.data; if (!d) return;
+    const items = d.tick.map(x => `<span><b>${h(x.sym)}</b> ${price(x.p)} <i class="${x.ch >= 0 ? 'up' : 'dn'}">${x.ch >= 0 ? '▲' : '▼'} ${Math.abs(x.ch).toFixed(2)}%</i></span>`).join('');
+    $('#hq-ticker', p.body).innerHTML = `<div class="tk-run">${items}${items}</div>`;
+  },
+  drawAlarm(p) {
+    const d = p.hq.data, el = $('#hq-alarm', p.body); if (!d || !el) return;
+    const a = d.alarm, msg = a.halt ? 'Kill switch is on: Alpaca trading stopped' : a.killed.length ? `${a.killed.join(', ')} stopped itself` : a.brake.length ? `${a.brake.join(', ')}: brake on` : a.cooldown.length ? `${a.cooldown.join(', ')}: daily loss limit hit` : '';
+    el.classList.toggle('hidden', !msg); el.innerHTML = msg ? `${icon('shield')}<span>${h(msg)}</span>` : '';
+  },
+  // ---------- live events ----------
+  onEvent(p, ev) {
+    const st = p.hq, a = ev.botId ? st.agents.get(ev.botId) : null;
+    if (ev.kind === 'phase' && a) {
+      a.busy = ev.phase !== 'done'; a.deciding = a.busy;
+      if (ev.phase === 'news') { a.goRoom('news'); this.say(p, a, pickLine(['Reading the news…', 'Checking headlines and earnings', 'Any scoops today?'])); }
+      else if (ev.phase === 'council') { a.goRoom('council', [TABLE[0] + 2.6, TABLE[1] - 2.2 + Math.random()]); this.say(p, a, 'Taking it to the council'); }
+      else if (ev.phase === 'trade') { a.goRoom('trading'); }
+      else if (ev.phase === 'done') { setTimeout(() => { a.goRoom(this.homeOf(a.bot)); this.load(p, true); }, 2500); }
+      if (st.cine) this.focus(p, a);
+    } else if (ev.kind === 'council') {
+      api('council?limit=1' + (ev.botId ? '&bot=' + ev.botId : '')).then(l => { if (l[0]) st.queue.push(l[0]); }).catch(() => {});
+    } else if (ev.kind === 'trade' && a) {
+      this.say(p, a, ev.title, ev.side === 'buy' ? 'buy' : 'sell');
+      if (ev.pnl > 0) this.coins(p, a, 12); else if (/stop/i.test(ev.title)) this.flash(p, a, '#FF5C77');
+      if (st.cine) this.focus(p, a);
+    } else if ((ev.kind === 'risk' || ev.kind === 'error') && a) { a.goRoom('control'); this.say(p, a, ev.title, 'bad'); this.flash(p, a, '#FF5C77'); }
+    else if (ev.kind === 'report' && a) { a.goRoom('lab'); this.say(p, a, ev.title, 'good'); }
+    else if (ev.kind === 'decision' && a) this.say(p, a, ev.title.replace(/^(Daily decision|Manual run): /, ''));
+  },
+  say(p, a, text, tone = '') {
+    const ov = $('#hq-ov', p.body); if (!ov || !text) return;
+    for (const b of p.hq.bubbles.filter(b => b.a === a || (a.persona && b.a.persona))) b.die = 0;
+    const el = document.createElement('div'); el.className = `hq-bub ${tone}`; el.textContent = String(text).slice(0, 110); ov.appendChild(el);
+    p.hq.bubbles.push({ a, el, die: tone === 'line' ? 4.2 : 5.5 });
+  },
+  coins(p, a, n) { if (p.hq.calm) return; for (let i = 0; i < n; i++) p.hq.parts.push({ x: a.x, y: a.y, z: 1, vx: (Math.random() - 0.5) * 1.6, vy: (Math.random() - 0.5) * 1.6, vz: 2 + Math.random() * 2, life: 1.4, c: '#FFD646' }); },
+  flash(p, a, c) { p.hq.parts.push({ x: a.x, y: a.y, z: 0.6, ring: true, life: 0.9, c }); },
+  // ---------- council sessions ----------
+  runSession(p, s) {
+    const st = p.hq, bot = st.bots?.find(b => b.id === s.botId);
+    st.session = { s, t: 0, i: -1, done: false };
+    const tally = { yes: 0, no: 0 };
+    st.members.forEach(m => { m.sign = null; m.mood = 'ok'; });
+    const card = $('#hq-case', p.body);
+    const verdict = s.action === 'buy' || s.action === 'add' ? (s.no > s.yes ? 'OVERRULED' : 'APPROVED') : s.action === 'skip' ? 'REJECTED' : s.action === 'sell' || s.action === 'trim' ? 'SELL' : 'HOLD';
+    const vClass = verdict === 'APPROVED' ? 'up' : verdict === 'REJECTED' || verdict === 'SELL' ? 'dn' : 'ac';
+    const draw = () => { card.innerHTML = `<div class="hc-q"><span class="t-cap">${h(bot?.name || 'A bot')} asks${s.replay ? ' · replay' : ''}</span><b>${s.action === 'sell' || s.action === 'trim' ? 'Sell' : 'Buy'} ${h(s.sym)} at ${price(s.price)}?</b></div><div class="hc-tally"><span class="up">YES ${tally.yes}</span><i style="--y:${tally.yes};--n:${tally.no}"></i><span class="dn">${tally.no} NO</span></div>${st.session.done ? `<div class="hc-stamp ${vClass}">${verdict}</div><p class="hc-chair">${icon('flag')}${h(s.chair || '')}</p>` : ''}${s.settled && st.session.done ? `<p class="t-foot">A week later it moved ${pct(s.result * 100)}. ${Object.entries(s.right || {}).filter(([, v]) => v).length} of ${Object.keys(s.right || {}).length} called it.</p>` : ''}`; };
+    card.classList.toggle('hidden', !!s.replay && st.mode === 'floor'); draw();
+    st.session.next = () => {
+      const ss = st.session; ss.i++;
+      if (ss.i < s.votes.length) {
+        const v = s.votes[ss.i], m = st.members.find(x => x.k === v.k); if (!m) return ss.next();
+        m.sign = v.vote; m.signT = 0; m.mood = v.vote === 'yes' ? 'happy' : v.vote === 'no' ? 'sad' : 'ok';
+        if (v.vote === 'yes') tally.yes++; if (v.vote === 'no') tally.no++;
+        this.say(p, m, v.line, `line ${v.vote}`); draw(); buzz(4);
+      } else if (!ss.done) {
+        ss.done = true; st.chair.mood = verdict === 'APPROVED' ? 'happy' : verdict === 'REJECTED' ? 'sad' : 'ok'; st.chair.gavel = 1;
+        this.say(p, st.chair, s.chair || verdict, verdict === 'APPROVED' ? 'good' : verdict === 'REJECTED' ? 'bad' : '');
+        st.councilGlow = verdict === 'APPROVED' ? '#3DDC97' : verdict === 'REJECTED' ? '#FF5C77' : '#FFD646';
+        draw(); buzz(18);
+      }
+    };
+    if (st.mode === 'council' || (st.cine && !s.replay && !st.followAgent)) this.camCouncil(p);
+  },
+  // ---------- one frame ----------
+  frame(p, dt) {
+    const st = p.hq, iso = st.iso, g = iso.g; if (!iso.w) return;
+    st.t += dt;
+    // camera easing
+    if (st.cam) { const k = Math.min(1, dt * 3.2); iso.ox += (st.cam.ox - iso.ox) * k; iso.oy += (st.cam.oy - iso.oy) * k; iso.zoom += (st.cam.zoom - iso.zoom) * k; if (Math.abs(st.cam.ox - iso.ox) < 0.5 && Math.abs(st.cam.zoom - iso.zoom) < 0.002) st.cam = null; }
+    // sky
+    const m = st.data?.market, open = m?.state === 'open', mood = m?.spy ?? 0;
+    const sky = g.createLinearGradient(0, 0, 0, iso.h);
+    if (!open) { sky.addColorStop(0, '#05030C'); sky.addColorStop(1, '#151030'); } else if (mood < -0.8) { sky.addColorStop(0, '#2A0E22'); sky.addColorStop(1, '#3B1530'); } else { sky.addColorStop(0, '#120C2E'); sky.addColorStop(1, mood > 0.5 ? '#123A3A' : '#251B4A'); }
+    g.fillStyle = sky; g.fillRect(0, 0, iso.w, iso.h);
+    if (!open && !st.calm) { st.stars = st.stars || Array.from({ length: 60 }, () => [Math.random(), Math.random() * 0.6, Math.random()]); g.fillStyle = '#fff'; for (const [sx, sy, ph] of st.stars) { g.globalAlpha = 0.3 + 0.5 * Math.abs(Math.sin(st.t * 0.8 + ph * 9)); g.fillRect(sx * iso.w, sy * iso.h, 1.5, 1.5); } g.globalAlpha = 1; }
+    drawWorld(iso, { ...st, bots: st.bots, vault: st.data?.vault }, st.t);
+    // session timing
+    if (!st.session && st.queue.length) this.runSession(p, st.queue.shift());
+    if (st.session) { const ss = st.session; ss.t += dt; const beat = ss.done ? 4.5 : 1.35; if (ss.t >= beat) { ss.t = 0; if (ss.done) { st.session = null; st.members.forEach(mm => { mm.sign = null; }); st.councilGlow = null; if (!st.queue.length) setTimeout(() => { if (!p.hq.session) $('#hq-case', p.body)?.classList.add('hidden'); }, 400); } else ss.next(); } }
+    // move bots, idle wander
+    for (const a of st.agents.values()) { const moving = a.step(dt); if (!moving && !a.busy) { a.wait -= dt; if (a.wait <= 0) { a.wait = 4 + Math.random() * 6; if (a.mood !== 'sleep') a.goRoom(a.room); } } }
+    for (const mm of st.members) { mm.t += dt; if (mm.sign) mm.signT = (mm.signT || 0) + dt; }
+    st.chair.t += dt;
+    // draw characters back to front
+    const all = [...st.members.map(x => [x, true]), [st.chair, true], ...[...st.agents.values()].map(x => [x, false])].sort((a, b) => (a[0].x + a[0].y) - (b[0].x + b[0].y));
+    for (const [a, persona] of all) drawAgent(iso, a, { persona: persona && a.k !== 'chair' });
+    if (st.chair.gavel > 0) { st.chair.gavel -= dt * 2; const [cx, cy] = iso.P(THRONE[0] + 0.5, THRONE[1] - 0.6, 1.3 + Math.max(0, st.chair.gavel) * 0.5); g.fillStyle = '#8B5A2B'; g.save(); g.translate(cx, cy); g.rotate(-st.chair.gavel); g.fillRect(-8 * iso.zoom, -3 * iso.zoom, 16 * iso.zoom, 6 * iso.zoom); g.restore(); }
+    // particles
+    st.parts = st.parts.filter(q => (q.life -= dt) > 0);
+    for (const q of st.parts) {
+      if (q.ring) { const [cx, cy] = iso.P(q.x, q.y, q.z), r = (1 - q.life) * 60 * iso.zoom; g.beginPath(); g.ellipse(cx, cy, r, r / 2, 0, 0, 7); g.strokeStyle = rgba(q.c, q.life); g.lineWidth = 3; g.stroke(); continue; }
+      q.vz -= 6 * dt; q.x += q.vx * dt; q.y += q.vy * dt; q.z = Math.max(0, q.z + q.vz * dt);
+      const [cx, cy] = iso.P(q.x, q.y, q.z); g.fillStyle = q.c; g.globalAlpha = Math.min(1, q.life * 2); g.fillRect(cx - 3, cy - 3, 6, 4); g.globalAlpha = 1;
+    }
+    // room labels and speech bubbles (HTML on top of the canvas)
+    this.placeOverlay(p);
+    // follow the selected bot
+    if (st.followAgent && !st.drag) { const a = st.followAgent, [sx, sy] = iso.P(a.x, a.y, 0.5); iso.ox += (iso.w / 2 - sx) * Math.min(1, dt * 2); iso.oy += (iso.h * 0.55 - sy) * Math.min(1, dt * 2); }
+  },
+  placeOverlay(p) {
+    const st = p.hq, iso = st.iso, ov = $('#hq-ov', p.body); if (!ov) return;
+    if (!st.labels) {
+      st.labels = Object.entries(HQ_ROOMS).map(([k, r]) => { const el = document.createElement('button'); el.className = 'hq-room'; el.style.setProperty('--c', r.accent); el.innerHTML = `${h(r.name)}<small></small>`; el.dataset.room = k; ov.appendChild(el); el.addEventListener('click', e => { e.stopPropagation(); this.roomInfo(p, k); }); return { el, r, k }; });
+      st.tags = new Map();
+    }
+    const counts = {}; for (const a of st.agents.values()) counts[a.room] = (counts[a.room] || 0) + 1;
+    for (const L of st.labels) { const [x, y] = iso.P(L.r.x + 0.2, L.r.y + 0.2, 1.25); L.el.style.transform = `translate(${x}px, ${y}px)`; const n = L.k === 'council' ? '' : counts[L.k] ? `${counts[L.k]}` : ''; const sm = L.el.firstElementChild; if (sm.textContent !== n) sm.textContent = n; L.el.style.opacity = iso.zoom < 0.4 ? 0 : 1; }
+    // name tags for bots
+    for (const a of st.agents.values()) {
+      let el = st.tags.get(a.id); if (!el) { el = document.createElement('div'); el.className = 'hq-tag'; ov.appendChild(el); st.tags.set(a.id, el); }
+      if (el._n !== a.name) { el.textContent = a.name; el._n = a.name; }
+      const [x, y] = a.headScreen || [0, 0]; el.style.transform = `translate(${x}px, ${y - 4}px)`; el.classList.toggle('sel', !!a.selected); el.style.setProperty('--c', a.color);
+    }
+    for (const [id, el] of st.tags) if (!st.agents.has(id)) { el.remove(); st.tags.delete(id); }
+    // bubbles
+    st.bubbles = st.bubbles.filter(b => { b.die -= 1 / 60; if (b.die <= 0) { b.el.classList.add('out'); setTimeout(() => b.el.remove(), 300); return false; } const [x, y] = b.a.headScreen || [0, 0], half = Math.min(110, b.el.offsetWidth / 2 + 6); b.el.style.transform = `translate(${clamp(x, half, iso.w - half)}px, ${y - 22}px)`; return true; });
+  },
+  // ---------- camera ----------
+  camHome(p, now) { const st = p.hq, iso = st.iso, fitZ = clamp(Math.min(iso.w / (17 * iso.TW), iso.h / (22 * iso.TH)), 0.42, 1.3); const [cx, cy] = [(11 - 8) * iso.TW / 2, (11 + 8) * iso.TH / 2]; const c = { zoom: fitZ, ox: -cx * fitZ, oy: -cy * fitZ + 10 }; st.followAgent = null; if (now) Object.assign(iso, c); else st.cam = c; },
+  camAt(p, x, y, zoom) { const st = p.hq, iso = st.iso; st.cam = { zoom, ox: -(x - y) * iso.TW / 2 * zoom, oy: -((x + y) * iso.TH / 2 - 0.5 * iso.ZH) * zoom + iso.h * 0.06 }; },
+  camCouncil(p) { this.camAt(p, TABLE[0], TABLE[1] + 0.6, clamp(p.hq.iso.w / 520, 0.8, 1.7)); },
+  focus(p, a) { this.camAt(p, a.x, a.y, Math.max(p.hq.iso.zoom, clamp(p.hq.iso.w / 640, 0.7, 1.3))); },
+  setMode(p, v) {
+    const st = p.hq; st.mode = v;
+    $('#hq-board', p.body).classList.toggle('hidden', v !== 'council');
+    if (st.session) $('#hq-case', p.body).classList.toggle('hidden', !!st.session.s.replay && v === 'floor');
+    if (v === 'council') { this.camCouncil(p); this.loadBoard(p); if (!st.session && !st.queue.length && st.data?.council?.length) st.queue.push(...st.data.council.slice(0, 5).reverse().map(c => ({ ...c, replay: true }))); }
+    else if (v === 'floor') this.camHome(p);
+    else if (v === 'replay') this.replay(p);
+  },
+  async loadBoard(p) {
+    const el = $('#hq-board', p.body); if (!el) return;
+    try {
+      const b = await api('council/board');
+      if (el._min == null) el._min = p.hq.iso.w < 600; el.classList.toggle('min', el._min); el.onclick = e => { if (e.target.closest('.hb-h')) { el._min = !el._min; el.classList.toggle('min', el._min); } };
+      el.innerHTML = `<div class="hb-h"><b>Who called it? ${icon('down')}</b><span class="t-cap">${b.settled ? `${b.settled} votes checked a week later` : 'Votes get checked a week after each session'}${b.pending ? ` · ${b.pending} waiting` : ''}</span></div>
+        ${b.members.map(m => `<div class="hb-row" style="--c:${m.color}"><span class="hb-n">${h(m.name)}<small>${h(m.role)}</small></span><i><em style="width:${m.acc == null ? 0 : Math.round(m.acc * 100)}%"></em></i><b class="n">${m.acc == null ? '–' : Math.round(m.acc * 100) + '%'}</b></div>`).join('')}
+        ${b.settled ? `<p class="t-foot">A council veto would have blocked ${b.veto.blocked} buy${b.veto.blocked === 1 ? '' : 's'}${b.veto.blockedAvg != null ? ` that went ${pct(b.veto.blockedAvg * 100)} on average` : ''}${b.veto.wanted ? `, and it wanted ${b.veto.wanted} the bots skipped${b.veto.wantedAvg != null ? ` (${pct(b.veto.wantedAvg * 100)})` : ''}` : ''}. Turn on "Council veto" in a bot's limits to let a majority NO block buys.</p>` : ''}`;
+    } catch (e) { el.innerHTML = ''; }
+  },
+  // Replays the last day of journal entries on the floor at speed.
+  replay(p) {
+    const st = p.hq, evs = (st.data?.events || []).slice().reverse().filter(e => e.ts > Date.now() - 36 * 3600e3);
+    if (!evs.length) { toast('Nothing to replay yet', { kind: 'info', sub: 'Once your bots make decisions, you can replay the day here.' }); return; }
+    toast('Replaying the last day', { kind: 'info', ms: 1600 });
+    clearInterval(st.replayT); let i = 0;
+    st.replayT = setInterval(() => {
+      if (!document.body.contains(p.el) || i >= evs.length) { clearInterval(st.replayT); if (document.body.contains(p.el)) toast('Replay finished', { kind: 'info', ms: 1400 }); return; }
+      const e = evs[i++];
+      if (e.kind === 'decision') { this.onEvent(p, { kind: 'phase', phase: 'news', botId: e.botId }); setTimeout(() => this.onEvent(p, { kind: 'phase', phase: 'trade', botId: e.botId }), 1200); setTimeout(() => this.onEvent(p, { kind: 'decision', botId: e.botId, title: e.title }), 1800); setTimeout(() => this.onEvent(p, { kind: 'phase', phase: 'done', botId: e.botId }), 2600); }
+      else this.onEvent(p, { kind: e.kind, botId: e.botId, title: e.title, sym: e.sym, side: /^Bought|Buy /.test(e.title) ? 'buy' : 'sell', pnl: /\(\+/.test(e.title) ? 1 : null });
+    }, 2200);
+    p.cleanups.push(() => clearInterval(st.replayT));
+  },
+  // ---------- touch and mouse ----------
+  bindInput(p, cv) {
+    const st = p.hq, pts = new Map(); let start = null, moved = 0, pinch = null;
+    cv.addEventListener('pointerdown', e => { cv.setPointerCapture?.(e.pointerId); pts.set(e.pointerId, [e.offsetX, e.offsetY]); moved = 0; st.cam = null; st.drag = true; if (pts.size === 1) start = { x: e.offsetX, y: e.offsetY, ox: st.iso.ox, oy: st.iso.oy }; if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), z: st.iso.zoom }; } });
+    cv.addEventListener('pointermove', e => {
+      if (!pts.has(e.pointerId)) return; pts.set(e.pointerId, [e.offsetX, e.offsetY]);
+      if (pts.size === 2 && pinch) { const [a, b] = [...pts.values()]; this.zoomAt(p, clamp(pinch.z * Math.hypot(a[0] - b[0], a[1] - b[1]) / pinch.d, 0.3, 2.6), (a[0] + b[0]) / 2, (a[1] + b[1]) / 2); moved = 99; return; }
+      if (start) { const dx = e.offsetX - start.x, dy = e.offsetY - start.y; moved = Math.max(moved, Math.hypot(dx, dy)); st.iso.ox = start.ox + dx; st.iso.oy = start.oy + dy; if (moved > 6) st.followAgent = null; }
+    });
+    const up = e => { pts.delete(e.pointerId); if (!pts.size) { st.drag = false; if (moved < 6 && start) this.tap(p, e.offsetX, e.offsetY); start = null; pinch = null; } };
+    cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+    cv.addEventListener('wheel', e => { e.preventDefault(); this.zoomAt(p, clamp(st.iso.zoom * (e.deltaY < 0 ? 1.1 : 0.9), 0.3, 2.6), e.offsetX, e.offsetY); }, { passive: false });
+    cv.addEventListener('dblclick', () => this.camHome(p));
+  },
+  zoomAt(p, z, sx, sy) { const iso = p.hq.iso, k = z / iso.zoom; iso.ox = sx - iso.w / 2 - (sx - iso.w / 2 - iso.ox) * k; iso.oy = sy - iso.h / 2 - (sy - iso.h / 2 - iso.oy) * k; iso.zoom = z; },
+  tap(p, sx, sy) {
+    const st = p.hq; let best = null, bd = 30;
+    for (const a of [...st.agents.values(), ...st.members, st.chair]) { const [x, y] = a.headScreen || [-1e4, -1e4], d = Math.hypot(sx - x, sy - (y + 14)); if (d < bd) { bd = d; best = a; } }
+    if (best) this.select(p, best); else { for (const a of st.agents.values()) a.selected = false; st.followAgent = null; $('#hq-card', p.body).classList.add('hidden'); }
+  },
+  select(p, a) {
+    const st = p.hq; for (const x of [...st.agents.values(), ...st.members, st.chair]) x.selected = x === a;
+    const card = $('#hq-card', p.body); card.classList.remove('hidden'); buzz(6);
+    if (a.persona || a.k === 'chair') {
+      const m = st.data?.members.find(x => x.k === a.k);
+      card.innerHTML = a.k === 'chair' ? `<div class="hk-h"><b>Big Mango</b><span class="t-cap">The chair</span></div><p class="t-foot">Announces what the bot actually does. The bot's strategy and your limits decide; with "Council veto" on in a bot's limits, a majority NO blocks a buy.</p><button class="btn btn-quiet btn-sm" data-hq="close">Close</button>`
+        : `<div class="hk-h" style="--c:${a.color}"><b>${h(m?.name || a.k)}</b><span class="t-cap">${h(m?.role || '')}</span></div><p class="t-foot">${h(PERSONA_ABOUT[a.k] || '')}</p><button class="btn btn-quiet btn-sm" data-hq="board">Who called it?</button><button class="btn btn-quiet btn-sm" data-hq="close">Close</button>`;
+    } else {
+      const b = a.bot, act = b.activity || {};
+      card.innerHTML = `<div class="hk-h" style="--c:${a.color}"><b>${h(b.name)}</b><span class="n ${cls(b.ret)}">${money(b.value || 0)} · ${pct(b.ret)}</span></div><div class="hk-act"><i class="tone-${act.tone || 'mu'}"></i><div><b>${h(act.text || b.status)}</b>${act.sub ? `<span>${h(act.sub)}</span>` : ''}</div></div><div class="btns"><button class="btn btn-quiet btn-sm" data-hq="follow">${icon('eye')}Follow</button><button class="btn btn-primary btn-sm" data-hq="open">${icon('bot')}Open bot</button></div>`;
+    }
+    card.onclick = e => { const x = e.target.closest('[data-hq]')?.dataset.hq; if (!x) return; if (x === 'close') { card.classList.add('hidden'); a.selected = false; st.followAgent = null; } if (x === 'open') Router.go('bot/' + a.bot.id); if (x === 'follow') { st.followAgent = a; st.cine = false; this.camAt(p, a.x, a.y, Math.max(1, st.iso.zoom)); } if (x === 'board') { const s = $('[data-seg="hqm"] [data-v="council"]', p.body); s && s.click(); } };
+  },
+  roomInfo(p, k) { const r = HQ_ROOMS[k], who = [...p.hq.agents.values()].filter(a => a.room === k).map(a => a.name); toast(r.name, { kind: 'info', sub: r.what + (who.length ? `\nHere now: ${who.join(', ')}` : ''), ms: 3800 }); if (k === 'council') this.setModeBtn(p, 'council'); },
+  setModeBtn(p, v) { const b = $(`[data-seg="hqm"] [data-v="${v}"]`, p.body); if (b && !b.classList.contains('on')) b.click(); },
+};
+const PERSONA_ABOUT = {
+  surfer: 'Votes YES when price is above its 200-day average with the 50-day above it: a real uptrend. NO in a downtrend.',
+  rocket: 'Votes YES after a strong 3-month run that beats the market. Winners tend to keep winning for a while.',
+  scoop: 'Reads the news and social mood. NO on serious bad news or gloomy coverage, YES on clearly good press.',
+  shield: 'Looks for danger: earnings in the next few days, unusually wild swings, or too much in one position.',
+  prof: 'The numbers person: RSI and how far price sits from its 20-day average. NO when stretched, YES when cheap.',
+  doubt: 'The contrarian. NO when everyone is chasing a big week or a hype spike; YES when fear hits a healthy uptrend.',
+};
+const pickLine = a => a[Math.floor(Math.random() * a.length)];
+ACT.hqInfo = () => sheet({ title: 'Mango HQ', tall: true, html: `<p class="dialog-msg">Every bot is a little worker. What they do here is what they really do: when a bot starts its daily decision it walks to the Newsroom to read the news, takes buys and sells to the Council, then heads to the Trading desk. Bubbles show real journal entries and fills.</p>
+  <div class="group">${Object.values(HQ_ROOMS).map(r => `<div class="cell"><div class="lead" style="color:${r.accent}">${icon('grid')}</div><div class="main"><div class="title">${h(r.name)}</div><div class="sub">${h(r.what)}</div></div></div>`).join('')}</div>
+  <div class="section-h"><h2>The Council</h2></div><div class="group">${Object.entries(PERSONA_ABOUT).map(([k, t]) => `<div class="cell"><div class="main"><div class="title">${h({ surfer: 'Surfer · Trend', rocket: 'Rocket · Momentum', scoop: 'Scoop · News', shield: 'Shield · Risk', prof: 'Professor · Value stats', doubt: 'Doubt · Contrarian' }[k])}</div><div class="sub">${h(t)}</div></div></div>`).join('')}</div>
+  <p class="note">Big Mango, the chair, announces what the bot does. Every vote is checked a week later, so "Who called it?" shows which kind of evidence has actually been right for your bots. Drag to look around, pinch to zoom, tap a character for details. The eye button follows the action.</p>` });
 
 // ===================================================================
 // Settings
