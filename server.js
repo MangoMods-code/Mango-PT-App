@@ -308,7 +308,7 @@ const DEF = {
   confirmStyle: 'hold', confirmBuy: false, confirmSell: true, cashAPY: 0, startBalance: 10000,
   // notifications
   pushAlerts: true, pushOrders: true, notifySummary: true, notifyMoves: true, moveThreshold: 5,
-  notifyAchv: true, notifyGames: true, pushBots: true, botWeekly: true, pushReal: true, realDailyLossPct: 3, realHalt: false, faceReal: true, autoBackup: true, quietStart: '', quietEnd: '',
+  notifyAchv: true, notifyGames: true, pushBots: true, botWeekly: true, pushReal: true, realDailyLossPct: 3, realHalt: false, standbyActive: false, standbyActiveAt: 0, faceReal: true, autoBackup: true, quietStart: '', quietEnd: '',
   // look and feel
   hideBalances: false, showCents: true, compactNums: false, defaultRange: '1D', defaultChart: 'Candles',
   theme: 'mango', accent: 'mango', plColors: 'classic', roundedNums: true, reduceMotion: false, celebrate: true,
@@ -1813,6 +1813,7 @@ function liveGuard(b, notional) {
   if (ALP.maxOrder && notional > ALP.maxOrder) fail(`Real-money orders are capped at ${money(ALP.maxOrder)} by ALPACA_MAX_ORDER in Railway.`);
 }
 async function brokerTrade(w, b) {
+  if (standbyPaused()) fail('This is the standby copy and it\'s switched off, so no Alpaca orders go out from here.');
   const sym = cleanSym(b.sym); if (!sym) fail('Pick something to trade');
   if (!assets.has(sym)) await trackAsset(sym, b.kind);
   const crypto = isCrypto(sym), side = b.side === 'sell' ? 'sell' : 'buy', otype = b.otype || 'market', px = priceOf(sym) || 0;
@@ -3361,7 +3362,7 @@ function cleanMandate(m = {}, base = MANDATE_DEF) {
 const botJson = b => ({ id: b.id, name: b.name, wid: b.wid, strategy: b.strategy, params: jsonOr(b.params, {}), syms: jsonOr(b.syms, []), mandate: { ...MANDATE_DEF, ...jsonOr(b.mandate, {}) }, status: b.status, created: tsMs(b.created), lastRun: tsMs(b.last_run), lastDay: b.last_day, peak: b.peak == null ? null : +b.peak, summary: b.summary, killed: b.killed_reason || null });
 async function botLog(botId, kind, title, body = '', data = null, sym = null) {
   await Q('insert into bot_log(bot_id,kind,title,body,data,sym) values($1,$2,$3,$4,$5,$6)', [botId, kind, String(title).slice(0, 200), String(body || '').slice(0, 4000), data ? JSON.stringify(data) : null, sym]).catch(e => warn('bot log', e.message));
-  broadcast({ t: 'evt', e: 'hq', ev: { kind, botId, title: String(title).slice(0, 140), sym, side: data?.side || null, pnl: data?.fill?.pnl ?? null, ts: Date.now() } });
+  broadcast({ t: 'evt', e: 'hq', ev: { kind, botId, title: String(title).slice(0, 140), body: String(body || '').slice(0, 120), sym, side: data?.side || null, pnl: data?.fill?.pnl ?? null, qty: data?.fill?.qty ?? null, price: data?.fill?.price ?? null, ts: Date.now() } });
 }
 // Today's bars with the live price as today's close.
 function withLive(b, sym) {
@@ -3376,6 +3377,7 @@ function withLive(b, sym) {
 }
 const running = new Set();
 async function runBot(id, { manual = false, dry = false } = {}) {
+  if (!dry && standbyPaused()) fail('This is the standby copy and it\'s switched off, so bots don\'t trade here. Switch it on in Settings if your main server is down.');
   if (running.has(id)) fail('This bot is already deciding. Give it a moment.');
   running.add(id); if (!dry) broadcast({ t: 'evt', e: 'bot', id, deciding: true });
   try { return await runBotInner(id, { manual, dry }); } finally { running.delete(id); if (!dry) broadcast({ t: 'evt', e: 'bot', id }); }
@@ -3954,7 +3956,7 @@ GET('/api/state', auth, async req => {
     settings: S, unread, counts: { trades: +counts.trades, events: +counts.events, conditional: ord.length + lims.length, seasons: +seasons[0].n },
     stats: { day: dayChange(pos), diversity: diversity(pos), protected: protectedPct(wid, pos), invested: marketValue(pos) },
     feeds: { crypto: { ok: feeds.crypto.ok, last: feeds.crypto.last }, stocks: { ok: feeds.stocks.ok, last: feeds.stocks.last, key: !!FINNHUB_KEY, live: feeds.stocks.ws } },
-    push: { key: VAPID_PUB, on: pushOn },
+    push: { key: VAPID_PUB, on: pushOn }, standby: standbyJson(),
   };
   if (tokenExpiry(req.token) - Date.now() < (TOKEN_DAYS - 30) * 864e5) out.token = newToken(); // keeps you logged in while you use the app
   return out;
@@ -4912,43 +4914,43 @@ const seedOf = s => [...String(s)].reduce((a, c) => a * 31 + c.charCodeAt(0), 7)
 // Each member looks at its own evidence and says YES, NO or PASS, with a line in its own voice.
 function councilVotes(sym, b, ctx = {}) {
   const i = b?.c?.length - 1, out = [], sd = seedOf(sym + (b?.d?.[i] || ''));
-  if (!(i >= 30)) return COUNCIL.map(m => ({ k: m.k, vote: 'pass', conf: 0, line: 'Not enough history to say.' }));
+  if (!(i >= 30)) return COUNCIL.map(m => ({ k: m.k, vote: 'pass', conf: 0, line: 'Not enough history to say.', c: 'nodata' }));
   const c = b.c[i], s50 = IND.sma(b.c, 50, i), s200 = i >= 200 ? IND.sma(b.c, 200, i) : null, atr = IND.atr(b, 14, i, b.memo) || c * 0.02;
   const r63 = IND.ret(b.c, 63, i), r5 = IND.ret(b.c, 5, i), rsi = IND.rsi(b.c, 14, i, b.memo);
   const v20 = IND.vol(b.c, 20, i), v250 = i > 252 ? IND.vol(b.c, 250, i) : null;
   const m20 = IND.sma(b.c, 20, i); let dev = 0; for (let k = i - 19; k <= i; k++) dev += (b.c[k] - m20) ** 2; const z = (c - m20) / (Math.sqrt(dev / 20) || 1);
   const bz = ctx.buzz, up = ctx.earnings;
   // Surfer: is it trending up?
-  if (s200 && c > s200 && s50 > s200) out.push({ k: 'surfer', vote: 'yes', conf: clamp((c / s200 - 1) * 5, 0.3, 1), line: pick([`Above the 200-day by ${pf(c / s200 - 1, 0)}. Ride the wave.`, `Clean uptrend. Surf's up.`, `Fast average over slow, price over both. I'm in.`], sd) });
-  else if (s200 && c < s200) out.push({ k: 'surfer', vote: 'no', conf: clamp((1 - c / s200) * 5, 0.3, 1), line: pick([`Under its 200-day. No wave to ride.`, `Downtrend. I don't paddle into rocks.`], sd) });
-  else out.push({ k: 'surfer', vote: c > s50 ? 'yes' : 'pass', conf: 0.3, line: c > s50 ? 'Above the 50-day, trend is young.' : 'Flat water. Nothing to ride yet.' });
+  if (s200 && c > s200 && s50 > s200) out.push({ k: 'surfer', vote: 'yes', conf: clamp((c / s200 - 1) * 5, 0.3, 1), line: pick([`Above the 200-day by ${pf(c / s200 - 1, 0)}. Ride the wave.`, `Clean uptrend. Surf's up.`, `Fast average over slow, price over both. I'm in.`], sd), c: 'trend_up', v: { p: pf(c / s200 - 1, 0) } });
+  else if (s200 && c < s200) out.push({ k: 'surfer', vote: 'no', conf: clamp((1 - c / s200) * 5, 0.3, 1), line: pick([`Under its 200-day. No wave to ride.`, `Downtrend. I don't paddle into rocks.`], sd), c: 'trend_down', v: { p: pf(c / s200 - 1, 0) } });
+  else out.push({ k: 'surfer', vote: c > s50 ? 'yes' : 'pass', conf: 0.3, line: c > s50 ? 'Above the 50-day, trend is young.' : 'Flat water. Nothing to ride yet.', c: c > s50 ? 'trend_young' : 'trend_flat' });
   // Rocket: momentum, absolute and against the market
   const bm = ctx.benchRet63;
-  if (r63 != null && r63 > 0.04 && (bm == null || r63 > bm)) out.push({ k: 'rocket', vote: 'yes', conf: clamp(r63 * 4, 0.3, 1), line: pick([`${pf(r63, 0)} in 3 months${bm != null ? `, beating the market's ${pf(bm, 0)}` : ''}. To the moon.`, `Strong 3-month run. Winners keep winning.`], sd + 1) });
-  else if (r63 != null && r63 < -0.03) out.push({ k: 'rocket', vote: 'no', conf: clamp(-r63 * 4, 0.3, 1), line: `${pf(r63, 0)} in 3 months. That's no rocket.` });
-  else out.push({ k: 'rocket', vote: 'pass', conf: 0.2, line: r63 == null ? 'Too new to judge.' : `Only ${pf(r63, 1)} in 3 months. Meh.` });
+  if (r63 != null && r63 > 0.04 && (bm == null || r63 > bm)) out.push({ k: 'rocket', vote: 'yes', conf: clamp(r63 * 4, 0.3, 1), line: pick([`${pf(r63, 0)} in 3 months${bm != null ? `, beating the market's ${pf(bm, 0)}` : ''}. To the moon.`, `Strong 3-month run. Winners keep winning.`], sd + 1), c: 'mom_up', v: { p: pf(r63, 0), m: bm != null ? pf(bm, 0) : '' } });
+  else if (r63 != null && r63 < -0.03) out.push({ k: 'rocket', vote: 'no', conf: clamp(-r63 * 4, 0.3, 1), line: `${pf(r63, 0)} in 3 months. That's no rocket.`, c: 'mom_down', v: { p: pf(r63, 0) } });
+  else out.push({ k: 'rocket', vote: 'pass', conf: 0.2, line: r63 == null ? 'Too new to judge.' : `Only ${pf(r63, 1)} in 3 months. Meh.`, c: r63 == null ? 'nodata' : 'mom_flat', v: { p: r63 == null ? '' : pf(r63, 1) } });
   // Scoop: the news
-  if (!bz || bz.count < 3) out.push({ k: 'scoop', vote: 'pass', conf: 0, line: pick(['Quiet out there. No story.', 'Nothing on the wire.'], sd + 2) });
-  else if (bz.flags.includes('severe_news')) out.push({ k: 'scoop', vote: 'no', conf: 1, line: `Breaking: "${(bz.events.find(e => e.k === 'severe')?.title || 'serious trouble').slice(0, 70)}". Stay away.` });
-  else if (bz.sentiment <= -0.2) out.push({ k: 'scoop', vote: 'no', conf: clamp(-bz.sentiment * 2, 0.3, 1), line: `The mood is ${bz.sentiment.toFixed(2)} across ${bz.count} stories. People are gloomy.` });
-  else if (bz.sentiment >= 0.15) out.push({ k: 'scoop', vote: 'yes', conf: clamp(bz.sentiment * 2, 0.3, 1), line: `Good press: ${bz.sentiment >= 0 ? '+' : ''}${bz.sentiment.toFixed(2)} across ${bz.count} stories${bz.events[0] ? `, ${bz.events[0].label.toLowerCase()}` : ''}.` });
-  else out.push({ k: 'scoop', vote: 'pass', conf: 0.2, line: `Mixed headlines (${bz.sentiment.toFixed(2)}). No scoop.` });
+  if (!bz || bz.count < 3) out.push({ k: 'scoop', vote: 'pass', conf: 0, line: pick(['Quiet out there. No story.', 'Nothing on the wire.'], sd + 2), c: 'news_quiet' });
+  else if (bz.flags.includes('severe_news')) out.push({ k: 'scoop', vote: 'no', conf: 1, line: `Breaking: "${(bz.events.find(e => e.k === 'severe')?.title || 'serious trouble').slice(0, 70)}". Stay away.`, c: 'news_severe', v: { t: (bz.events.find(e => e.k === 'severe')?.title || 'serious trouble').slice(0, 70) } });
+  else if (bz.sentiment <= -0.2) out.push({ k: 'scoop', vote: 'no', conf: clamp(-bz.sentiment * 2, 0.3, 1), line: `The mood is ${bz.sentiment.toFixed(2)} across ${bz.count} stories. People are gloomy.`, c: 'news_gloomy', v: { s: bz.sentiment.toFixed(2), n: String(bz.count) } });
+  else if (bz.sentiment >= 0.15) out.push({ k: 'scoop', vote: 'yes', conf: clamp(bz.sentiment * 2, 0.3, 1), line: `Good press: ${bz.sentiment >= 0 ? '+' : ''}${bz.sentiment.toFixed(2)} across ${bz.count} stories${bz.events[0] ? `, ${bz.events[0].label.toLowerCase()}` : ''}.`, c: 'news_good', v: { s: '+' + bz.sentiment.toFixed(2), n: String(bz.count), e: bz.events[0] ? bz.events[0].label.toLowerCase() : '' } });
+  else out.push({ k: 'scoop', vote: 'pass', conf: 0.2, line: `Mixed headlines (${bz.sentiment.toFixed(2)}). No scoop.`, c: 'news_mixed', v: { s: bz.sentiment.toFixed(2) } });
   // Shield: what could hurt
   const hot = v250 && v20 > v250 * 1.6, earnSoon = up && up.tradingDays <= 3;
-  if (earnSoon) out.push({ k: 'shield', vote: 'no', conf: 0.9, line: `Earnings ${up.tradingDays <= 0 ? 'today' : `in ${up.tradingDays} day${up.tradingDays === 1 ? '' : 's'}`}. Coin flip with a big move. Pass.` });
-  else if (hot) out.push({ k: 'shield', vote: 'no', conf: clamp(v20 / v250 - 1, 0.3, 1), line: `Swinging ${(v20 / v250).toFixed(1)}x harder than usual. Too wild.` });
-  else if (ctx.weight > 0.3) out.push({ k: 'shield', vote: 'no', conf: 0.6, line: `That would be ${Math.round(ctx.weight * 100)}% of the wallet in one name. Too much.` });
-  else out.push({ k: 'shield', vote: 'yes', conf: 0.4, line: pick(['Risk looks normal. Stop loss ready.', 'Calm enough. I can protect this one.'], sd + 3) });
+  if (earnSoon) out.push({ k: 'shield', vote: 'no', conf: 0.9, line: `Earnings ${up.tradingDays <= 0 ? 'today' : `in ${up.tradingDays} day${up.tradingDays === 1 ? '' : 's'}`}. Coin flip with a big move. Pass.`, c: 'earnings', v: { d: String(Math.max(0, up.tradingDays)) } });
+  else if (hot) out.push({ k: 'shield', vote: 'no', conf: clamp(v20 / v250 - 1, 0.3, 1), line: `Swinging ${(v20 / v250).toFixed(1)}x harder than usual. Too wild.`, c: 'wild', v: { x: (v20 / v250).toFixed(1) } });
+  else if (ctx.weight > 0.3) out.push({ k: 'shield', vote: 'no', conf: 0.6, line: `That would be ${Math.round(ctx.weight * 100)}% of the wallet in one name. Too much.`, c: 'heavy', v: { p: Math.round(ctx.weight * 100) + '%' } });
+  else out.push({ k: 'shield', vote: 'yes', conf: 0.4, line: pick(['Risk looks normal. Stop loss ready.', 'Calm enough. I can protect this one.'], sd + 3), c: 'safe' });
   // Professor: stretched or cheap?
-  if (rsi != null && rsi > 75) out.push({ k: 'prof', vote: 'no', conf: clamp((rsi - 70) / 20, 0.3, 1), line: `RSI ${rsi.toFixed(0)}. Statistically overbought.` });
-  else if (z < -1.5) out.push({ k: 'prof', vote: 'yes', conf: clamp(-z / 3, 0.3, 1), line: `${Math.abs(z).toFixed(1)} standard deviations under its average. Cheap, by the numbers.` });
-  else if (z > 2) out.push({ k: 'prof', vote: 'no', conf: clamp(z / 3, 0.3, 1), line: `${z.toFixed(1)} standard deviations above average. Expensive today.` });
-  else out.push({ k: 'prof', vote: rsi != null && rsi < 60 ? 'yes' : 'pass', conf: 0.3, line: `RSI ${rsi == null ? '–' : rsi.toFixed(0)}, ${z >= 0 ? '+' : ''}${z.toFixed(1)}σ. Fair price.` });
+  if (rsi != null && rsi > 75) out.push({ k: 'prof', vote: 'no', conf: clamp((rsi - 70) / 20, 0.3, 1), line: `RSI ${rsi.toFixed(0)}. Statistically overbought.`, c: 'overbought', v: { r: rsi.toFixed(0) } });
+  else if (z < -1.5) out.push({ k: 'prof', vote: 'yes', conf: clamp(-z / 3, 0.3, 1), line: `${Math.abs(z).toFixed(1)} standard deviations under its average. Cheap, by the numbers.`, c: 'cheap', v: { z: Math.abs(z).toFixed(1) } });
+  else if (z > 2) out.push({ k: 'prof', vote: 'no', conf: clamp(z / 3, 0.3, 1), line: `${z.toFixed(1)} standard deviations above average. Expensive today.`, c: 'expensive', v: { z: z.toFixed(1) } });
+  else out.push({ k: 'prof', vote: rsi != null && rsi < 60 ? 'yes' : 'pass', conf: 0.3, line: `RSI ${rsi == null ? '–' : rsi.toFixed(0)}, ${z >= 0 ? '+' : ''}${z.toFixed(1)}σ. Fair price.`, c: 'fair', v: { r: rsi == null ? '–' : rsi.toFixed(0), z: (z >= 0 ? '+' : '') + z.toFixed(1) } });
   // Doubt: against the crowd
-  if (r5 != null && r5 * c > 2.5 * atr) out.push({ k: 'doubt', vote: 'no', conf: 0.6, line: pick([`Up ${pf(r5, 0)} in a week. We're chasing.`, `Everyone already bought this. Who's left?`], sd + 4) });
-  else if (bz?.flags?.includes('attention_spike') && bz.sentiment > 0.2) out.push({ k: 'doubt', vote: 'no', conf: 0.5, line: `${bz.attention}x the usual hype. Smells like a top.` });
-  else if (r5 != null && r5 < 0 && s200 && c > s200 && -r5 * c > 1.5 * atr) out.push({ k: 'doubt', vote: 'yes', conf: 0.6, line: `Everyone's scared after a ${pf(r5, 0)} week, but the trend is fine. I like it.` });
-  else out.push({ k: 'doubt', vote: 'pass', conf: 0.2, line: pick(['Nothing to argue with. Suspicious.', 'I have no objection. For now.'], sd + 5) });
+  if (r5 != null && r5 * c > 2.5 * atr) out.push({ k: 'doubt', vote: 'no', conf: 0.6, line: pick([`Up ${pf(r5, 0)} in a week. We're chasing.`, `Everyone already bought this. Who's left?`], sd + 4), c: 'chasing', v: { p: pf(r5, 0) } });
+  else if (bz?.flags?.includes('attention_spike') && bz.sentiment > 0.2) out.push({ k: 'doubt', vote: 'no', conf: 0.5, line: `${bz.attention}x the usual hype. Smells like a top.`, c: 'hype', v: { x: String(bz.attention) } });
+  else if (r5 != null && r5 < 0 && s200 && c > s200 && -r5 * c > 1.5 * atr) out.push({ k: 'doubt', vote: 'yes', conf: 0.6, line: `Everyone's scared after a ${pf(r5, 0)} week, but the trend is fine. I like it.`, c: 'fear_buy', v: { p: pf(r5, 0) } });
+  else out.push({ k: 'doubt', vote: 'pass', conf: 0.2, line: pick(['Nothing to argue with. Suspicious.', 'I have no objection. For now.'], sd + 5), c: 'no_view' });
   return out.map(v => ({ ...v, conf: round(v.conf, 2) }));
 }
 const tally = votes => ({ yes: votes.filter(v => v.vote === 'yes').length, no: votes.filter(v => v.vote === 'no').length });
@@ -5002,7 +5004,7 @@ GET('/api/council/members', auth, () => COUNCIL);
 GET('/api/hq', auth, async () => {
   const list = await rows("select * from bots order by id");
   const cards = await Promise.all(list.map(botCard));
-  const events = (await rows("select l.*, b.name bname from bot_log l join bots b on b.id=l.bot_id where l.ts > now() - interval '3 days' order by l.id desc limit 80")).map(r => ({ ...logJson(r), botId: r.bot_id, bot: r.bname, data: undefined }));
+  const events = (await rows("select l.*, b.name bname from bot_log l join bots b on b.id=l.bot_id where l.ts > now() - interval '3 days' order by l.id desc limit 80")).map(r => { const j = logJson(r), d = j.data || {}; return { ...j, botId: r.bot_id, bot: r.bname, side: d.side || null, qty: d.fill?.qty ?? null, price: d.fill?.price ?? null, pnl: d.fill?.pnl ?? null, data: undefined }; });
   const council = (await rows('select * from council order by id desc limit 12')).map(councilJson);
   let totalPL = 0, day = 0; for (const c of cards) { totalPL += (c.value || 0) - (c.start || 0); day += c.day?.change || 0; }
   const spy = prices.get('SPY'), btc = prices.get('BTC');
@@ -5015,6 +5017,31 @@ GET('/api/hq', auth, async () => {
     market: { ...market(), spy: spy?.prev ? (spy.p / spy.prev - 1) * 100 : null, btc: btc?.prev ? (btc.p / btc.prev - 1) * 100 : null },
     vault: { total: totalPL, day }, alarm: { halt: !!S.realHalt, killed: cards.filter(c => c.status === 'killed').map(c => c.name), brake: cards.filter(c => c.activity?.k === 'brake').map(c => c.name), cooldown: cards.filter(c => c.activity?.k === 'cooldown').map(c => c.name) },
   };
+});
+// =====================================================================
+// Standby copy: a second Mango on another host (e.g. Render's free plan) that you only switch on when
+// your main server is down. Set MANGO_STANDBY=1 on that host. While it's off, bots don't trade and no
+// Alpaca orders go out, so the two copies can never trade twice. While it's on, it pings its own public
+// address every 10 minutes so free hosts don't put it to sleep.
+// =====================================================================
+const STANDBY = /^(1|true|yes)$/i.test(ENV.MANGO_STANDBY || '');
+const SELF_URL = (ENV.RENDER_EXTERNAL_URL || ENV.PUBLIC_URL || (ENV.KOYEB_PUBLIC_DOMAIN ? 'https://' + ENV.KOYEB_PUBLIC_DOMAIN : '')).replace(/\/$/, '');
+const standbyPaused = () => STANDBY && S.standbyActive !== true;
+const standbyJson = () => ({ standby: STANDBY, active: STANDBY ? S.standbyActive === true : true, since: S.standbyActiveAt || null, url: SELF_URL || null, awake: standbyAwake });
+let standbyAwake = null;
+async function standbyPing() {
+  if (!STANDBY || standbyPaused() || !SELF_URL) return;
+  try { const r = await fetch(SELF_URL + '/api/health', { signal: AbortSignal.timeout(15e3) }); standbyAwake = { ok: r.ok, ts: Date.now() }; } catch (e) { standbyAwake = { ok: false, ts: Date.now(), err: e.message }; }
+}
+GET('/api/standby', auth, () => standbyJson());
+POST('/api/standby', auth, async req => {
+  if (!STANDBY) fail('This is your main server, not a standby copy.');
+  const on = !!req.body.on;
+  await saveSettings({ standbyActive: on, standbyActiveAt: on ? Date.now() : 0 });
+  log(on ? 'Standby switched ON: bots and keep-awake running' : 'Standby switched OFF: bots paused, allowed to sleep');
+  if (on) standbyPing();
+  broadcast({ t: 'evt', e: 'settings' });
+  return standbyJson();
 });
 
 // =====================================================================
@@ -5114,11 +5141,13 @@ function startJobs() {
   every(60e3, marginDaily, 'margin interest');
   every(fast ? 5e3 : 60e3, marginWatch, 'margin');
   every(fast ? 3000 : 5000, pollExtended, 'extended hours');
-  every(fast ? 5e3 : 60e3, () => { if (S.f_bots !== false) return botScheduler(); }, 'bots');
+  every(fast ? 5e3 : 60e3, () => { if (S.f_bots !== false && !standbyPaused()) return botScheduler(); }, 'bots');
+  every(fast ? 5e3 : 10 * 60e3, standbyPing, 'standby keep-awake'); setTimeout(() => standbyPing().catch(() => {}), 20e3);
   every(fast ? 5e3 : 10 * 60e3, backupJob, 'backups');
   every(fast ? 5e3 : 30 * 60e3, settleCouncil, 'council');
   every(3600e3, () => Q("delete from bot_log where ts < now() - interval '2 years'"), 'bot log cleanup');
   every(3600e3, () => Q("delete from settle where settles < now() - interval '7 days'"), 'settlement cleanup');
+  if (BROKER && STANDBY) warn('Standby copy has Alpaca keys: orders are blocked while standby is off, but keep real-money keys on one server only.');
   if (BROKER) { every(15e3, () => brokerSync(), 'broker'); every(30e3, () => { adSync(); if (BROKER.wid) tuConnect(); }, 'broker streams'); setTimeout(() => brokerSync().then(() => { if (BROKER.wid) tuConnect(); }).catch(() => {}), 3000); }
   every(3600e3, async () => { await thinSnapshots(); await Q('delete from notifs where id not in (select id from notifs order by id desc limit 500)'); }, 'cleanup');
   every(10 * 60e3, checkAchievements, 'achievements'); setTimeout(() => checkAchievements().catch(e => warn('achievements', e.message)), 20e3);
