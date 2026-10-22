@@ -1229,7 +1229,7 @@ button.tile:active { transform: scale(.98); }
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '2.12.0';
+const BUILD = '__BUILD__', APP_VERSION = '2.13.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -4634,6 +4634,7 @@ const rng = seed => () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Mat
 const lerp2 = (p, q, f) => [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f];
 
 // ---------- the floor plan (tile units; x runs to the right-down, y to the left-down) ----------
+const BEDS = [[37.6, 0.7], [37.6, 3.7], [37.6, 12.7], [37.6, 15.7], [37.6, 18.7], [43.3, 0.7], [43.3, 3.7], [43.3, 12.7], [43.3, 15.7], [43.3, 18.7]];
 const HQ_L = (() => {
   const rooms = {
     news:    { x: 0,    y: 0,    w: 11, d: 8,   door: ['s', 5.5],  node: 'n1', walls: { n: 'tall', w: 'tall' } },
@@ -4644,15 +4645,17 @@ const HQ_L = (() => {
     vault:   { x: 28,   y: 11,   w: 8,  d: 6.5, door: ['n', 32],   node: 'n6', walls: { n: 'low', w: 'tall' } },
     control: { x: 14,   y: 19.5, w: 13, d: 7.5, door: ['n', 20.5], node: 'm1', walls: { n: 'low', w: 'tall' } },
     lounge:  { x: 28,   y: 19.5, w: 8,  d: 7.5, door: ['n', 32],   node: 'm2', walls: { n: 'low', w: 'tall' } },
+    // the Council's bedrooms: where they sleep while the night shift works (low west wall so it doesn't hide the rooms beside it)
+    quarters: { x: 37,  y: 0,    w: 8,  d: 27,  door: ['w', 10.5], node: 'n7', walls: { n: 'tall', w: 'low' } },
   };
   for (const r of Object.values(rooms)) {
     const [side, at] = r.door;
-    r.doorPt = side === 's' ? [at, r.y + r.d] : side === 'n' ? [at, r.y] : [r.x + r.w, at];
-    r.inPt = side === 's' ? [at, r.y + r.d - 1] : side === 'n' ? [at, r.y + 1] : [r.x + r.w - 1, at];
+    r.doorPt = side === 's' ? [at, r.y + r.d] : side === 'n' ? [at, r.y] : side === 'w' ? [r.x, at] : [r.x + r.w, at];
+    r.inPt = side === 's' ? [at, r.y + r.d - 1] : side === 'n' ? [at, r.y + 1] : side === 'w' ? [r.x + 1, at] : [r.x + r.w - 1, at];
   }
-  const nodes = { n1: [5.5, 9.5], j1: [13, 9.5], n3: [18, 9.5], n4: [20.5, 9.5], n5: [30.5, 9.5], n6: [32, 9.5], c1: [13, 14], j2: [13, 18.5], m1: [20.5, 18.5], m2: [32, 18.5] };
-  const edges = [['n1', 'j1'], ['j1', 'n3'], ['n3', 'n4'], ['n4', 'n5'], ['n5', 'n6'], ['j1', 'c1'], ['c1', 'j2'], ['j2', 'm1'], ['m1', 'm2']];
-  const halls = [{ x: 0, y: 8, w: 36, d: 3, main: true }, { x: 12, y: 11, w: 2, d: 8.5 }, { x: 14, y: 17.5, w: 22, d: 2 }];
+  const nodes = { n1: [5.5, 9.5], j1: [13, 9.5], n3: [18, 9.5], n4: [20.5, 9.5], n5: [30.5, 9.5], n6: [32, 9.5], c1: [13, 14], j2: [13, 18.5], m1: [20.5, 18.5], m2: [32, 18.5], n6b: [33.6, 10.5], n7: [36.3, 10.5] };
+  const edges = [['n1', 'j1'], ['j1', 'n3'], ['n3', 'n4'], ['n4', 'n5'], ['n5', 'n6'], ['j1', 'c1'], ['c1', 'j2'], ['j2', 'm1'], ['m1', 'm2'], ['n6', 'n6b'], ['n6b', 'n7']];
+  const halls = [{ x: 0, y: 8, w: 37, d: 3, main: true }, { x: 12, y: 11, w: 2, d: 8.5 }, { x: 14, y: 17.5, w: 22, d: 2 }];
   const table = [6, 18.4], throne = [6, 23.9];
   const seats = []; for (let i = 0; i < 10; i++) { const t = Math.PI * (0.82 + i * (1.36 / 9)); seats.push([table[0] + Math.cos(t) * 2.85, table[1] + Math.sin(t) * 2.85]); }
   // furniture: k = kind (the theme draws it), occ = can hide a character standing behind it
@@ -4700,6 +4703,12 @@ const HQ_L = (() => {
     { k: 'coffeeTable', room: 'lounge', x: 30.6, y: 22.0, w: 1.5, d: 1.7, occ: 1 },
     { k: 'kitchen', room: 'lounge', x: 28.2, y: 25.7, w: 3.6, d: 1.0, occ: 1, dyn: 1 },
     { k: 'plant', room: 'lounge', x: 35.3, y: 26.3 }, { k: 'plant', room: 'lounge', x: 35.3, y: 20.2 },
+    // quarters: ten beds in two rows along the walls, the king's bed at the far end, an aisle down the middle
+    ...BEDS.map(([x, y], i) => ({ k: 'bed', room: 'quarters', x, y, w: 1.1, d: 2.0, i, occ: 1, h: 0.85 })),
+    ...BEDS.map(([x, y], i) => ({ k: 'nightstand', room: 'quarters', x: x < 40 ? x + 1.2 : x - 0.62, y: y + 0.05, w: 0.42, d: 0.42, i, occ: 1, h: 0.95 })),
+    { k: 'kingBed', room: 'quarters', x: 40.0, y: 23.4, w: 2.0, d: 2.6, occ: 1, h: 1.6 },
+    { k: 'rug', room: 'quarters', x: 39.6, y: 1.2, w: 2.8, d: 20.6, flat: 1 },
+    { k: 'plant', room: 'quarters', x: 37.6, y: 26.3 }, { k: 'plant', room: 'quarters', x: 44.4, y: 26.3 }, { k: 'plant', room: 'quarters', x: 44.4, y: 7.6 },
     // halls and the gaps between rooms
     ...[[11.75, 1.6], [11.75, 4.4], [11.75, 7.2], [24.25, 1.6], [24.25, 4.4], [24.25, 7.2], [27.5, 12.2], [27.5, 16.6], [27.5, 20.5], [27.5, 26.3], [13, 21], [13, 23.6], [13, 26.2]].map(([x, y], i) => ({ k: 'gap', room: null, x, y, i, occ: 1 })),
     ...[[0.7, 9.5], [35.3, 9.5], [35.3, 18.5], [8.6, 10.45], [26.5, 10.45]].map(([x, y], i) => ({ k: 'hallDecor', room: null, x, y, i, occ: 1 })),
@@ -4726,11 +4735,15 @@ const HQ_L = (() => {
     trading: [[20.5, 14.0], [20.5, 16.9], [14.6, 14.1], [26.5, 14.1]],
     vault: [[29.6, 16.8], [33.4, 16.8], [32, 12.2], [29.2, 12.3]],
     control: [[16.0, 25.8], [19.6, 25.8], [23.0, 25.8], [16.2, 20.4]],
+    quarters: [[41, 9.4], [41, 11.6], [40.2, 21.8], [41.8, 21.8]],
     lounge: [[30.0, 20.4], [32.2, 26.1], [29.7, 24.4], [32.2, 20.4]],
   };
   const sleep = [[34.1, 22.35], [34.1, 23.55]].map(([x, y]) => ({ x, y, z: 0.5, sit: 1, face: 'l', exit: [32.7, y], sleep: 1 }));
-  const W = 36, D = 27;
-  return { rooms, nodes, edges, halls, table, throne, seats, A, stand, chairs, sleep, W, D, petition: [[9.6, 15.0], [9.6, 16.4], [10.4, 17.0]] };
+  const W = 45, D = 27;
+  // where each Council member sleeps (lying along the bed, head to the north), and where they step out to
+  const beds = BEDS.map(([x, y], i) => ({ x: x + 0.55, y: y + 1.12, z: 0.5, sit: 1, face: 'l', bed: 1, sleep: 1, i, exit: [x < 40 ? x + 1.75 : x - 0.75, y + 1.1] }));
+  const kingBed = { x: 41.0, y: 24.75, z: 0.6, sit: 1, face: 'l', bed: 1, sleep: 1, king: 1, exit: [41.0, 22.6] };
+  return { rooms, nodes, edges, halls, table, throne, seats, A, stand, chairs, sleep, beds, kingBed, W, D, petition: [[9.6, 15.0], [9.6, 16.4], [10.4, 17.0]] };
 })();
 const HQ_ROOMS = HQ_L.rooms;
 const TABLE = HQ_L.table, THRONE = HQ_L.throne, SEATS = HQ_L.seats;
@@ -4900,7 +4913,7 @@ const HQ_TAKEN = new Map(); // spot -> agent id, so two bots don't share a chair
 // Live layers (scrolling text, screens, glows, people and anything redrawn over them) are painted on top of the
 // cached world, so anything that should be in front of them gets painted again after them, in depth order.
 // Isometric overlap doesn't depend on zoom or pan, so the "in front of" lists are worked out once.
-const HQ_H = { desk: 1.3, tradeDesk: 2.8, bigTable: 1.4, vessels: 1.45, bench: 1.3, councilTable: 1.0, throne: 2.0, pillar: 2.35, gold: 0.9, safe: 1.0, rack: 1.9, console: 1.3, beacon: 4.3, lever: 1.7, sofa: 1.0, coffeeTable: 0.85, kitchen: 1.95, chair: 0.95, plant: 1.7, printer: 1.0, shelf: 1.95, gap: 3.6, hallDecor: 2.5 };
+const HQ_H = { desk: 1.3, tradeDesk: 2.8, bigTable: 1.4, vessels: 1.45, bench: 1.3, councilTable: 1.0, throne: 2.0, pillar: 2.35, gold: 0.9, safe: 1.0, rack: 1.9, console: 1.3, beacon: 4.3, lever: 1.7, sofa: 1.0, coffeeTable: 0.85, kitchen: 1.95, chair: 0.95, plant: 1.7, printer: 1.0, shelf: 1.95, gap: 3.6, bed: 0.85, nightstand: 0.95, kingBed: 1.6, hallDecor: 2.5 };
 // walls have a side too, so check for a wall (kind) first; wall-mounted pieces (side) sit z..z+h up the wall
 const hqPieceH = o => o.kind ? (o.kind === 'tall' ? 2.6 : 1.5) : o.side ? o.z + o.h + 0.05 : (o.h || HQ_H[o.k] || 1.2);
 const HQ_STATIC = [...HQ_WALLS.map(w => ({ w, f: [w.x, w.y, w.w, w.d], h: hqPieceH(w) })), ...HQ_L.A.filter(o => !o.flat).map(o => ({ o, f: anchorFp(o), h: hqPieceH(o), dyn: !!o.dyn }))];
@@ -5532,17 +5545,19 @@ function facing(a) { const f = facing4(a); return f === 'S' ? 'l' : f === 'E' ? 
 const CARD = { S: [0, 1], E: [1, 0], N: [0, -1], W: [-1, 0] };
 // how high each world's seats really are (the top of the cushion or seat), so people sit ON them
 const SEAT_TOP = {
-  office: { desk: 0.37, stool: 0.38, council: 0.37, throne: 0.48, sofa: 0.52 },
-  space: { desk: 0.4, stool: 0.4, council: 0.4, throne: 0.45, sofa: 0.47 },
-  village: { desk: 0.38, stool: 0.38, council: 0.38, throne: 0.55, sofa: 0.54 },
-  island: { desk: 0.38, stool: 0.38, council: 0.34, throne: 0.4, sofa: 0.5 },
+  office: { desk: 0.37, stool: 0.38, council: 0.37, throne: 0.48, sofa: 0.52, bed: 0.5 },
+  space: { desk: 0.4, stool: 0.4, council: 0.4, throne: 0.45, sofa: 0.47, bed: 0.51 },
+  village: { desk: 0.38, stool: 0.38, council: 0.38, throne: 0.55, sofa: 0.54, bed: 0.5 },
+  island: { desk: 0.38, stool: 0.38, council: 0.34, throne: 0.4, sofa: 0.5, bed: 0.5 },
 };
 function hammockZ(y) { const S = HQ_L.A.find(o => o.k === 'sofa'), t = clamp((y - S.y) / S.d, 0, 1), c = 2 * 0.45 - 1.2; return (1 - t) ** 2 * 1.2 + 2 * t * (1 - t) * c + t * t * 1.2 + 0.03; }
 function seatTop(th, a) {
   const T = SEAT_TOP[th.id] || SEAT_TOP.office;
+  const q = a.spot;
+  if (q?.bed) return (T.bed ?? 0.5) + (q.king ? 0.1 : 0);
   if (a.throne) return T.throne;
   if (a.persona) return T.council;
-  const q = a.spot; if (!q) return a.seatZ || 0.37;
+  if (!q) return a.seatZ || 0.37;
   if (q.sleep) return th.id === 'island' ? hammockZ(q.y) : T.sofa;
   if (q.chair) return T[q.chair.style] ?? T.desk;
   return q.z || 0.37;
@@ -6058,6 +6073,94 @@ async function editCouncilNames(onSaved) {
 ACT.councilNames = () => editCouncilNames(() => { const top = Router.layers.filter(l => l.type === 'page').pop()?.page; if (top?.hq) PAGES.hq.renameAll(top); });
 
 // ===================================================================
+// Mango HQ quarters: the Council's bedrooms. At night (while the night shift works) the Council and the
+// chair walk here and go to bed; in the morning they walk back to the table. One room in every theme,
+// drawn in that theme's style. This file adds it to each theme without touching the theme code.
+// ===================================================================
+const QUARTERS = {
+  office: {
+    name: 'Rest rooms', accent: '#8FA2FF',
+    floor(iso, r) { iso.onFloor(r.x, r.y, 0.002, g => { g.fillStyle = '#4A4E66'; g.fillRect(0, 0, r.w * 100, r.d * 100); }); speckle(iso, r.x, r.y, r.w, r.d, ['rgba(255,255,255,.04)', 'rgba(0,0,0,.08)'], 900, [2, 4]); },
+    bed: { frame: '#5A4A3A', head: '#3E3228', sheet: '#F2F0EA', blankets: ['#4EA8FF', '#FF7A45', '#F5C542', '#9AA6B8', '#3DDC97', '#B48CFF', '#FF9F1C', '#E85D75', '#5BC0BE', '#C3E88D'] },
+    king: { frame: '#3E3228', head: '#C9A045', sheet: '#FFFFFF', blanket: '#B5523B', trim: '#FFD646' },
+    stand: ['#5A4A3A', '#FFE7A8'], rug: '#5A5E7A',
+  },
+  space: {
+    name: 'Sleep pods', accent: '#8FA2FF',
+    floor(iso, r) { hexes(iso, r.x, r.y, r.w, r.d, '#24283E', shade('#24283E', 0.12)); },
+    bed: { frame: '#2A303C', head: '#3A4252', sheet: '#C9D2E6', blankets: ['#4EA8FF', '#FF7A45', '#F5C542', '#9AA6B8', '#3DDC97', '#B48CFF', '#FF9F1C', '#E85D75', '#5BC0BE', '#C3E88D'], glow: '#5AE4FF', pod: 1 },
+    king: { frame: '#2A303C', head: '#FF9F1C', sheet: '#DDE3F0', blanket: '#5A3A8A', trim: '#FFB224', glow: '#FFB224' },
+    stand: ['#3A4252', '#5AE4FF'], rug: '#2E3450',
+  },
+  village: {
+    name: 'The inn', accent: '#C98B5A',
+    floor(iso, r) { planks(iso, r.x, r.y, r.w, r.d, '#9C6E44', { pw: 0.4, vary: 0.16, grain: 1 }); },
+    bed: { frame: '#6B4A2A', head: '#5A3B24', sheet: '#F0E2C6', blankets: ['#2A5A9A', '#9C2B2B', '#C9A045', '#6A7A8A', '#3A7A3A', '#6A3A8A', '#B5523B', '#8A2A3E', '#2F6E6C', '#7A8A3A'], quilt: 1 },
+    king: { frame: '#5A3B24', head: '#8A5A32', sheet: '#FBF3E0', blanket: '#9C2B2B', trim: '#FFD646', posts: 1 },
+    stand: ['#6B4A2A', '#FFD678'], rug: '#9C2B2B',
+  },
+  island: {
+    name: 'Beach huts', accent: '#B48CFF',
+    floor(iso, r) { planks(iso, r.x, r.y, r.w, r.d, '#D9B07A', { pw: 0.36, vary: 0.16, grain: 1 }); },
+    bed: { frame: '#C9A050', head: '#B89A5A', sheet: '#FFF8E8', blankets: ['#4EC8F0', '#FF7A45', '#FFD646', '#2EC4B6', '#7CE07A', '#B48CFF', '#FF9F1C', '#FF6F96', '#5BC0BE', '#C3E88D'], bamboo: 1 },
+    king: { frame: '#B89A5A', head: '#C9A050', sheet: '#FFFFFF', blanket: '#FF6F96', trim: '#FFD646', net: 1 },
+    stand: ['#B89A5A', '#FFD678'], rug: '#2EC4B6',
+  },
+};
+function drawBed(iso, a, Q) {
+  const { x, y, w, d } = a, B = Q.bed, col = B.blankets[a.i % B.blankets.length];
+  if (B.pod) { // a sleep pod: a low capsule with a glowing rim
+    iso.box(x - 0.05, y - 0.05, 0, w + 0.1, d + 0.1, 0.3, B.frame, { top: shade(B.frame, 0.12) });
+    iso.box(x, y - 0.08, 0, w, 0.14, 1.0, B.head, { top: B.glow });
+    iso.box(x + 0.06, y + 0.06, 0.3, w - 0.12, d - 0.12, 0.16, B.sheet, { top: '#FFFFFF' });
+    iso.box(x + 0.05, y + 0.85, 0.46, w - 0.1, d - 0.92, 0.05, col, { top: shade(col, 0.15) });
+    iso.onFloor(x - 0.05, y + d + 0.06, 0.31, g => { g.fillStyle = rgba(B.glow, 0.8); g.fillRect(0, 0, (w + 0.1) * 100, 4); });
+    return;
+  }
+  // frame, headboard at the north end, mattress, pillow, blanket
+  iso.box(x, y, 0, w, d, 0.28, B.frame, { top: shade(B.frame, 0.1) });
+  if (B.bamboo) for (const dx of [0.08, w - 0.16]) iso.box(x + dx, y + 0.1, 0.02, 0.08, d - 0.2, 0.27, shade(B.frame, -0.15));
+  iso.box(x, y - 0.06, 0, w, 0.1, 0.8, B.head, { top: shade(B.head, 0.15) });
+  iso.box(x + 0.05, y + 0.06, 0.28, w - 0.1, d - 0.12, 0.17, B.sheet, { top: '#FFFFFF' });
+  iso.box(x + 0.2, y + 0.12, 0.45, w - 0.4, 0.36, 0.08, '#FFFFFF', { top: '#FFFFFF' });
+  iso.box(x + 0.03, y + 0.82, 0.45, w - 0.06, d - 0.88, 0.05, col, { top: shade(col, 0.12) });
+  if (B.quilt) iso.onFloor(x + 0.03, y + 0.82, 0.501, g => { const L = (d - 0.88) * 100, W = (w - 0.06) * 100; for (let j = 0; j < L; j += 22) for (let i = 0; i < W; i += 22) if (((i + j) / 22) % 2 === 0) { g.fillStyle = 'rgba(255,255,255,.18)'; g.fillRect(i, j, 22, 22); } });
+}
+function drawKingBed(iso, a, Q) {
+  const { x, y, w, d } = a, K = Q.king;
+  iso.box(x, y, 0, w, d, 0.34, K.frame, { top: shade(K.frame, 0.1) });
+  iso.box(x - 0.04, y - 0.1, 0, w + 0.08, 0.14, 1.3, K.head, { top: K.trim });
+  if (K.posts) for (const [dx, dy] of [[0, 0], [w - 0.12, 0], [0, d - 0.12], [w - 0.12, d - 0.12]]) iso.box(x + dx, y + dy, 0, 0.12, 0.12, 1.6, K.frame, { top: K.trim });
+  if (K.glow) iso.box(x - 0.04, y - 0.12, 1.3, w + 0.08, 0.04, 0.06, K.glow);
+  iso.box(x + 0.06, y + 0.08, 0.34, w - 0.12, d - 0.14, 0.2, K.sheet, { top: '#FFFFFF' });
+  for (const dx of [0.2, w / 2 + 0.05]) iso.box(x + dx, y + 0.14, 0.54, w / 2 - 0.25, 0.4, 0.1, '#FFFFFF', { top: '#FFFFFF' });
+  iso.box(x + 0.03, y + 1.0, 0.54, w - 0.06, d - 1.06, 0.06, K.blanket, { top: shade(K.blanket, 0.12) });
+  iso.onFloor(x + 0.03, y + 1.0, 0.601, g => { g.fillStyle = K.trim; g.fillRect(0, 0, (w - 0.06) * 100, 6); });
+  if (K.net) { const g = iso.g, top = iso.P(x + w / 2, y + d / 2, 2.4); g.save(); g.strokeStyle = 'rgba(255,255,255,.35)'; g.lineWidth = 1.2 * iso.zoom; for (const [px, py] of [[x, y], [x + w, y], [x + w, y + d], [x, y + d]]) { const b = iso.P(px, py, 0.4); g.beginPath(); g.moveTo(top[0], top[1]); g.lineTo(b[0], b[1]); g.stroke(); } g.restore(); }
+}
+function drawNightstand(iso, a, Q) {
+  const [wood, lamp] = Q.stand;
+  iso.box(a.x, a.y, 0, a.w, a.d, 0.5, wood, { top: shade(wood, 0.12) });
+  iso.cyl(a.x + a.w / 2, a.y + a.d / 2, 0.5, 0.05, 0.22, shade(wood, -0.2));
+  iso.cyl(a.x + a.w / 2, a.y + a.d / 2, 0.7, 0.14, 0.16, lamp, { top: shade(lamp, 0.2) });
+}
+// add the room to every theme: name, colour, floor, furniture and lamps at night
+for (const [id, Q] of Object.entries(QUARTERS)) {
+  const th = HQT[id]; if (!th) continue;
+  th.names.quarters = Q.name; th.accents.quarters = Q.accent;
+  const floor = th.floor, item = th.item, lights = th.lights;
+  th.floor = function (iso, k, r, ctx) { if (k === 'quarters') { Q.floor.call(this, iso, r); return; } return floor.call(this, iso, k, r, ctx); };
+  th.item = function (iso, a, ctx) {
+    if (a.k === 'bed') return drawBed(iso, a, Q);
+    if (a.k === 'kingBed') return drawKingBed(iso, a, Q);
+    if (a.k === 'nightstand') return drawNightstand(iso, a, Q);
+    if (a.k === 'rug' && a.room === 'quarters') { iso.onFloor(a.x, a.y, 0.003, g => { g.fillStyle = Q.rug; g.fillRect(0, 0, a.w * 100, a.d * 100); g.strokeStyle = 'rgba(255,255,255,.25)'; g.lineWidth = 5; g.strokeRect(12, 12, a.w * 100 - 24, a.d * 100 - 24); }); return; }
+    return item.call(this, iso, a, ctx);
+  };
+  th.lights = function (st) { const base = lights ? lights.call(this, st) : []; return [...base, ...HQ_L.A.filter(o => o.k === 'nightstand').map(o => [o.x + 0.2, o.y + 0.2, 1.1, Q.stand[1], 0.35]), [41, 24.6, 2.2, Q.king.trim, 0.3]]; };
+}
+
+// ===================================================================
 // Mango HQ: your bots as little workers in a themed isometric world, and the Council that votes
 // on every buy. Everything on screen is driven by what the bots really do (their journal, phases and
 // council sessions arrive live over the socket); the art is just a way to watch it.
@@ -6075,7 +6178,7 @@ function hqSpot(room, sleep, who) {
   const sits = pool.filter(q => q.sit), q = sits.length && Math.random() < 0.65 ? sits[Math.floor(Math.random() * sits.length)] : pool[Math.floor(Math.random() * pool.length)];
   return q;
 }
-const ROOM_WHAT = { news: 'Reads headlines, StockTwits and earnings dates', charts: 'Where bots study prices and wait for setups', lab: 'Autopilot\'s tryouts trade pretend money here', council: 'Six voices vote on every buy and sell', trading: 'Orders go out from here', vault: 'Gold for profit, red crates for losses', control: 'Limits, the brake and the kill switch', lounge: 'Paused bots take a nap' };
+const ROOM_WHAT = { quarters: 'Where the Council and the chair sleep while the night shift works', news: 'Reads headlines, StockTwits and earnings dates', charts: 'Where bots study prices and wait for setups', lab: 'Autopilot\'s tryouts trade pretend money here', council: 'Six voices vote on every buy and sell', trading: 'Orders go out from here', vault: 'Gold for profit, red crates for losses', control: 'Limits, the brake and the kill switch', lounge: 'Paused bots take a nap' };
 class Agent {
   constructor(o) { Object.assign(this, { x: 12, y: 9, path: [], speed: 2.2, t: Math.random() * 10, room: 'trading', mood: 'ok', sign: null, wait: 0, sit: false, spot: null, target: null }, o); }
   // claim a spot and take its pose right away (used when someone first appears)
@@ -6181,10 +6284,11 @@ PAGES.hq = {
       st.bots = bots; st.tryouts = bots.find(b => b.auto)?.tryouts || [];
       // overnight the Council sleeps in their seats and the night crew takes over at the table
       st.nightActive = !!d.night?.active; const crew = st.nightActive ? d.night.crew || [] : [];
-      if (st.members.map(m => m.k).join() !== [...d.members, ...crew].map(m => m.k).join() && !st.session) st.members = [
-        ...d.members.map((m, i) => { const si = SEAT_OF[m.k] ?? i; return new Agent({ ...m, id: 100 + si, persona: true, color: m.color, x: SEATS[si][0], y: SEATS[si][1], room: 'council', speed: 0, sit: true, seatZ: 0.37, faceIdle: ({ n: 'l', w: 'r', s: 'b', e: 'w' })[HQ_L.chairs.find(c => c.seat === si)?.back] || 'l', seatIdx: si }); }),
-        ...crew.map((m, i) => new Agent({ ...m, id: 120 + i, persona: true, night: true, color: m.color, x: CREW_AT[i][0], y: CREW_AT[i][1], room: 'council', speed: 0, sit: false, faceIdle: CREW_AT[i][2] })),
-      ];
+      if (st.members.map(m => m.k).join() !== [...d.members, ...crew].map(m => m.k).join() && !st.session) { const old = new Map(st.members.map(m => [m.k, m])); st.members = [
+        ...d.members.map((m, i) => { const si = SEAT_OF[m.k] ?? i, o = old.get(m.k); if (o) return Object.assign(o, { ...m, name: o.name }); const face = ({ n: 'l', w: 'r', s: 'b', e: 'w' })[HQ_L.chairs.find(c => c.seat === si)?.back] || 'l'; return new Agent({ ...m, id: 100 + si, persona: true, color: m.color, x: SEATS[si][0], y: SEATS[si][1], room: 'council', speed: 0, sit: true, seatZ: 0.37, faceIdle: face, seatFace: face, seatIdx: si }); }),
+        ...crew.map((m, i) => old.get(m.k) || new Agent({ ...m, id: 120 + i, persona: true, night: true, color: m.color, x: CREW_AT[i][0], y: CREW_AT[i][1], room: 'council', speed: 0, sit: false, faceIdle: CREW_AT[i][2] })),
+      ]; }
+      this.bedtime(p);
       const nb = $('#hq-night', p.body); if (nb) { nb.classList.toggle('hidden', !st.nightActive); if (st.nightActive) nb.innerHTML = `${icon('moon')}<span>Night shift${d.night.next ? ` · next check ${h(fmtHM(d.night.next.split(':').reduce((a, b) => a * 60 + +b, 0)))}` : ''}</span>`; }
       if (d.names) App.S.councilNames = d.names; this.renameAll(p);
       for (const b of bots) {
@@ -6323,8 +6427,12 @@ PAGES.hq = {
     // idle chatter: bots remark on the market, their holdings and each other, in the theme's voice
     st.chatT = (st.chatT ?? 5) - dt;
     if (st.chatT <= 0) { st.chatT = 8 + Math.random() * 8; if (!st.session || Math.random() < 0.35) { const c = hqChatter(st); if (c) { this.say(p, c.a, c.text, 'chat'); if (c.reply) setTimeout(() => { if (document.body.contains(p.el)) this.say(p, c.reply.a, c.reply.text, 'chat'); }, 2400); } } }
-    st.chair.sitK = 1; for (const mm of st.members) { mm.sitK = mm.night ? 0 : 1; mm.t += dt; if (mm.sign) mm.signT = (mm.signT || 0) + dt; if (st.nightActive && !mm.night && !mm.sign) mm.mood = 'sleep'; else if (!st.nightActive && mm.mood === 'sleep') mm.mood = 'ok'; }
-    if (st.nightActive && !st.chair.gavel) st.chair.mood = st.session && !st.session.done ? st.chair.mood : 'sleep'; else if (!st.nightActive && st.chair.mood === 'sleep') st.chair.mood = 'ok';
+    // the Council and the chair: walking to bed and back (staggered so they don't all leave at once), asleep once in bed
+    for (const mm of [...st.members, st.chair]) {
+      if (mm.goLater) { mm.goLater.t -= dt; if (mm.goLater.t <= 0) { const g = mm.goLater; mm.goLater = null; mm.speed = 2.4; mm.goRoom(g.room, g.q); } }
+      mm.step(dt); if (mm.sign) mm.signT = (mm.signT || 0) + dt;
+      if (!mm.night) { const inBed = mm.spot?.bed && !mm.path.length && !mm.goLater; if (inBed && !mm.sign) mm.mood = 'sleep'; else if (!inBed && mm.mood === 'sleep') mm.mood = 'ok'; }
+    }
     st.chair.t += dt;
     this.drawPeople(p);
     // during the Analyst's rebuttal, a dashed line runs from it to the member it's arguing with
@@ -6382,7 +6490,7 @@ PAGES.hq = {
       chars.forEach((a, i) => { if (a.x < f[0] + f[2] && a.y < f[1] + f[3] && (S.o?.k === 'tradeDesk' || S.o?.always || !(a.x > f[0] && a.y > f[1])) && boxes[i][0] < bb[2] && boxes[i][2] > bb[0] && boxes[i][1] < bb[3] && boxes[i][3] > bb[1]) { const it = need(S, 'item'); if (bb[1] < boxes[i][1] + 40 * s && (S.o?.k === 'tradeDesk' ? th.awnings : S.h > 1.6)) it.fade = true; } });
     }
     // someone sitting: their seat goes under them, and the chair back goes in front only if it's on the near side
-    const sitters = []; for (const a of chars) { if (!(a.sitK > 0.5) || a.path.length) continue; const ch = a.spot?.chair || (a.seatIdx != null ? HQ_L.chairs.find(c => c.seat === a.seatIdx) : null); if (ch) sitters.push([a, ch]); }
+    const sitters = []; for (const a of chars) { if (!(a.sitK > 0.5) || a.path.length) continue; const ch = a.spot?.chair || (a.seatIdx != null && !a.spot?.bed && Math.hypot(a.x - SEATS[a.seatIdx][0], a.y - SEATS[a.seatIdx][1]) < 0.3 ? HQ_L.chairs.find(c => c.seat === a.seatIdx) : null); if (ch) sitters.push([a, ch]); }
     const split = new Set();
     for (const [a, ch] of sitters) { const S = HQ_STATIC.find(q => q.o === ch); if (!S) continue; split.add(S); set.delete(S); const far = ch.back === 'n' || ch.back === 'w';
       items.push({ S, f: [ch.x - 0.3, ch.y - 0.3, 0.5, 0.5], h: S.h, item: true, part: 'seat', fadeNo: 1 });
@@ -6411,6 +6519,24 @@ PAGES.hq = {
       }
       if (S.dyn && (it.dyn || it.item) && !it.part) th.dyn(iso, S.o, st, st.t);
     }
+  },
+  // night: the Council and the chair go to bed in the quarters; morning: back to their seats. Instant on first load.
+  bedtime(p) {
+    const st = p.hq, want = st.nightActive ? 'bed' : 'seat', who = [...st.members.filter(m => !m.night), st.chair];
+    who.forEach((a, i) => {
+      if (a.where === want) return;
+      const first = a.where == null; a.where = want;
+      const king = a === st.chair, si = a.seatIdx, seat = king ? { x: THRONE[0], y: THRONE[1] + 0.02, sit: 1, face: 'l', exit: [THRONE[0], THRONE[1] - 1.2] } : { x: SEATS[si][0], y: SEATS[si][1], sit: 1, face: a.seatFace || 'l', chair: HQ_L.chairs.find(c => c.seat === si), exit: [TABLE[0] + (SEATS[si][0] - TABLE[0]) * 1.26, TABLE[1] + (SEATS[si][1] - TABLE[1]) * 1.26] };
+      const bed = king ? HQ_L.kingBed : HQ_L.beds[si ?? i];
+      if (want === 'bed') {
+        if (first) { a.place('quarters', bed); return; }
+        // stand up from the table, then walk to bed
+        a.sit = true; a.spot = { exit: seat.exit }; a.goLater = { t: 0.4 + Math.random() * 4, room: 'quarters', q: bed };
+      } else {
+        if (first) return; // already at the table
+        a.goLater = { t: 0.4 + Math.random() * 4, room: 'council', q: seat };
+      }
+    });
   },
   renameAll(p) { const st = p.hq; if (st.chair) st.chair.name = memberName('chair', st.theme.id); for (const m of st.members) m.name = memberName(m.k, st.theme.id); if (st.mode === 'council') this.loadBoard(p); },
   setTheme(p, id) {
