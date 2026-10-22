@@ -3956,7 +3956,7 @@ GET('/api/state', auth, async req => {
   for (const s of new Set(mine)) ensureMeta(s).catch(() => {});
   const eq = await equitySeries(wid, '1D').catch(() => null);
   const out = {
-    v: BUILD, now: Date.now(), market: market(), user: APP_USER,
+    v: BUILD, appVersion: APP_VERSION, now: Date.now(), market: market(), user: APP_USER,
     wallet: w, wallets, pos, ord, lims, account, xfers, rules: rulesJson(wr), broker: brokerJson(), trd: trd.map(tradeJson), watch: watch.map(x => x.sym), alerts: alerts.map(alertJson),
     preds: preds.map(p => ({ id: p.id, sym: p.sym, dir: p.dir, start: +p.start_px, startTs: tsMs(p.start_ts), end: tsMs(p.end_ts) })),
     assets: assetsJson(syms), prices: pricesJson(), spark: sp, eq1d: eq,
@@ -4327,7 +4327,7 @@ GET('/api/games', auth, async req => {
 POST('/api/preds', auth, async req => { const id = await newPrediction(req.body.sym, req.body.dir, req.body.mins); return { id }; });
 DEL('/api/preds/:id', auth, async req => { await Q('delete from preds where id=$1 and result is null and start_ts > now() - interval \'2 minutes\'', [+req.params.id]); });
 GET('/api/status', auth, async () => ({
-  version: BUILD, up: Date.now() - BOOT, market: market(), finnhubKey: !!FINNHUB_KEY, wsMax: WS_MAX,
+  version: BUILD, appVersion: APP_VERSION, up: Date.now() - BOOT, market: market(), finnhubKey: !!FINNHUB_KEY, wsMax: WS_MAX,
   feeds: { crypto: { ...feeds.crypto, subs: cbSubs.size }, stocks: { ...feeds.stocks, subs: [...fhSubs] } },
   queue: fhQueue.length, tracked: assets.size, broker: brokerJson(), clients: wss.clients.size, db: { schema: +(await kvGet('schema', '0')), snaps: +(await row('select count(*) n from snap')).n },
 }));
@@ -5438,6 +5438,7 @@ const ICONS = {};
 const icon = (name, fn) => ICONS[name] || (ICONS[name] = fn());
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD646"/><stop offset=".5" stop-color="#FFA028"/><stop offset="1" stop-color="#FA5256"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="#1E1430"/><ellipse cx="31" cy="36" rx="18" ry="22" transform="rotate(30 31 36)" fill="url(#g)"/><path d="M20 41l6.5-6 5 3.5 9.5-10" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37 28.5h4.5V33" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="45" cy="11.5" rx="9" ry="4.6" transform="rotate(-24 45 11.5)" fill="#3BD68A"/></svg>`;
 let BUILD = 'dev', INDEX = null, INDEX_GZ = null;
+const APP_VERSION = '2.11.3'; // stamped by build.sh from package.json
 function loadIndex() {
   const file = path.join(__dirname, 'index.html');
   let html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<!doctype html><title>Mango</title><p>index.html is missing next to server.js.</p>';
@@ -5548,6 +5549,6 @@ process.on('unhandledRejection', e => warn('unhandled', e && (e.stack || e.messa
   tokenSalt = (await kvGet('token_salt', '')) || '';
   await loadSettings(); await refreshPasskeysOn(); await loadAssets(); await loadPriceCache(); await loadOrders(); await loadAlerts(); await initPush();
   await refreshUserSyms(); await walletsSummary();
-  server.listen(PORT, () => log(`🥭 Mango is running on port ${PORT} · build ${BUILD} · ${FINNHUB_KEY ? 'stocks on' : 'stocks off (no FINNHUB_KEY)'}${BROKER ? ` · Alpaca ${BROKER.env}` : ''}`));
+  server.listen(PORT, () => log(`🥭 Mango is running on port ${PORT} · v${APP_VERSION} (build ${BUILD}) · ${FINNHUB_KEY ? 'stocks on' : 'stocks off (no FINNHUB_KEY)'}${BROKER ? ` · Alpaca ${BROKER.env}` : ''}`));
   cbConnect(); fhConnect(); if (BROKER) adConnect(); startJobs();
 })().catch(e => { console.error('Mango could not start:', e); process.exit(1); });

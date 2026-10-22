@@ -128,7 +128,8 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 #tabs { position: absolute; inset: 0; }
 .tab {
   position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior-y: contain;
-  padding: calc(var(--safe-t) + 4px) calc(var(--gut) + var(--safe-r)) calc(var(--nav-h) + var(--safe-b) + 28px) calc(var(--gut) + var(--safe-l));
+  /* no top padding here: the header already makes room for the status bar (it used to be counted twice) */
+  padding: 0 calc(var(--gut) + var(--safe-r)) calc(var(--nav-h) + var(--safe-b) + 28px) calc(var(--gut) + var(--safe-l));
   visibility: hidden; opacity: 0; transform: scale(.985);
   transition: opacity .22s var(--ease), transform .3s var(--ease-out), visibility 0s linear .22s;
   scrollbar-width: none;
@@ -158,8 +159,8 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 
 /* ---------- top bars ---------- */
 .topbar {
-  position: sticky; top: calc(-1 * var(--safe-t) - 4px); z-index: 10; margin: 0 calc(-1 * var(--gut)); padding: calc(var(--safe-t) + 8px) var(--gut) 8px;
-  display: flex; align-items: center; gap: 10px; min-height: calc(var(--safe-t) + 56px);
+  position: sticky; top: 0; z-index: 10; margin: 0 calc(-1 * var(--gut)); padding: calc(var(--safe-t) + 4px) var(--gut) 8px;
+  display: flex; align-items: center; gap: 10px; min-height: calc(var(--safe-t) + 52px);
   transition: background .25s, border-color .25s; border-bottom: 1px solid transparent;
 }
 .scrolled .topbar { background: var(--glass); -webkit-backdrop-filter: saturate(170%) blur(22px); backdrop-filter: saturate(170%) blur(22px); border-bottom-color: var(--line); }
@@ -173,6 +174,9 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 .icon-btn:active { transform: scale(.9); background: var(--card3); }
 .icon-btn .badge { position: absolute; top: -2px; right: -2px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; background: var(--dn); color: #fff; font-size: 10.5px; line-height: 17px; font-weight: 700; text-align: center; box-shadow: 0 0 0 2px var(--bg); }
 .large-title { margin: 6px 0 14px; }
+
+/* a tab that doesn't start with a header still clears the status bar */
+.tab > .inner > :first-child:not(.topbar) { margin-top: calc(var(--safe-t) + 4px); }
 
 /* ---------- buttons ---------- */
 .btn {
@@ -435,6 +439,8 @@ button.tile:active { transform: scale(.98); }
 
 #netbar { position: fixed; left: 50%; top: calc(var(--safe-t) + 8px); transform: translateX(-50%); z-index: 90; height: 32px; padding: 0 14px; border-radius: 16px; background: var(--card3); color: var(--tx); font-size: 13.5px; font-weight: 650; display: flex; align-items: center; gap: 8px; box-shadow: var(--shadow-sm); }
 #netbar .spin { width: 13px; height: 13px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
+
+.set-ver { display: inline-block; margin-left: 6px; padding: 2px 8px; border-radius: 8px; background: var(--card3); color: var(--tx2); font-size: 13px; font-weight: 700; vertical-align: 3px; font-variant-numeric: tabular-nums; }
 
 /* ---------- portfolio ---------- */
 .wallet-pill { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px 0 6px; border-radius: 19px; background: var(--card2); font-weight: 650; font-size: 15.5px; max-width: 62vw; transition: transform .16s; }
@@ -1222,7 +1228,7 @@ button.tile:active { transform: scale(.98); }
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__';
+const BUILD = '__BUILD__', APP_VERSION = '2.11.3';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -6692,13 +6698,13 @@ PAGES.settings = {
   refresh(p) { p.draw && p.draw(); },
   root() {
     const S = App.S;
-    return `<div class="set-hero"><svg viewBox="0 0 120 120" class="av"><use href="#mango-mark"/></svg><div><div class="t-title">Mango</div><div class="t-foot">Logged in as ${h(S.user || 'you')} · ${(S.wallets || []).filter(w => !w.archived).length} wallet${(S.wallets || []).length === 1 ? '' : 's'}</div></div></div>
+    return `<div class="set-hero"><svg viewBox="0 0 120 120" class="av"><use href="#mango-mark"/></svg><div><div class="t-title">Mango <span class="set-ver">v${h(APP_VERSION)}</span></div><div class="t-foot">Logged in as ${h(S.user || 'you')} · ${(S.wallets || []).filter(w => !w.archived).length} wallet${(S.wallets || []).length === 1 ? '' : 's'}</div></div></div>
       ${standbyCard()}${councilCard()}${analystCard()}
       <div class="group mt16">${Object.entries(SECTIONS).map(([k, v]) => rowLink(v.icon, v.title, v.sub, 'settings/' + k)).join('')}</div>
       <div class="group mt16">${rowLink('wallet', 'Wallets', 'Create, rename, reset, move cash', 'wallets')}${rowToggle('hideBalances', 'Hide balances', 'Blur dollar amounts. Press and hold to peek.')}</div>
       <div class="group mt16">${rowLink('lock', 'Face ID and backups', 'Log in with Face ID, protect real money, save your data', 'security')}</div>
       <div class="group mt16"><button class="cell" data-act="changePass"><div class="lead">${icon('key')}</div><div class="main"><div class="title">Change password</div></div>${icon('right', 'chev')}</button><button class="cell" data-act="logout"><div class="lead">${icon('logout')}</div><div class="main"><div class="title">Log out of this device</div></div></button><button class="cell" data-act="logoutAll"><div class="lead" style="color:var(--dn)">${icon('lock')}</div><div class="main"><div class="title">Log out everywhere</div><div class="sub">Signs out every phone and computer</div></div></button></div>
-      <p class="note center">Mango · build ${h(BUILD.slice(0, 7))} · ${S.broker?.on && S.broker.env === 'live' ? 'a live Alpaca account is connected' : 'practice money only'}</p>`;
+      <p class="note center">Mango v${h(APP_VERSION)} · build ${h(BUILD.slice(0, 7))} · ${S.broker?.on && S.broker.env === 'live' ? 'a live Alpaca account is connected' : 'practice money only'}</p>`;
   },
   trading() {
     const w = W(), real = isRealW();
@@ -6795,7 +6801,7 @@ PAGES.settings.after = {
     try {
       const s = await api('status'), box = $('#status-box', p.body); if (!box) return;
       const ago = t => t ? timeAgo(t) : 'never';
-      box.innerHTML = `<div class="kv"><span class="k">Version</span><span class="v">${h(s.version)}</span></div>
+      box.innerHTML = `<div class="kv"><span class="k">Version</span><span class="v">${h(APP_VERSION)}${s.appVersion && s.appVersion !== APP_VERSION ? ` (server ${h(s.appVersion)})` : ''}</span></div><div class="kv"><span class="k">Build</span><span class="v">${h(s.version)}</span></div>
         <div class="kv"><span class="k">Server running for</span><span class="v">${duration(s.up)}</span></div>
         <div class="kv"><span class="k">Crypto prices</span><span class="v ${s.feeds.crypto.ok ? 'up' : 'dn'}">${s.feeds.crypto.ok ? 'Live' : 'Reconnecting'} · ${ago(s.feeds.crypto.last)}</span></div>
         <div class="kv"><span class="k">Stock prices</span><span class="v ${s.finnhubKey ? (s.feeds.stocks.ok ? 'up' : 'dn') : 'mu'}">${s.finnhubKey ? (s.feeds.stocks.ok ? 'Connected' : 'Reconnecting') : 'No FINNHUB_KEY'}${s.finnhubKey ? ' · trade ' + ago(s.feeds.stocks.last) : ''}</span></div>
