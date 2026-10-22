@@ -4684,7 +4684,7 @@ const HQ_L = (() => {
     ...[20.4, 21.8, 23.2, 24.6].map(y => ({ k: 'rack', room: 'control', x: 14.25, y, w: 0.95, d: 1.2, h: 1.75, occ: 1, dyn: 1 })),
     { k: 'console', room: 'control', x: 17, y: 21.4, w: 7.4, d: 1.0, occ: 1, dyn: 1 },
     { k: 'camWall', room: 'control', side: 'w', x: 14, y: 26.9, w: 1.0, z: 0.55, h: 0.8, dyn: 1 },
-    { k: 'beacon', room: 'control', x: 25.55, y: 25.95, r: 0.75, occ: 1, dyn: 1 },
+    { k: 'beacon', room: 'control', x: 25.3, y: 25.65, r: 0.8, occ: 1, dyn: 1 },
     { k: 'lever', room: 'control', x: 25.6, y: 20.6, w: 0.9, d: 0.8, occ: 1, dyn: 1 },
     // lounge
     { k: 'rug', room: 'lounge', x: 29.2, y: 20.9, w: 4.6, d: 4.2, flat: 1 },
@@ -4891,8 +4891,9 @@ const HQ_TAKEN = new Map(); // spot -> agent id, so two bots don't share a chair
 // Live layers (scrolling text, screens, glows, people and anything redrawn over them) are painted on top of the
 // cached world, so anything that should be in front of them gets painted again after them, in depth order.
 // Isometric overlap doesn't depend on zoom or pan, so the "in front of" lists are worked out once.
-const HQ_H = { desk: 1.3, tradeDesk: 2.8, bigTable: 1.4, vessels: 1.45, bench: 1.3, councilTable: 1.0, throne: 2.0, pillar: 2.35, gold: 0.9, safe: 1.0, rack: 1.9, console: 1.3, beacon: 4.3, lever: 1.7, sofa: 1.0, coffeeTable: 0.85, kitchen: 1.95, chair: 0.95, plant: 1.7, printer: 1.0, shelf: 1.95, gap: 2.4, hallDecor: 2.5 };
-const hqPieceH = o => o.side ? o.z + o.h + 0.05 : o.kind ? (o.kind === 'tall' ? 2.5 : 1.5) : (o.h || HQ_H[o.k] || 1.2);
+const HQ_H = { desk: 1.3, tradeDesk: 2.8, bigTable: 1.4, vessels: 1.45, bench: 1.3, councilTable: 1.0, throne: 2.0, pillar: 2.35, gold: 0.9, safe: 1.0, rack: 1.9, console: 1.3, beacon: 4.3, lever: 1.7, sofa: 1.0, coffeeTable: 0.85, kitchen: 1.95, chair: 0.95, plant: 1.7, printer: 1.0, shelf: 1.95, gap: 3.6, hallDecor: 2.5 };
+// walls have a side too, so check for a wall (kind) first; wall-mounted pieces (side) sit z..z+h up the wall
+const hqPieceH = o => o.kind ? (o.kind === 'tall' ? 2.6 : 1.5) : o.side ? o.z + o.h + 0.05 : (o.h || HQ_H[o.k] || 1.2);
 const HQ_STATIC = [...HQ_WALLS.map(w => ({ w, f: [w.x, w.y, w.w, w.d], h: hqPieceH(w) })), ...HQ_L.A.filter(o => !o.flat).map(o => ({ o, f: anchorFp(o), h: hqPieceH(o), dyn: !!o.dyn }))];
 const hqScreenBox = (f, h) => { const P = (x, y, z) => [(x - y) * 28, (x + y) * 14 - z * 30], pts = [P(f[0], f[1], h), P(f[0] + f[2], f[1], 0), P(f[0] + f[2], f[1] + f[3], 0), P(f[0], f[1] + f[3], 0), P(f[0], f[1] + f[3], h), P(f[0] + f[2], f[1], h)]; return [Math.min(...pts.map(p => p[0])), Math.min(...pts.map(p => p[1])), Math.max(...pts.map(p => p[0])), Math.max(...pts.map(p => p[1]))]; };
 for (const S of HQ_STATIC) S.sb = hqScreenBox(S.f, S.h);
@@ -5395,7 +5396,7 @@ HQT.village = {
     // chimney smoke from the tavern
     const sm = st.amb.smoke; if (Math.random() < dt * 2.5) sm.push({ x: 28.2, y: 23.2, z: 2.7, l: 0 }); for (let i = sm.length - 1; i >= 0; i--) { const q = sm[i]; q.l += dt; q.z += dt * 0.5; q.x += dt * 0.2; if (q.l > 5) { sm.splice(i, 1); continue; } const [cx, cy] = iso.P(q.x, q.y, q.z), r = (4 + q.l * 4) * iso.zoom; g.fillStyle = `rgba(230,230,230,${0.35 * (1 - q.l / 5)})`; g.beginPath(); g.arc(cx, cy, r, 0, 7); g.fill(); }
   },
-  lights() { return [[6, 18.4, 3, '#FFB060', 0.5], [1.4, 12.4, 1.2, '#FF9A40'], [10.6, 12.4, 1.2, '#FF9A40'], [1.4, 25.6, 1.2, '#FF9A40'], [10.6, 25.6, 1.2, '#FF9A40'], [28.8, 23, 2.4, '#FF9A40', 0.55], [27.6, 5.6, 2, '#9BE564', 0.35], [25.55, 25.95, 1.6, '#FF9A40'], [0.7, 9.5, 1.5, '#FFD678'], [35.3, 9.5, 1.5, '#FFD678'], [35.3, 18.5, 1.5, '#FFD678'], [8.6, 9.5, 1.5, '#FFD678'], [26.5, 9.5, 1.5, '#FFD678'], [32, 23, 2, '#FFB060', 0.4]]; },
+  lights() { return [[6, 18.4, 3, '#FFB060', 0.5], [1.4, 12.4, 1.2, '#FF9A40'], [10.6, 12.4, 1.2, '#FF9A40'], [1.4, 25.6, 1.2, '#FF9A40'], [10.6, 25.6, 1.2, '#FF9A40'], [28.8, 23, 2.4, '#FF9A40', 0.55], [27.6, 5.6, 2, '#9BE564', 0.35], [25.3, 25.65, 1.6, '#FF9A40'], [0.7, 9.5, 1.5, '#FFD678'], [35.3, 9.5, 1.5, '#FFD678'], [35.3, 18.5, 1.5, '#FFD678'], [8.6, 9.5, 1.5, '#FFD678'], [26.5, 9.5, 1.5, '#FFD678'], [32, 23, 2, '#FFB060', 0.4]]; },
   night: 'rgba(40,50,110,.6)', dusk: 'rgba(200,120,110,.22)',
 };
 
@@ -5474,7 +5475,7 @@ HQT.island = {
     else if (k === 'deposits') onAnchor(iso, a, (g, W, H) => { g.strokeStyle = '#7A5232'; g.lineWidth = 3; for (let i = 0; i <= 8; i++) { g.beginPath(); g.moveTo(i * W / 8, 0); g.lineTo(i * W / 8, H * 0.8); g.stroke(); g.beginPath(); g.moveTo(0, i * H * 0.1); g.lineTo(W, i * H * 0.1); g.stroke(); } g.fillStyle = '#FFC93C'; for (let i = 0; i < 5; i++) { g.beginPath(); g.arc(20 + i * 26, H * 0.5 + (i % 2) * 12, 6, 0, 7); g.fill(); } });
     else if (k === 'rack') { barrel(iso, a.x + 0.45, a.y + 0.6, 0, 0.95); if (a.y < 22) crate(iso, a.x + 0.1, a.y + 0.1, 0.67, 0.7, '#C4945A'); }
     else if (k === 'console') { table(iso, a.x, a.y, a.w, a.d, 0.75, '#B88A5A', '#7A5232', { th: 0.1 }); iso.box(a.x + 0.4, a.y + 0.2, 0.75, 1.1, 0.6, 0.02, '#F2E2B8'); iso.cyl(a.x + 2.5, a.y + 0.5, 0.75, 0.2, 0.3, '#C9A45A', { top: '#5A4A3A' }); iso.box(a.x + 4.2, a.y + 0.25, 0.75, 0.8, 0.5, 0.35, '#5A4A3A'); }
-    else if (k === 'beacon') { const x = a.x, y = a.y; iso.cyl(x, y, 0, 0.9, 0.3, '#9A968E', { top: '#8E8A84' }); for (let i = 0; i < 6; i++) iso.cyl(x, y, 0.3 + i * 0.5, 0.62 - i * 0.05, 0.5, i % 2 ? '#F5F5F0' : '#D9483B', { noTop: i < 5 }); iso.cyl(x, y, 3.3, 0.5, 0.08, '#3A3A3A'); iso.cyl(x, y, 3.38, 0.36, 0.5, 'rgba(200,230,255,.5)', { side: 'rgba(200,230,255,.35)', top: 'rgba(200,230,255,.5)' }); iso.cone(x, y, 3.88, 0.48, 0.45, '#D9483B'); }
+    else if (k === 'beacon') { const x = a.x, y = a.y; iso.cyl(x, y, 0, 0.8, 0.3, '#9A968E', { top: '#8E8A84' }); for (let i = 0; i < 6; i++) iso.cyl(x, y, 0.3 + i * 0.5, 0.62 - i * 0.05, 0.5, i % 2 ? '#F5F5F0' : '#D9483B', { noTop: i < 5 }); iso.cyl(x, y, 3.3, 0.5, 0.08, '#3A3A3A'); iso.cyl(x, y, 3.38, 0.36, 0.5, 'rgba(200,230,255,.5)', { side: 'rgba(200,230,255,.35)', top: 'rgba(200,230,255,.5)' }); iso.cone(x, y, 3.88, 0.48, 0.45, '#D9483B'); }
     else if (k === 'lever') { iso.box(a.x + 0.3, a.y + 0.3, 0, 0.12, 0.12, 1.4, '#7A5232'); iso.box(a.x, a.y + 0.3, 1.3, 0.75, 0.12, 0.08, '#7A5232'); }
     else if (k === 'rug') iso.onFloor(a.x, a.y, 0.006, g => { for (let i = 0; i < 2; i++) { g.save(); g.translate(60 + i * 220, 80); g.rotate(0.2 - i * 0.3); g.fillStyle = ['#FF6F96', '#2EC4B6'][i]; g.fillRect(0, 0, 140, 260); g.fillStyle = 'rgba(255,255,255,.55)'; for (let k = 0; k < 260; k += 40) g.fillRect(0, k, 140, 14); g.restore(); } });
     else if (k === 'tv') onAnchor(iso, a, (g, W, H) => { for (let i = 0; i < 3; i++) { g.save(); g.translate(30 + i * (W - 60) / 2, H); g.rotate(-0.08 + i * 0.08); g.fillStyle = ['#FF6F96', '#FFD646', '#2EC4B6'][i]; g.beginPath(); g.ellipse(0, -H / 2, 20, H / 2, 0, 0, 7); g.fill(); g.fillStyle = 'rgba(255,255,255,.7)'; g.fillRect(-2, -H + 6, 4, H - 12); g.restore(); } });
@@ -5498,7 +5499,7 @@ HQT.island = {
     else if (k === 'kitchen' && !st.calm) for (let i = 0; i < 4; i++) { const f = (t * 0.35 + i / 4) % 1, [cx, cy] = iso.P(a.x + 1.0 + Math.sin(f * 5 + i) * 0.2, a.y + 0.5, 1.1 + f * 1.4), r = (3 + f * 7) * iso.zoom; iso.g.fillStyle = `rgba(240,240,240,${0.35 * (1 - f)})`; iso.g.beginPath(); iso.g.arc(cx, cy, r, 0, 7); iso.g.fill(); }
   },
   ambient(iso, st, t, dt) { if (st.calm) return; const g = iso.g; st.amb = st.amb || Array.from({ length: 4 }, () => ({ x: Math.random() * iso.w, y: 40 + Math.random() * 160, v: 15 + Math.random() * 20, p: Math.random() * 9 })); for (const b of st.amb) { b.x += b.v * dt; if (b.x > iso.w + 40) { b.x = -40; b.y = 40 + Math.random() * 160; } const fl = Math.sin(t * 5 + b.p) * 6, y = b.y + Math.sin(t * 0.7 + b.p) * 10; g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 2; g.beginPath(); g.moveTo(b.x - 9, y - fl); g.quadraticCurveTo(b.x - 4, y - 4, b.x, y); g.quadraticCurveTo(b.x + 4, y - 4, b.x + 9, y - fl); g.stroke(); } },
-  lights() { return [[6, 18.4, 3.4, '#FF9A40', 0.6], [1.4, 12.4, 1.2, '#FF9A40'], [10.6, 12.4, 1.2, '#FF9A40'], [1.4, 25.6, 1.2, '#FF9A40'], [10.6, 25.6, 1.2, '#FF9A40'], [0.7, 9.5, 1.4, '#FF9A40'], [35.3, 9.5, 1.4, '#FF9A40'], [35.3, 18.5, 1.4, '#FF9A40'], [8.6, 9.5, 1.4, '#FF9A40'], [26.5, 9.5, 1.4, '#FF9A40'], [25.55, 25.95, 2.4, '#FFF2B0', 0.4], [29, 26.2, 1.8, '#FF9A40', 0.4]]; },
+  lights() { return [[6, 18.4, 3.4, '#FF9A40', 0.6], [1.4, 12.4, 1.2, '#FF9A40'], [10.6, 12.4, 1.2, '#FF9A40'], [1.4, 25.6, 1.2, '#FF9A40'], [10.6, 25.6, 1.2, '#FF9A40'], [0.7, 9.5, 1.4, '#FF9A40'], [35.3, 9.5, 1.4, '#FF9A40'], [35.3, 18.5, 1.4, '#FF9A40'], [8.6, 9.5, 1.4, '#FF9A40'], [26.5, 9.5, 1.4, '#FF9A40'], [25.3, 25.65, 2.4, '#FFF2B0', 0.4], [29, 26.2, 1.8, '#FF9A40', 0.4]]; },
   night: 'rgba(30,60,120,.55)', dusk: 'rgba(220,120,120,.2)',
 };
 
@@ -6357,18 +6358,23 @@ PAGES.hq = {
     for (let round = 0; round < 2; round++) for (const it of [...set.values()]) for (const F of it.S.front) if (!set.get(F)?.item && !split.has(F)) need(F, 'item');
     for (const S of split) set.delete(S);
     const ctx = { st, R: rng(7), names: th.names }, g = iso.g, env = hqEnv(st), dim = (env.night || env.dusk) && th.night;
-    for (const it of isoSort([...items, ...set.values()])) {
+    // scenery outside the building (palms, rocks, boats...) isn't in the static lists, so anything redrawn
+    // above has to check it too: scenery standing in front of a redrawn piece or a person gets redrawn after it
+    if (st._scen?.id !== th.id) st._scen = { id: th.id, list: (th.scenery?.({ st, R: rng(7), names: th.names }) || []).map(m => { const f = m.f || [m.x - 0.5, m.y - 0.5, 1, 1], h = m.h || 4; return { f, h, draw: m.draw, sb: hqScreenBox(f, h) }; }) };
+    const live = [...set.values(), ...items].map(it => ({ f: it.f, sb: it.S?.sb || hqScreenBox(it.f, it.a ? 2.4 : it.h || 2) }));
+    const scenery = st._scen.list.filter(sc => live.some(L => hqBehind(L.f, sc.f) && !hqBehind(sc.f, L.f) && L.sb[0] < sc.sb[2] && L.sb[2] > sc.sb[0] && L.sb[1] < sc.sb[3] && L.sb[3] > sc.sb[1])).map(sc => ({ f: sc.f, h: sc.h, scen: sc }));
+    const dimBox = it => { const [x, y, w, d] = it.f, hh = it.h, P = (a, b, c) => iso.P(a, b, c);
+      g.save(); g.beginPath(); [P(x, y, hh), P(x + w, y, hh), P(x + w, y, 0), P(x + w, y + d, 0), P(x, y + d, 0), P(x, y + d, hh)].forEach((q, i) => i ? g.lineTo(...q) : g.moveTo(...q)); g.closePath(); g.clip();
+      g.globalCompositeOperation = 'multiply'; g.fillStyle = env.night ? th.night : th.dusk || th.night; g.fillRect(0, 0, iso.w, iso.h); g.restore(); };
+    for (const it of isoSort([...items, ...set.values(), ...scenery])) {
       if (it.a) { drawPerson(iso, it.a, th); continue; }
+      if (it.scen) { it.scen.draw(iso, ctx); if (dim) dimBox(it); continue; }
       const S = it.S;
       if (it.item) {
         if (it.fade) g.globalAlpha = 0.42;
         if (S.w) th.wall(iso, S.w, ctx); else th.item(iso, S.o, it.part ? { ...ctx, part: it.part } : ctx);
         g.globalAlpha = 1;
-        if (dim) { // match the darker static image at night
-          const [x, y, w, d] = it.f, hh = it.h, P = (a, b, c) => iso.P(a, b, c);
-          g.save(); g.beginPath(); [P(x, y, hh), P(x + w, y, hh), P(x + w, y, 0), P(x + w, y + d, 0), P(x, y + d, 0), P(x, y + d, hh)].forEach((q, i) => i ? g.lineTo(...q) : g.moveTo(...q)); g.closePath(); g.clip();
-          g.globalCompositeOperation = 'multiply'; g.fillStyle = env.night ? th.night : th.dusk || th.night; g.fillRect(0, 0, iso.w, iso.h); g.restore();
-        }
+        if (dim) dimBox(it); // match the darker static image at night
       }
       if (S.dyn && (it.dyn || it.item) && !it.part) th.dyn(iso, S.o, st, st.t);
     }
@@ -6931,7 +6937,7 @@ document.addEventListener('keydown', e => {
   if (top?.page?.name === 'asset' && (e.key === 'b' || e.key === 's')) { if (e.key === 's' && !posOf(top.page.sym)) return; tradeSheet(top.page.sym, e.key === 'b' ? 'buy' : 'sell'); }
   if (!top && ['1', '2', '3', '4'].includes(e.key)) setTab(TABS[+e.key - 1]);
 });
-window.Mango = { App, Router, api, loadState, VIEWS, PAGES, ACT, HQ: { L: HQ_L, WALLS: HQ_WALLS, T: HQT, fp, anchorFp, SPOTS: HQ_SPOTS, path: hqRoomPath } };
+window.Mango = { App, Router, api, loadState, VIEWS, PAGES, ACT, HQ: { L: HQ_L, WALLS: HQ_WALLS, T: HQT, fp, anchorFp, SPOTS: HQ_SPOTS, path: hqRoomPath, isoSort, Iso } };
 boot();
 
 })();
