@@ -308,7 +308,7 @@ const DEF = {
   confirmStyle: 'hold', confirmBuy: false, confirmSell: true, cashAPY: 0, startBalance: 10000,
   // notifications
   pushAlerts: true, pushOrders: true, notifySummary: true, notifyMoves: true, moveThreshold: 5,
-  notifyAchv: true, notifyGames: true, pushBots: true, botWeekly: true, pushReal: true, realDailyLossPct: 3, realHalt: false, standbyActive: false, standbyActiveAt: 0, councilWeighted: true, aiOn: true, aiSize: true, aiDebate: true, aiHawk: true, aiGuard: true, aiChart: true, aiDailyMax: 120, faceReal: true, autoBackup: true, quietStart: '', quietEnd: '',
+  notifyAchv: true, notifyGames: true, pushBots: true, botWeekly: true, pushReal: true, realDailyLossPct: 3, realHalt: false, standbyActive: false, standbyActiveAt: 0, councilWeighted: true, nightOn: true, nightRuns: 2, aiOn: true, aiSize: true, aiDebate: true, aiHawk: true, aiGuard: true, aiChart: true, aiDailyMax: 120, faceReal: true, autoBackup: true, quietStart: '', quietEnd: '',
   // look and feel
   hideBalances: false, showCents: true, compactNums: false, defaultRange: '1D', defaultChart: 'Candles',
   theme: 'mango', accent: 'mango', plColors: 'classic', roundedNums: true, reduceMotion: false, celebrate: true,
@@ -320,7 +320,7 @@ const DEF = {
   f_divs: true, f_ext: true, f_movers: true, f_insights: true, f_taxes: true, f_statements: true, f_bots: true, f_buzz: true,
 };
 const LIMITS = {
-  aiDailyMax: [0, 500],
+  nightRuns: [1, 3], aiDailyMax: [0, 500],
   realDailyLossPct: [0, 50],
   feeFlat: [0, 1000], feePct: [0, 10], slippage: [0, 5], maxPos: [0, 100], reservePct: [0, 100], autoSL: [0, 90], autoTP: [0, 1000],
   defaultBuy: [0, 1e9], cashAPY: [0, 100], startBalance: [100, 1e9], moveThreshold: [1, 50], defaultWallet: [1, 1e9],
@@ -3377,13 +3377,13 @@ function withLive(b, sym) {
   return { bars: out, live: true };
 }
 const running = new Set();
-async function runBot(id, { manual = false, dry = false } = {}) {
+async function runBot(id, { manual = false, dry = false, night = false } = {}) {
   if (!dry && standbyPaused()) fail('This is the standby copy and it\'s switched off, so bots don\'t trade here. Switch it on in Settings if your main server is down.');
   if (running.has(id)) fail('This bot is already deciding. Give it a moment.');
   running.add(id); if (!dry) broadcast({ t: 'evt', e: 'bot', id, deciding: true });
-  try { return await runBotInner(id, { manual, dry }); } finally { running.delete(id); if (!dry) broadcast({ t: 'evt', e: 'bot', id }); }
+  try { return await runBotInner(id, { manual, dry, night }); } finally { running.delete(id); if (!dry) broadcast({ t: 'evt', e: 'bot', id }); }
 }
-async function runBotInner(id, { manual, dry }) {
+async function runBotInner(id, { manual, dry, night }) {
   const b = await row('select * from bots where id=$1', [id]); if (!b) fail('That bot is gone', 404);
   const bot = botJson(b), st = STRATEGIES[bot.strategy], m = bot.mandate, state = jsonOr(b.state, {});
   const w = await walletRow(bot.wid);
@@ -3418,7 +3418,7 @@ async function runBotInner(id, { manual, dry }) {
   const tradesToday = +(await row("select count(*) n from bot_log where bot_id=$1 and kind='trade' and ts > $2", [id, new Date(etToUtc(...today.split('-').map(Number), 0, 0))])).n;
   let tradeBudget = Math.max(0, m.maxTradesDay - tradesToday);
   // ---- data ----
-  const syms = bot.syms.filter(s => isCrypto(s) || sess === 'regular' || manual);
+  const syms = bot.syms.filter(s => isCrypto(s) || sess === 'regular' || manual || night);
   const bench = benchFor(bot.syms);
   const { data, missing } = await loadUniverse([...new Set([...bot.syms, bench])]);
   const series = {}, idx = {};
@@ -3445,11 +3445,12 @@ async function runBotInner(id, { manual, dry }) {
   const phase = p => { if (!dry) broadcast({ t: 'evt', e: 'hq', ev: { kind: 'phase', phase: p, botId: id, ts: Date.now() } }); };
   phase('news');
   if (m.newsFilter && S.f_buzz !== false) {
-    const list = [...new Set([...wantBuy.map(([s]) => s), ...Object.keys(held), ...tradable])].slice(0, 24);
+    const list = [...new Set([...wantBuy.map(([s]) => s), ...Object.keys(held), ...tradable])].filter(s => !night || isCrypto(s)).slice(0, 24);
     for (let i = 0; i < list.length; i += 8) await Promise.all(list.slice(i, i + 8).map(s => Promise.race([buzzFor(s), sleep(12000).then(() => null)]).then(x => { if (x) buzz[s] = x; }).catch(() => {})));
   }
   const decisions = {};
   for (const s of new Set([...tradable, ...Object.keys(held)])) {
+    if (night && !isCrypto(s)) continue; // the night shift only handles crypto; stocks wait for the day crew
     const want = dec.weights[s] > 0 ? dec.weights[s] : 0, px = priceOf(s), have = (held[s]?.qty || 0) * (px || 0), bz = buzz[s];
     const d = { sym: s, note: dec.notes[s] || (tradable.includes(s) ? '' : isCrypto(s) ? 'No fresh price yet.' : 'Stock market is closed; stocks are only traded in regular hours.'), want, have, buzz: bz ? buzzLine(bz) : null, flags: bz?.flags || [], action: 'hold', why: [] };
     let wt = want;
@@ -3472,13 +3473,15 @@ async function runBotInner(id, { manual, dry }) {
     const buying = d.want * capital > d.have + Math.max(m.minTrade, 1), selling = d.have > 0 && !(d.target > 0);
     if (!(buying || selling) || sessions.length >= 12 || !series[d.sym]) continue;
     const bz = buzz[d.sym], up = bz?.upcoming?.find(u => u.k === 'earnings') || null;
-    const s = councilSession(bot, d, series, bz, up, m, capital);
+    const s = night ? await nightSession(d, series, bz, up, { strategy: STRATEGIES[bot.strategy]?.name || bot.strategy }) : councilSession(bot, d, series, bz, up, m, capital);
     // the AI members (Claude) vote too: specialists first, then the Analyst, who debates the others
-    const ais = await aiRound(d.sym, series[d.sym], { side: buying ? 'buy' : 'sell', target: d.target }, bz, up, { strategy: STRATEGIES[bot.strategy]?.name || bot.strategy, bench: series.SPY ? IND.ret(series.SPY.c, 63, series.SPY.c.length - 1) : null, have: d.have / capital, positions: Object.keys(held).length, maxPos: m.maxPosPct, stops: !!m.stops }, s.votes).catch(e => { warn('ai round', e.message); return []; });
+    const ais = night ? [] : await aiRound(d.sym, series[d.sym], { side: buying ? 'buy' : 'sell', target: d.target }, bz, up, { strategy: STRATEGIES[bot.strategy]?.name || bot.strategy, bench: series.SPY ? IND.ret(series.SPY.c, 63, series.SPY.c.length - 1) : null, have: d.have / capital, positions: Object.keys(held).length, maxPos: m.maxPosPct, stops: !!m.stops }, s.votes).catch(e => { warn('ai round', e.message); return []; });
     if (ais.length) { s.votes.push(...ais); s.yes = s.votes.filter(v => v.vote === 'yes').length; s.no = s.votes.filter(v => v.vote === 'no').length;
       // the Analyst has the last word on size; without its vote, the most cautious specialist decides
       const an = ais.find(v => v.k === 'ai' && v.c === 'ai' && v.vote !== 'pass'), cut = an || ais.filter(v => v.c === 'ai' && v.vote !== 'pass').sort((a, b) => a.size - b.size)[0];
       if (cut && buying && S.aiSize !== false && cut.size < 1 && d.target * capital > d.have + 1) { const add = d.target * capital - d.have, nt = (d.have + add * cut.size) / capital; d.why.push(`The ${nameOf(cut.k)} cut this buy to ${Math.round(cut.size * 100)}%: ${cut.line}`); d.target = nt; } }
+    // at night the Night Owl gets the same say over size that the Analyst has in the day
+    if (night && buying && S.aiSize !== false && d.target * capital > d.have + 1) { const ow = s.votes.find(v => v.k === 'owl' && v.c === 'ai' && v.vote !== 'pass'); if (ow && ow.size < 1) { const add = d.target * capital - d.have; d.target = (d.have + add * ow.size) / capital; d.why.push(`The Night Owl cut this buy to ${Math.round(ow.size * 100)}%: ${ow.line}`); } }
     Object.assign(s, weighVotes(s.votes, situation(series[d.sym], bz, up), councilRec));
     if (m.councilVeto && buying && d.target * capital > d.have + 1 && leansNo(s)) { d.target = d.have / capital; d.why.push(`Skipped buying: the council voted ${tallyText(s)} against${weightedOn() ? ' (weighted)' : ''}, and council veto is on.`); }
     d.council = s; sessions.push(d);
@@ -3565,14 +3568,16 @@ async function runBotInner(id, { manual, dry }) {
       state[p.sym] = { ...s0, entryDate: s0.entryDate || today, high: Math.max(s0.high || 0, priceOf(p.sym) || 0), days: held[p.sym] ? held[p.sym].days : 0, lastDay: today, weight: d?.target || s0.weight };
     }
     for (const s of Object.keys(state)) if (!s.startsWith('_') && !pnow.some(p => p.sym === s)) delete state[s];
-    if (rebalanceDue && st.rebalance !== 'none') state._lastRebalance = today;
+    if (rebalanceDue && st.rebalance !== 'none' && !night) state._lastRebalance = today;
     const bought = log.orders.filter(o => o.side === 'buy').map(o => o.sym), sold = log.orders.filter(o => o.side === 'sell').map(o => o.sym);
     const summary = log.orders.length ? [bought.length ? 'Bought ' + bought.join(', ') : '', sold.length ? 'sold ' + sold.join(', ') : ''].filter(Boolean).join('; ') : 'No changes';
     state._health = { t: Date.now(), missing, noPrice: bot.syms.filter(x => !priceOf(x)), news: m.newsFilter && S.f_buzz !== false ? { checked: Object.keys(buzz).length, wanted: Math.min(24, new Set([...wantBuy.map(([x]) => x), ...Object.keys(held), ...tradable]).size) } : null, problems: log.skips.length, saved: dataHealth.saved.syms.filter(x => bot.syms.includes(x)) };
-    await Q('update bots set state=$1, last_run=now(), last_day=$2, peak=$3, day_start=$4, day_date=$5, summary=$6 where id=$7', [JSON.stringify(state), today, peak, dayStart, today, summary, id]);
+    // a night run doesn't count as the day's decision, so the day crew still meets at its usual time
+    if (night) await Q('update bots set state=$1, last_run=now(), peak=$2, day_start=$3, day_date=$4, summary=$5 where id=$6', [JSON.stringify(state), peak, dayStart, today, summary, id]);
+    else await Q('update bots set state=$1, last_run=now(), last_day=$2, peak=$3, day_start=$4, day_date=$5, summary=$6 where id=$7', [JSON.stringify(state), today, peak, dayStart, today, summary, id]);
     const rows = Object.values(decisions).map(d => ({ sym: d.sym, action: d.action, want: round(d.want, 4), target: round(d.target, 4), have: round(d.have, 2), note: d.note, why: d.why, buzz: d.buzz, flags: d.flags, council: d.council || null }));
     if (dec.report) { await botLog(id, 'report', dec.report.title, dec.report.body, dec.report.data); await notify('bot', `🧭 ${bot.name}: ${dec.report.title.toLowerCase()}`, dec.report.body.split('\n').filter(l => !/: none/.test(l)).slice(0, 5).join('\n') || 'Holding cash: no strategy is working well enough right now.', { wid: bot.wid, url: '/#/bot/' + id }); }
-    await botLog(id, 'decision', `${manual ? 'Manual run' : 'Daily decision'}: ${summary}`, [...log.risk, ...log.skips].join('\n'), { rows, equity, capital, dd, dayRet, regime: ctx.regime || null, missing });
+    await botLog(id, 'decision', `${night ? 'Night shift' : manual ? 'Manual run' : 'Daily decision'}: ${summary}`, [...log.risk, ...log.skips].join('\n'), { rows, equity, capital, dd, dayRet, regime: ctx.regime || null, missing });
     if (m.notify === 'all' || (m.notify === 'trades' && log.orders.length)) await notify(brk ? 'real' : 'bot', `${brk ? (liveMoney ? '🔴 LIVE · ' : '🔵 Alpaca · ') : '🤖 '}${bot.name}: ${summary}`, log.orders.map(o => `${o.text}. ${o.label || ''}`.trim()).join('\n').slice(0, 600) || [...log.risk, ...log.skips].join(' ') || 'Nothing to do today.', { wid: bot.wid, url: '/#/bot/' + id });
   }
   phase('done');
@@ -3623,7 +3628,36 @@ async function botScheduler() {
       await notify('bot', `⚠️ ${b.name} missed today's decision`, why ? `Last problem: ${why}` : 'It will catch up tomorrow morning at 9:45.', { url: '/#/bot/' + b.id });
     }
   }
+  await nightScheduler(p, hm, today).catch(e => warn('night shift', e.message));
   await weeklySummary(p, hm, today).catch(e => warn('bot weekly', e.message));
+}
+// ---------- the night shift ----------
+// While the Council sleeps (9 PM to 7 AM ET), crypto bots get extra check-ins at set times. Only crypto is
+// touched, only for strategies that decide every day (monthly ones and Autopilot wait for the day crew),
+// and two night members vote instead of ten: the Night Watch (rules) and the Night Owl (one AI call).
+const NIGHT_SLOTS = { 1: ['01:00'], 2: ['23:00', '03:00'], 3: ['22:00', '02:00', '06:00'] };
+const nightOn = () => S.nightOn !== false;
+const nightSlots = () => NIGHT_SLOTS[S.nightRuns] || NIGHT_SLOTS[2];
+const inNight = hm => ENV.NIGHT_OVERRIDE ? ENV.NIGHT_OVERRIDE === '1' : hm >= '21:00' || hm < '07:00'; // NIGHT_OVERRIDE is for tests only
+const nightEligible = b => { const syms = jsonOr(b.syms, []), st = STRATEGIES[b.strategy]; return syms.some(isCrypto) && st && !st.auto && st.rebalance === 'none'; };
+function nightJson() {
+  const p = etParts(), hm = String(p.h).padStart(2, '0') + ':' + String(p.mi).padStart(2, '0');
+  const slots = nightSlots(), next = slots.slice().sort((a, b) => ((a < '12:00' ? '24' + a : a) > (b < '12:00' ? '24' + b : b) ? 1 : -1)).find(s => (s < '12:00' ? '24' + s : s) > (hm < '12:00' ? '24' + hm : hm)) || slots[0];
+  return { on: nightOn(), active: nightOn() && inNight(hm), slots, next };
+}
+async function nightScheduler(p, hm, today) {
+  if (!nightOn() || standbyPaused()) return;
+  for (const slot of nightSlots()) {
+    // run within the hour after each slot (no catching up on missed nights, that's the day crew's job)
+    const [sh, sm] = slot.split(':').map(Number), mins = p.h * 60 + p.mi - (sh * 60 + sm); if (mins < 0 || mins >= 60) continue;
+    const key = today + ' ' + slot;
+    for (const b of await rows("select * from bots where status='running'")) {
+      if (!nightEligible(b) || running.has(b.id)) continue;
+      if ((await kvGet('night:' + b.id)) === key) continue;
+      await kvSet('night:' + b.id, key);
+      runBot(b.id, { night: true }).catch(e => { warn('night', b.id, e.message); botLog(b.id, 'error', 'The night shift check failed', e.message).catch(() => {}); });
+    }
+  }
 }
 // Friday after the close: one notification with how every bot did this week.
 async function weeklySummary(p, hm, today) {
@@ -3964,7 +3998,7 @@ GET('/api/state', auth, async req => {
     settings: S, unread, counts: { trades: +counts.trades, events: +counts.events, conditional: ord.length + lims.length, seasons: +seasons[0].n },
     stats: { day: dayChange(pos), diversity: diversity(pos), protected: protectedPct(wid, pos), invested: marketValue(pos) },
     feeds: { crypto: { ok: feeds.crypto.ok, last: feeds.crypto.last }, stocks: { ok: feeds.stocks.ok, last: feeds.stocks.last, key: !!FINNHUB_KEY, live: feeds.stocks.ws } },
-    push: { key: VAPID_PUB, on: pushOn }, standby: standbyJson(), analyst: { key: !!AI_KEY, on: S.aiOn !== false, debate: S.aiDebate !== false, bench: AI_BENCH.map(m => ({ k: m.k, name: m.name, on: S[m.set] !== false })) }, councilNames: await getCouncilNames(),
+    push: { key: VAPID_PUB, on: pushOn }, standby: standbyJson(), night: nightJson(), analyst: { key: !!AI_KEY, on: S.aiOn !== false, debate: S.aiDebate !== false, bench: AI_BENCH.map(m => ({ k: m.k, name: m.name, on: S[m.set] !== false })) }, councilNames: await getCouncilNames(),
   };
   if (tokenExpiry(req.token) - Date.now() < (TOKEN_DAYS - 30) * 864e5) out.token = newToken(); // keeps you logged in while you use the app
   return out;
@@ -4655,6 +4689,8 @@ GET('/api/buzz', auth, async req => {
 // Test-only helpers (only with MANGO_FAST_JOBS, which Railway never sets).
 if (ENV.MANGO_FAST_JOBS) {
   POST('/api/test/weekly', auth, async () => { await kvSet('job_botweekly', ''); const p = etParts(); return weeklySummary({ ...p, y: 2026, m: 10, d: 23 }, '16:30', 'test-' + Date.now()); });
+  POST('/api/test/night/:id', auth, async req => runBot(+req.params.id, { night: true }));
+  POST('/api/test/nightsched', auth, async req => { const [h, mi] = String(req.body.hm).split(':').map(Number); const p = { ...etParts(), h, mi }; await nightScheduler(p, req.body.hm, etDate()); return { ok: true }; });
   POST('/api/test/clear-cache', auth, async req => { for (const k of [...cache.keys()]) if (!req.body?.prefix || k.startsWith(req.body.prefix)) cache.delete(k); return { ok: true }; });
 }
 
@@ -4968,6 +5004,27 @@ function councilSession(bot, d, series, buzz, earnings, m, capital) {
   const t = tally(votes);
   return { votes, yes: t.yes, no: t.no };
 }
+// ---------- the night crew ----------
+const NIGHT_CREW = [
+  { k: 'watch', name: 'Night Watch', role: 'Night shift · trend and risk', color: '#7A8CFF', night: true },
+  { k: 'owl', name: 'Night Owl', role: 'Night shift · AI', color: '#C792EA', night: true, ai: true },
+];
+// the Night Watch: one rule-based vote that folds trend and risk together, plus the overnight move
+function watchVote(sym, b) {
+  const i = b?.c?.length - 1; if (!(i >= 30)) return { k: 'watch', vote: 'pass', conf: 0, line: 'Not enough history to say.', c: 'nodata' };
+  const c = b.c[i], s50 = IND.sma(b.c, 50, i), s200 = i >= 200 ? IND.sma(b.c, 200, i) : null, r1 = IND.ret(b.c, 1, i), v20 = IND.vol(b.c, 20, i), v250 = i > 252 ? IND.vol(b.c, 250, i) : null;
+  if (r1 != null && r1 < -0.06) return { k: 'watch', vote: 'no', conf: clamp(-r1 * 8, 0.5, 1), line: `Down ${(-r1 * 100).toFixed(1)}% since yesterday's close. Not on my watch.`, c: 'nw_drop', v: { p: (-r1 * 100).toFixed(1) + '%' } };
+  if (v250 && v20 > v250 * 1.6) return { k: 'watch', vote: 'no', conf: clamp(v20 / v250 - 1, 0.4, 1), line: `Swinging ${(v20 / v250).toFixed(1)}x harder than usual. Too rough for the night.`, c: 'nw_wild', v: { x: (v20 / v250).toFixed(1) } };
+  if (c > s50 && (!s200 || c > s200)) return { k: 'watch', vote: 'yes', conf: s200 ? clamp((c / s200 - 1) * 5, 0.3, 1) : 0.4, line: `Above its 50-day${s200 ? ' and 200-day' : ''} averages. All quiet, trend intact.`, c: 'nw_up', v: {} };
+  if (s200 && c < s200) return { k: 'watch', vote: 'no', conf: clamp((1 - c / s200) * 5, 0.3, 1), line: 'Under its 200-day average. The trend is down.', c: 'nw_down', v: {} };
+  return { k: 'watch', vote: 'pass', conf: 0.2, line: 'Nothing moving either way.', c: 'nw_flat', v: {} };
+}
+async function nightSession(d, series, bz, up, ctx) {
+  const b = series[d.sym], side = d.have > 0 && !(d.target > 0) ? 'sell' : 'buy';
+  const votes = [watchVote(d.sym, b)], owl = await owlVote(d.sym, b, { side, target: d.target }, bz, up, ctx, votes[0]).catch(() => null);
+  if (owl) votes.push(owl);
+  const t = tally(votes); return { votes, yes: t.yes, no: t.no, night: true };
+}
 // ---------- weighted votes: some members count for more than others ----------
 // A vote's weight comes from three things, multiplied and kept between 0.5 and 2 so nobody decides alone:
 //   track record: members who have been right more often (20+ graded votes) count more, the rest less;
@@ -5043,7 +5100,7 @@ GET('/api/council', auth, async req => {
 GET('/api/council/board', auth, async req => {
   const bot = +req.query.bot || null;
   const list = (await rows(`select * from council where settled ${bot ? 'and bot_id=$1' : ''} order by id desc limit 2000`, bot ? [bot] : [])).map(councilJson);
-  const members = [...COUNCIL, ...AI_ALL].filter(m => !m.ai || aiMembersOn().includes(m) || list.some(s => s.right && m.k in s.right)).map(m => { let calls = 0, right = 0; for (const s of list) if (s.right && m.k in s.right) { calls++; if (s.right[m.k]) right++; } return { ...m, calls, right, acc: calls ? right / calls : null }; });
+  const members = [...COUNCIL, ...AI_ALL, ...NIGHT_CREW].filter(m => (!m.ai && !m.night) || aiMembersOn().includes(m) || list.some(s => s.right && m.k in s.right)).map(m => { let calls = 0, right = 0; for (const s of list) if (s.right && m.k in s.right) { calls++; if (s.right[m.k]) right++; } return { ...m, calls, right, acc: calls ? right / calls : null }; });
   // What a council veto would have done: buys it would have blocked, and skips it wanted to buy.
   const blocked = list.filter(s => (s.action === 'buy' || s.action === 'add') && leansNo(s)), wanted = list.filter(s => s.action === 'skip' && !leansNo(s) && (s.wy != null && weightedOn() ? s.wy > s.wn : s.yes > s.no));
   const avg = a => a.length ? a.reduce((t, s) => t + s.result, 0) / a.length : null;
@@ -5071,14 +5128,14 @@ GET('/api/hq', auth, async () => {
   const trades = +(await row("select count(*) n from bot_log where kind='trade' and ts > $1", [new Date(etToUtc(...etDate().split('-').map(Number), 0, 0))])).n;
   return {
     bots: cards.map(c => ({ id: c.id, name: c.name, strategy: c.strategy, status: c.status, activity: c.activity, holding: c.holding, value: c.value, ret: c.ret, day: c.day, spark: c.spark, broker: !!c.wallet?.broker, auto: !!STRATEGIES[c.strategy]?.auto, deciding: running.has(c.id), next: c.next, tryouts: STRATEGIES[c.strategy]?.auto ? (jsonOr(list.find(x => x.id === c.id)?.state, {})._board || []).map(t => ({ k: t.k, label: t.label, alloc: t.alloc, eligible: t.eligible })) : null })),
-    events, council, members: councilMembers(), names: await getCouncilNames(), tick, trades,
+    events, council, members: councilMembers(), night: { ...nightJson(), crew: nightCrewOn() }, names: await getCouncilNames(), tick, trades,
     market: { ...market(), spy: spy?.prev ? (spy.p / spy.prev - 1) * 100 : null, btc: btc?.prev ? (btc.p / btc.prev - 1) * 100 : null },
     vault: { total: totalPL, day }, alarm: { halt: !!S.realHalt, killed: cards.filter(c => c.status === 'killed').map(c => c.name), brake: cards.filter(c => c.activity?.k === 'brake').map(c => c.name), cooldown: cards.filter(c => c.activity?.k === 'cooldown').map(c => c.name) },
   };
 });
 
 // ---------- your own names for the Council (and the chair), optionally per theme ----------
-const NAME_KEYS = ['surfer', 'rocket', 'scoop', 'shield', 'prof', 'doubt', 'ai', 'hawk', 'guard', 'chart', 'chair'], NAME_THEMES = ['office', 'space', 'village', 'island'];
+const NAME_KEYS = ['surfer', 'rocket', 'scoop', 'shield', 'prof', 'doubt', 'ai', 'hawk', 'guard', 'chart', 'watch', 'owl', 'chair'], NAME_THEMES = ['office', 'space', 'village', 'island'];
 let councilNames = null;
 async function getCouncilNames() { if (!councilNames) councilNames = jsonOr(await kvGet('council_names').catch(() => null), null) || { sync: true, all: {}, themes: {} }; return councilNames; }
 const cleanName = v => String(v ?? '').replace(/[\u0000-\u001f<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, 24);
@@ -5243,6 +5300,15 @@ async function aiRound(sym, b, d, bz, up, ctx = {}, rule = []) {
     cacheSet(key, a);
   }
   return [...out, a];
+}
+// the Night Owl: the only AI call on the night shift. It sees everything the Analyst would, plus the Night Watch's vote.
+const OWL_SYSTEM = `You are the Night Owl, working the overnight shift on a trading council for an automated paper-trading bot. The day council is asleep; it's just you and the Night Watch, and only crypto trades at night. The bot's strategy has proposed a trade; give your own judgement over roughly the next day or two, using only the facts given. Overnight crypto can be thin and jumpy, so be a little more careful than in the day, but don't be timid when the evidence is clear. ${JSON_SHAPE}`;
+const nightCrewOn = () => NIGHT_CREW.filter(m => m.k === 'watch' || analystReady());
+async function owlVote(sym, b, d, bz, up, ctx, watch) {
+  if (!analystReady() || !b || !(b.c?.length > 30)) return null;
+  const u = await aiUse(), key = `owl|${sym}|${etDate()}|${etParts().h}|${d.side}`, hit = cacheGet(key); if (hit) return hit;
+  if (u.calls >= (S.aiDailyMax ?? 120)) return capPass('owl');
+  const v = await aiCall('owl', OWL_SYSTEM, `${aiFacts(sym, b, d, bz, up, ctx)}\n\nThe Night Watch voted ${watch.vote.toUpperCase()}: ${watch.line}`, d.side); delete v._o; cacheSet(key, v); return v;
 }
 // kept for older callers: the Analyst alone
 async function analystVote(sym, b, d, bz, up, ctx = {}) { const r = await aiRound(sym, b, d, bz, up, ctx, []); return r[r.length - 1] || null; }
@@ -5438,7 +5504,7 @@ const ICONS = {};
 const icon = (name, fn) => ICONS[name] || (ICONS[name] = fn());
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD646"/><stop offset=".5" stop-color="#FFA028"/><stop offset="1" stop-color="#FA5256"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="#1E1430"/><ellipse cx="31" cy="36" rx="18" ry="22" transform="rotate(30 31 36)" fill="url(#g)"/><path d="M20 41l6.5-6 5 3.5 9.5-10" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37 28.5h4.5V33" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="45" cy="11.5" rx="9" ry="4.6" transform="rotate(-24 45 11.5)" fill="#3BD68A"/></svg>`;
 let BUILD = 'dev', INDEX = null, INDEX_GZ = null;
-const APP_VERSION = '2.11.3'; // stamped by build.sh from package.json
+const APP_VERSION = '2.12.0'; // stamped by build.sh from package.json
 function loadIndex() {
   const file = path.join(__dirname, 'index.html');
   let html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<!doctype html><title>Mango</title><p>index.html is missing next to server.js.</p>';

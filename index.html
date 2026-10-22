@@ -1109,6 +1109,7 @@ button.tile:active { transform: scale(.98); }
 .tc-w { display: inline-block; margin: 0 6px 0 0; padding: 0 6px; border-radius: 6px; background: rgba(255,255,255,.07); color: var(--t3, #9A93B0); font-size: 11.5px; font-weight: 650; vertical-align: 1px; } .tc-w.hi { color: #FFD646; background: rgba(255,214,70,.12); }
 .hb-w { display: block; font-size: 10px; color: #B9B2CC; font-weight: 700; } .hb-w.hi { color: #FFD646; }
 .hb-card { display: flex; gap: 8px; margin: 10px 0 4px; } .hb-card span { flex: 1; padding: 8px 10px; border-radius: 12px; background: rgba(255,255,255,.06); font-size: 11.5px; color: #B9B2CC; } .hb-card b { display: block; font-size: 20px; color: #fff; font-variant-numeric: tabular-nums; }
+.hq-night { pointer-events: auto; display: flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 12px; background: rgba(40, 30, 80, .82); color: #E3DBFF; font-size: 12.5px; font-weight: 700; box-shadow: inset 0 0 0 1px rgba(199, 146, 234, .35); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); } .hq-night svg { width: 14px; height: 14px; color: #C792EA; } .hq-night.hidden { display: none; }
 
 /* ---------- motion ---------- */
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -1228,7 +1229,7 @@ button.tile:active { transform: scale(.98); }
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '2.11.3';
+const BUILD = '__BUILD__', APP_VERSION = '2.12.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -3814,8 +3815,8 @@ function thinkRows(rows, { all = false } = {}) {
       ${r.buzz ? `<p class="th-buzz">${icon('radar')}<span>${h(r.buzz)}</span></p>` : ''}${councilChips(r.council)}${flagChips(r.flags)}</div>`; }).join('')}
     ${holdLine}${quiet ? `<button class="th-more" data-act="thinkAll">${shown.length ? `See all ${list.length}` : `${quiet} more with nothing to do`} ${icon('down')}</button>` : ''}</div>`;
 }
-const COUNCIL_C = { surfer: '#4EA8FF', rocket: '#FF7A45', scoop: '#F5C542', shield: '#9AA6B8', prof: '#3DDC97', doubt: '#B48CFF', ai: '#FF9F1C', hawk: '#E85D75', guard: '#5BC0BE', chart: '#C3E88D' };
-const COUNCIL_N = { surfer: 'Surfer', rocket: 'Rocket', scoop: 'Scoop', shield: 'Shield', prof: 'Professor', doubt: 'Doubt', ai: 'Analyst (AI)', hawk: 'News Hawk (AI)', guard: 'Risk Officer (AI)', chart: 'Chartist (AI)' };
+const COUNCIL_C = { surfer: '#4EA8FF', rocket: '#FF7A45', scoop: '#F5C542', shield: '#9AA6B8', prof: '#3DDC97', doubt: '#B48CFF', ai: '#FF9F1C', hawk: '#E85D75', guard: '#5BC0BE', chart: '#C3E88D', watch: '#7A8CFF', owl: '#C792EA' };
+const COUNCIL_N = { surfer: 'Surfer', rocket: 'Rocket', scoop: 'Scoop', shield: 'Shield', prof: 'Professor', doubt: 'Doubt', ai: 'Analyst (AI)', hawk: 'News Hawk (AI)', guard: 'Risk Officer (AI)', chart: 'Chartist (AI)', watch: 'Night Watch', owl: 'Night Owl (AI)' };
 function councilChips(c) {
   if (!c?.votes?.length) return '';
   return `<details class="th-council"><summary><span class="tc-dots">${c.votes.map(v => `<i class="v-${v.vote}" style="--c:${COUNCIL_C[v.k] || '#888'}"></i>`).join('')}</span><span>Council ${tallyOf(c)}${c.chair ? ` · ${h(c.chair.split(/\.\s/)[0].replace(/\.$/, ''))}` : ''}</span></summary>${c.votes.map(v => `<p class="tc-line"><b style="color:${COUNCIL_C[v.k]}">${h(memberName(v.k))}</b><span class="tc-v v-${v.vote}">${v.vote === 'yes' ? 'YES' : v.vote === 'no' ? 'NO' : 'pass'}</span>${isWeighted(c) && weightNote(v) ? `<span class="tc-w${v.w > 1 ? ' hi' : ''}">${h(weightNote(v))}</span>` : ''}${v.arg && v.vs ? `<span class="tc-arg">To ${h(memberName(v.vs))}: “${h(v.arg)}”</span>` : ''}${h(v.line)}</p>`).join('')}</details>`;
@@ -4734,6 +4735,8 @@ const HQ_L = (() => {
 const HQ_ROOMS = HQ_L.rooms;
 const TABLE = HQ_L.table, THRONE = HQ_L.throne, SEATS = HQ_L.seats;
 // each Council member has a fixed seat; the Analyst sits facing the throne
+// the night crew stands at the table's near side, between the table and the throne
+const CREW_AT = [[5.0, 21.3, 'r'], [7.0, 21.3, 'l']];
 const SEAT_OF = { hawk: 0, surfer: 1, rocket: 2, scoop: 3, shield: 4, ai: 5, prof: 6, doubt: 7, guard: 8, chart: 9 };
 function hqPath(a, b) { // breadth-first over the hallway graph
   if (a === b) return [a];
@@ -5602,6 +5605,8 @@ const CAST = {
       hawk: { shirt: '#E85D75', pants: '#2A2D33', blazer: '#8A2A3E', face: 'glasses', prop: 'tablet', hairCol: '#3A2A22', badge: 1 },
       guard: { shirt: '#F5F5F0', pants: '#1F3A3A', blazer: '#2F6E6C', tie: '#5BC0BE', face: 'serious', prop: 'clipboard', hairCol: '#8A8A8A' },
       chart: { shirt: '#C3E88D', pants: '#3A3F48', face: 'glasses', prop: 'tablet', hat: 'cap', hatCol: '#4A5A2A' },
+      watch: { shirt: '#2A3150', pants: '#1A1E2E', blazer: '#3A4470', tie: '#7A8CFF', hat: 'cap', hatCol: '#1A1E2E', face: 'serious', prop: 'coffee', badge: 1 },
+      owl: { shirt: '#3A2A50', pants: '#1A1A1A', blazer: '#6A4A8A', face: 'glasses', hat: 'headset', prop: 'coffee', hairCol: '#C9C0D9' },
     },
     chair: { shirt: '#FF9F1C', pants: '#2A2D33', blazer: '#FF9F1C', tie: '#2A2D33', hat: 'crown', face: 'glasses', prop: 'gavel' },
     sign: 'card',
@@ -5619,6 +5624,8 @@ const CAST = {
       hawk: { shirt: '#E85D75', pants: '#6A2A3A', belt: '#1A1E26', hat: 'headset', face: 'visor', helmet: '#E85D75', badge: 2 },
       guard: { shirt: '#5BC0BE', pants: '#2A5A5A', belt: '#1A1E26', hat: 'knight', hatCol: '#3A7A78', prop: 'shield', face: 'serious', badge: 2 },
       chart: { shirt: '#C3E88D', pants: '#4A5A2A', belt: '#1A1E26', face: 'goggles', prop: 'pda', badge: 2, hairCol: '#6A4A2A' },
+      watch: { shirt: '#3A4470', pants: '#1F2640', belt: '#1A1E26', helmet: '#7A8CFF', face: 'visor', badge: 2, prop: 'pda' },
+      owl: { shirt: '#4A3A6A', pants: '#2A2040', belt: '#C792EA', face: 'visor', hat: 'headset', badge: 2, hair: 0, helmet: '#C792EA' },
     },
     chair: { shirt: '#FF9F1C', pants: '#7A4A10', belt: '#1A1E26', hat: 'captain', hatCol: '#FF9F1C', face: 'normal', prop: 'gavel', crownToo: 1, badge: 2 },
     sign: 'holo',
@@ -5636,6 +5643,8 @@ const CAST = {
       hawk: { shirt: '#E85D75', pants: '#5A3A22', belt: '#3A2A1A', hat: 'hood', hatCol: '#8A2A3E', prop: 'scroll', face: 'normal' },
       guard: { shirt: '#5BC0BE', pants: '#5A6478', hat: 'knight', hatCol: '#7FA8A6', prop: 'shield', face: 'hidden', armor: 1 },
       chart: { shirt: '#C3E88D', pants: '#4A3A2A', apron: '#6B4A2A', hat: 'straw', hatCol: '#C9A55A', prop: 'scroll', face: 'beard', hairCol: '#8A6A4A' },
+      watch: { shirt: '#3A4470', pants: '#2A2A3A', cape: '#1F2640', hat: 'hood', hatCol: '#2A3150', prop: 'staff', face: 'beard', hairCol: '#5A4A3A' },
+      owl: { shirt: '#4A3A6A', pants: '#2A2040', robe: '#5A3A7A', hat: 'wizard', hatCol: '#3A2A5A', prop: 'scroll', face: 'glasses', hairCol: '#E0D8EA' },
     },
     chair: { shirt: '#FF9F1C', pants: '#7A2A2A', cape: '#9C2B2B', hat: 'crown', face: 'beard', hairCol: '#C98B4A', prop: 'gavel' },
     sign: 'wood',
@@ -5653,6 +5662,8 @@ const CAST = {
       hawk: { shirt: '#E85D75', floral: 1, pants: '#2A4A5A', shorts: 1, hat: 'bandana', hatCol: '#E85D75', face: 'shades', prop: 'coffee' },
       guard: { shirt: '#5BC0BE', pants: '#E84A5F', shorts: 1, hat: 'cap', hatCol: '#2F6E6C', prop: 'whistle', face: 'serious', cross: 1 },
       chart: { shirt: '#C3E88D', floral: 1, pants: '#D9C08A', shorts: 1, hat: 'straw', face: 'normal', prop: 'fish', hairCol: '#5A3A22' },
+      watch: { shirt: '#3A4470', pants: '#2A4A5A', shorts: 1, hat: 'bandana', hatCol: '#1F2640', face: 'serious', prop: 'coffee' },
+      owl: { shirt: '#4A3A6A', floral: 1, pants: '#2A2040', shorts: 1, hat: 'flowers', face: 'glasses', prop: 'parrot', lei: 1 },
     },
     chair: { shirt: '#FF9F1C', floral: 1, pants: '#7A4A28', shorts: 1, hat: 'flowers', crownToo: 1, face: 'shades', prop: 'gavel', lei: 1 },
     sign: 'surf',
@@ -5849,7 +5860,7 @@ const VOICE = {
     },
     quip: { market: s => `SPY is ${s} today. ${parseFloat(s) >= 0 ? 'Green screens.' : 'Rough tape.'}`, own: r => `I'm ${r} since launch.`, hold: (sym, ch) => `${sym} is ${ch} today.`, next: n => `Next call ${n}.`, sleep: ['Out of office.', 'On PTO. Back when you unpause me.'], fluff: ['Coffee first, then charts.', 'Who keeps scheduling 4pm meetings?', 'Another reply-all. Really?', 'The printer is jammed again.'] },
     convo: { ask: sym => `How's ${sym} looking?`, answer: (sym, ch, r) => `${ch} today, ${r} overall. ${parseFloat(ch) >= 0 ? 'Holding.' : 'Watching it.'}`, askMkt: () => 'What do you make of the market?', answerMkt: (s, r) => `SPY ${s}. I'm ${r} overall, sticking to the plan.` },
-    roles: { hawk: 'AI · news hawk', guard: 'AI · risk officer', chart: 'AI · chartist', ai: 'AI analyst', surfer: 'Trend analyst', rocket: 'Momentum trader', scoop: 'News desk', shield: 'Chief risk officer', prof: 'Quant', doubt: 'Short seller' },
+    roles: { watch: 'Night security · trend & risk', owl: 'Night analyst · AI', hawk: 'AI · news hawk', guard: 'AI · risk officer', chart: 'AI · chartist', ai: 'AI analyst', surfer: 'Trend analyst', rocket: 'Momentum trader', scoop: 'News desk', shield: 'Chief risk officer', prof: 'Quant', doubt: 'Short seller' },
   },
   space: {
     wallet: 'our reserves',
@@ -5870,7 +5881,7 @@ const VOICE = {
     },
     quip: { market: s => `Fleet index (SPY) at ${s} today.`, own: r => `Mission return so far: ${r}.`, hold: (sym, ch) => `${sym} reading ${ch} on the scanners.`, next: n => `Next jump ${n}.`, sleep: ['In cryosleep.', 'Hibernating until reactivated.'], fluff: ['The food synth made mango again.', 'Who left the airlock light on?', 'Running diagnostics. All green.', 'Smooth flying today.'] },
     convo: { ask: sym => `Status on ${sym}?`, answer: (sym, ch, r) => `${ch} today, ${r} overall. ${parseFloat(ch) >= 0 ? 'Holding orbit.' : 'Monitoring.'}`, askMkt: () => 'How are the markets looking from up here?', answerMkt: (s, r) => `SPY ${s}. I'm ${r} overall. Course unchanged.` },
-    roles: { hawk: 'Sensor array · AI news', guard: 'Shield computer · AI risk', chart: 'Navigator · AI charts', ai: 'Ship computer · AI', surfer: 'Pilot · trend', rocket: 'Engineer · momentum', scoop: 'Comms officer · news', shield: 'Security chief · risk', prof: 'Science officer · stats', doubt: 'Alien advisor · contrarian' },
+    roles: { watch: 'Night pilot · trend & risk', owl: 'Night-cycle computer · AI', hawk: 'Sensor array · AI news', guard: 'Shield computer · AI risk', chart: 'Navigator · AI charts', ai: 'Ship computer · AI', surfer: 'Pilot · trend', rocket: 'Engineer · momentum', scoop: 'Comms officer · news', shield: 'Security chief · risk', prof: 'Science officer · stats', doubt: 'Alien advisor · contrarian' },
   },
   village: {
     wallet: 'the purse',
@@ -5891,7 +5902,7 @@ const VOICE = {
     },
     quip: { market: s => `The great market (SPY) moved ${s} today.`, own: r => `My purse is ${r} since I began.`, hold: (sym, ch) => `Our ${sym} fetches ${ch} today.`, next: n => `I'll trade again ${n}.`, sleep: ['Napping by the fire.', 'Resting my feet till I\'m called.'], fluff: ['Fine weather for market day.', 'The mangoes are ripe this season.', 'Mind the goat on the road.', 'The blacksmith is loud today.'] },
     convo: { ask: sym => `How fares our ${sym}?`, answer: (sym, ch, r) => `${ch} today, ${r} overall. ${parseFloat(ch) >= 0 ? 'We keep it.' : 'We watch it close.'}`, askMkt: () => 'What news of the great market?', answerMkt: (s, r) => `SPY ${s} today. I'm ${r} overall. We stay the course.` },
-    roles: { hawk: 'Raven keeper · AI news', guard: 'Watchman · AI risk', chart: 'Mapmaker · AI charts', ai: 'Oracle · AI', surfer: 'Riverman · trend', rocket: 'Blacksmith · momentum', scoop: 'Town crier · news', shield: 'Knight · risk', prof: 'Wizard · stats', doubt: 'Jester · contrarian' },
+    roles: { watch: 'Night watchman · trend & risk', owl: 'Owl sage · AI', hawk: 'Raven keeper · AI news', guard: 'Watchman · AI risk', chart: 'Mapmaker · AI charts', ai: 'Oracle · AI', surfer: 'Riverman · trend', rocket: 'Blacksmith · momentum', scoop: 'Town crier · news', shield: 'Knight · risk', prof: 'Wizard · stats', doubt: 'Jester · contrarian' },
   },
   island: {
     wallet: 'the stash',
@@ -5912,7 +5923,7 @@ const VOICE = {
     },
     quip: { market: s => `SPY's ${s} today. ${parseFloat(s) >= 0 ? 'Good vibes.' : 'Bit choppy.'}`, own: r => `Up to ${r} since I washed ashore.`, hold: (sym, ch) => `${sym} is ${ch} today.`, next: n => `Next trade ${n}.`, sleep: ['Napping in the hammock.', 'Do not disturb. Sunbathing.'], fluff: ['Perfect day for it.', 'Anyone seen my flip flop?', 'Coconut break.', 'The fish are biting today.'] },
     convo: { ask: sym => `How's ${sym} treating you?`, answer: (sym, ch, r) => `${ch} today, ${r} overall. ${parseFloat(ch) >= 0 ? 'Riding it.' : 'Keeping an eye on it.'}`, askMkt: () => 'How\'s the market, friend?', answerMkt: (s, r) => `SPY ${s}. I'm ${r} overall. No stress.` },
-    roles: { hawk: 'Dockhand · AI news', guard: 'Storm watcher · AI risk', chart: 'Tide reader · AI charts', ai: 'Fortune teller · AI', surfer: 'Surfer · trend', rocket: 'Fisher · momentum', scoop: 'Gossip (with parrot) · news', shield: 'Lifeguard · risk', prof: 'Old sage · stats', doubt: 'Pirate · contrarian' },
+    roles: { watch: 'Night fisher · trend & risk', owl: 'Moon reader · AI', hawk: 'Dockhand · AI news', guard: 'Storm watcher · AI risk', chart: 'Tide reader · AI charts', ai: 'Fortune teller · AI', surfer: 'Surfer · trend', rocket: 'Fisher · momentum', scoop: 'Gossip (with parrot) · news', shield: 'Lifeguard · risk', prof: 'Old sage · stats', doubt: 'Pirate · contrarian' },
   },
 };
 const voiceOf = th => VOICE[th.id] || VOICE.office;
@@ -5922,12 +5933,19 @@ const leansNo = s => isWeighted(s) ? s.wn > s.wy : s.no > s.yes;
 const tallyOf = s => isWeighted(s) ? `${(+s.wy).toFixed(1)}–${(+s.wn).toFixed(1)}` : `${s.yes}–${s.no}`;
 const weightNote = v => v.w != null && v.vote !== 'pass' && Math.abs(v.w - 1) >= 0.15 ? `counts ×${(+v.w).toFixed(1)}${v.wr?.length ? ': ' + v.wr.join(', ') : ''}` : '';
 // the AI members: how each one opens a vote in each world
-const AI_K = new Set(['ai', 'hawk', 'guard', 'chart']);
+const AI_K = new Set(['ai', 'hawk', 'guard', 'chart', 'owl']);
 const AI_PRE = {
-  office: { ai: ['Model says:', 'Running the numbers:'], hawk: ['Wire check:', 'Newsflash:'], guard: ['Risk memo:', 'Downside check:'], chart: ['On the chart:', 'Technically speaking:'] },
-  space: { ai: ['Computing…', 'Ship computer:'], hawk: ['Long-range scan:', 'Intercepted transmission:'], guard: ['Hull integrity check:', 'Shields report:'], chart: ['Star chart reads:', 'Plotting the trajectory:'] },
-  village: { ai: ['The oracle sees:', 'The stars say:'], hawk: ['Word from the road:', 'The ravens bring news:'], guard: ['The watchman warns:', 'From the wall:'], chart: ['The old maps show:', 'By the tally sticks:'] },
-  island: { ai: ['The tiki says:', 'Cards say:'], hawk: ['Message in a bottle:', 'Heard at the docks:'], guard: ['Storm watch:', 'From the lifeguard tower:'], chart: ['Reading the tides:', 'By the tide chart:'] },
+  office: { owl: ['Night desk:', 'Late read:'], ai: ['Model says:', 'Running the numbers:'], hawk: ['Wire check:', 'Newsflash:'], guard: ['Risk memo:', 'Downside check:'], chart: ['On the chart:', 'Technically speaking:'] },
+  space: { owl: ['Night cycle:', 'Overnight scan:'], ai: ['Computing…', 'Ship computer:'], hawk: ['Long-range scan:', 'Intercepted transmission:'], guard: ['Hull integrity check:', 'Shields report:'], chart: ['Star chart reads:', 'Plotting the trajectory:'] },
+  village: { owl: ['Hoo! The owl sees:', 'By moonlight:'], ai: ['The oracle sees:', 'The stars say:'], hawk: ['Word from the road:', 'The ravens bring news:'], guard: ['The watchman warns:', 'From the wall:'], chart: ['The old maps show:', 'By the tally sticks:'] },
+  island: { owl: ['Under the moon:', 'Night tide says:'], ai: ['The tiki says:', 'Cards say:'], hawk: ['Message in a bottle:', 'Heard at the docks:'], guard: ['Storm watch:', 'From the lifeguard tower:'], chart: ['Reading the tides:', 'By the tide chart:'] },
+};
+// the Night Watch, in each world's voice
+const NIGHT_VOTE = {
+  office: { nw_drop: v => `Down ${v.p} since the close. Not on my shift.`, nw_wild: v => `Swinging ${v.x}x harder than usual. I'm not signing off on that at this hour.`, nw_up: () => 'All quiet. Trend intact. Logging a yes.', nw_down: () => "Under its 200-day. That's a no from security.", nw_flat: () => 'Quiet night. No call.' },
+  space: { nw_drop: v => `Down ${v.p} this cycle. Shields up, no.`, nw_wild: v => `Turbulence ${v.x}x normal. Holding position.`, nw_up: () => 'Steady course, trend holding. Go.', nw_down: () => 'Drifting below the 200-day line. Negative.', nw_flat: () => 'Dead calm out here. No reading.' },
+  village: { nw_drop: v => `Fell ${v.p} since sundown. Not on my watch!`, nw_wild: v => `The winds blow ${v.x}x wilder than usual. Bar the gates.`, nw_up: () => 'All is well, and the road climbs. Aye.', nw_down: () => 'The road runs downhill. Nay.', nw_flat: () => 'A still night. I say naught.' },
+  island: { nw_drop: v => `Down ${v.p} since sunset. Not tonight, brah.`, nw_wild: v => `Waves ${v.x}x bigger than normal. Staying on the beach.`, nw_up: () => 'Calm water, steady tide. Paddle out.', nw_down: () => 'Tide going out under the 200-day. Nope.', nw_flat: () => 'Flat water tonight. Nothing to catch.' },
 };
 // the Analyst's rebuttal, and how the member it called out answers back
 const DEBATE = {
@@ -5944,7 +5962,7 @@ const SAY = {
       if (v.c === 'ai_cap') return { office: 'Out of AI budget today. Abstaining.', space: 'Power reserves low. Standing by.', village: 'My visions are spent for today.', island: 'Crystal ball needs a nap.' }[th.id] || v.line;
       if (v.c === 'ai_err') return { office: "Can't reach the model. Abstaining.", space: 'Uplink lost. No reading.', village: 'The mists are too thick today.', island: 'Signal lost out here.' }[th.id] || v.line;
       return `${P[(v.line || '').length % P.length]} ${v.line}${v.size && v.size < 1 ? ` (${Math.round(v.size * 100)}% size)` : ''}`; }
-    const f = v?.c && voiceOf(th).vote[v.c]; try { return f ? f(v.v || {}) : v.line; } catch (e) { return v.line; } },
+    const f = v?.c && ((NIGHT_VOTE[th.id] || NIGHT_VOTE.office)[v.c] || voiceOf(th).vote[v.c]); try { return f ? f(v.v || {}) : v.line; } catch (e) { return v.line; } },
   chair(th, s, verdict) {
     const V = voiceOf(th), t = tallyOf(s), raw = String(s.chair || ''), wallet = d => d.replace(/the wallet/g, V.wallet);
     if (verdict === 'APPROVED') return V.chair.approved(t, wallet((raw.match(/Approved [\d.–-]+?\.\s+(.*)$/) || [])[1] || ''));
@@ -5969,7 +5987,7 @@ const SAY = {
     if (pnl != null) return (ev.pnl != null ? ev.pnl >= 0 : !/^[−-]/.test(pnl)) ? V.win(i) : V.loss(i);
     return V.sell(i);
   },
-  decision(th, title) { return voiceOf(th).decision(String(title).replace(/^(Daily decision|Manual run): /, '')); },
+  decision(th, title) { return voiceOf(th).decision(String(title).replace(/^(Daily decision|Manual run|Night shift): /, '')); },
   alert(th, title) { return voiceOf(th).alert(title); },
   report(th, title) { return voiceOf(th).report(title); },
   role(th, k) { return voiceOf(th).roles[k]; },
@@ -6002,8 +6020,8 @@ function hqChatter(st) {
 }
 
 // ---------- names you gave the Council ----------
-const NAME_DEFAULT = { surfer: 'Surfer', rocket: 'Rocket', scoop: 'Scoop', shield: 'Shield', prof: 'Professor', doubt: 'Doubt', ai: 'Analyst', hawk: 'News Hawk', guard: 'Risk Officer', chart: 'Chartist', chair: 'Big Mango' };
-const NAME_ORDER = ['chair', 'surfer', 'rocket', 'scoop', 'shield', 'prof', 'doubt', 'ai', 'hawk', 'guard', 'chart'];
+const NAME_DEFAULT = { surfer: 'Surfer', rocket: 'Rocket', scoop: 'Scoop', shield: 'Shield', prof: 'Professor', doubt: 'Doubt', ai: 'Analyst', hawk: 'News Hawk', guard: 'Risk Officer', chart: 'Chartist', watch: 'Night Watch', owl: 'Night Owl', chair: 'Big Mango' };
+const NAME_ORDER = ['chair', 'surfer', 'rocket', 'scoop', 'shield', 'prof', 'doubt', 'ai', 'hawk', 'guard', 'chart', 'watch', 'owl'];
 const curThemeId = () => (HQT[store.get('hqTheme')] || HQT.office).id;
 function memberName(k, themeId = curThemeId()) {
   const N = App.S?.councilNames || { sync: true, all: {} };
@@ -6120,7 +6138,7 @@ PAGES.hq = {
     p.el.classList.add('hq-page'); p.title('Mango HQ', true);
     p.acts(`<button class="icon-btn" data-act="hqTheme" aria-label="Change the look">${icon('palette')}</button><button class="icon-btn" data-act="hqInfo" aria-label="What am I looking at">${icon('info')}</button>`);
     p.body.innerHTML = `<div class="hq" id="hq"><canvas id="hq-c"></canvas><div class="hq-ov" id="hq-ov"></div>
-      <div class="hq-top"><div class="hq-stats" id="hq-stats"></div>${seg('hqm', [['floor', 'Floor'], ['council', 'Council'], ['replay', 'Replay']], mode || 'floor')}</div>
+      <div class="hq-top"><div class="hq-stats" id="hq-stats"></div><div class="hq-night hidden" id="hq-night"></div>${seg('hqm', [['floor', 'Floor'], ['council', 'Council'], ['replay', 'Replay']], mode || 'floor')}</div>
       <div class="hq-alarm hidden" id="hq-alarm"></div>
       <div class="hq-case hidden" id="hq-case"></div>
       <div class="hq-board hidden" id="hq-board"></div>
@@ -6161,7 +6179,13 @@ PAGES.hq = {
       const d = await api('hq'); st.data = d;
       const real = isRealSpace(), bots = d.bots.filter(b => real ? b.broker : !b.broker);
       st.bots = bots; st.tryouts = bots.find(b => b.auto)?.tryouts || [];
-      if (st.members.map(m => m.k).join() !== d.members.map(m => m.k).join() && !st.session) st.members = d.members.map((m, i) => { const si = SEAT_OF[m.k] ?? i; return new Agent({ ...m, id: 100 + si, persona: true, color: m.color, x: SEATS[si][0], y: SEATS[si][1], room: 'council', speed: 0, sit: true, seatZ: 0.37, faceIdle: ({ n: 'l', w: 'r', s: 'b', e: 'w' })[HQ_L.chairs.find(c => c.seat === si)?.back] || 'l', seatIdx: si }); });
+      // overnight the Council sleeps in their seats and the night crew takes over at the table
+      st.nightActive = !!d.night?.active; const crew = st.nightActive ? d.night.crew || [] : [];
+      if (st.members.map(m => m.k).join() !== [...d.members, ...crew].map(m => m.k).join() && !st.session) st.members = [
+        ...d.members.map((m, i) => { const si = SEAT_OF[m.k] ?? i; return new Agent({ ...m, id: 100 + si, persona: true, color: m.color, x: SEATS[si][0], y: SEATS[si][1], room: 'council', speed: 0, sit: true, seatZ: 0.37, faceIdle: ({ n: 'l', w: 'r', s: 'b', e: 'w' })[HQ_L.chairs.find(c => c.seat === si)?.back] || 'l', seatIdx: si }); }),
+        ...crew.map((m, i) => new Agent({ ...m, id: 120 + i, persona: true, night: true, color: m.color, x: CREW_AT[i][0], y: CREW_AT[i][1], room: 'council', speed: 0, sit: false, faceIdle: CREW_AT[i][2] })),
+      ];
+      const nb = $('#hq-night', p.body); if (nb) { nb.classList.toggle('hidden', !st.nightActive); if (st.nightActive) nb.innerHTML = `${icon('moon')}<span>Night shift${d.night.next ? ` · next check ${h(fmtHM(d.night.next.split(':').reduce((a, b) => a * 60 + +b, 0)))}` : ''}</span>`; }
       if (d.names) App.S.councilNames = d.names; this.renameAll(p);
       for (const b of bots) {
         let a = st.agents.get(b.id);
@@ -6238,7 +6262,9 @@ PAGES.hq = {
     const beats = s.votes.flatMap(v => v.k === 'ai' && v.vs && v.arg ? [{ arg: v }, { react: v }, { v }] : [{ v }]);
     st.session = { s, t: 0, i: -1, done: false, beats };
     const tally = { yes: 0, no: 0 }, weighted = isWeighted(s), fmtT = n => weighted ? n.toFixed(1) : String(n);
-    st.members.forEach(m => { m.sign = null; m.mood = 'ok'; });
+    st.members.forEach(m => { m.sign = null; m.mood = st.nightActive && !m.night ? 'sleep' : 'ok'; });
+    // a night session is run by the crew: the Night Owl (or the Night Watch) announces the verdict while the chair sleeps
+    const nightS = s.votes.some(v => v.k === 'watch' || v.k === 'owl'), speaker = (nightS && (st.members.find(m => m.k === 'owl') || st.members.find(m => m.k === 'watch'))) || st.chair;
     const card = $('#hq-case', p.body);
     const verdict = s.action === 'buy' || s.action === 'add' ? (leansNo(s) ? 'OVERRULED' : 'APPROVED') : s.action === 'skip' ? 'REJECTED' : s.action === 'sell' || s.action === 'trim' ? 'SELL' : 'HOLD';
     const vClass = verdict === 'APPROVED' ? 'up' : verdict === 'REJECTED' || verdict === 'SELL' ? 'dn' : 'ac';
@@ -6261,8 +6287,8 @@ PAGES.hq = {
         const wt = weighted ? (v.w ?? 1) : 1; if (v.vote === 'yes') tally.yes += wt; if (v.vote === 'no') tally.no += wt;
         this.say(p, m, SAY.vote(st.theme, v), `line ${v.vote}`); draw(); buzz(4);
       } else if (!ss.done) {
-        ss.done = true; st.chair.mood = verdict === 'APPROVED' ? 'happy' : verdict === 'REJECTED' ? 'sad' : 'ok'; st.chair.gavel = 1;
-        this.say(p, st.chair, SAY.chair(st.theme, s, verdict), verdict === 'APPROVED' ? 'good' : verdict === 'REJECTED' ? 'bad' : '');
+        ss.done = true; speaker.mood = verdict === 'APPROVED' ? 'happy' : verdict === 'REJECTED' ? 'sad' : 'ok'; if (speaker === st.chair) st.chair.gavel = 1;
+        this.say(p, speaker, SAY.chair(st.theme, s, verdict), verdict === 'APPROVED' ? 'good' : verdict === 'REJECTED' ? 'bad' : '');
         st.councilGlow = verdict === 'APPROVED' ? '#3DDC97' : verdict === 'REJECTED' ? '#FF5C77' : '#FFD646';
         draw(); buzz(18);
       }
@@ -6297,7 +6323,8 @@ PAGES.hq = {
     // idle chatter: bots remark on the market, their holdings and each other, in the theme's voice
     st.chatT = (st.chatT ?? 5) - dt;
     if (st.chatT <= 0) { st.chatT = 8 + Math.random() * 8; if (!st.session || Math.random() < 0.35) { const c = hqChatter(st); if (c) { this.say(p, c.a, c.text, 'chat'); if (c.reply) setTimeout(() => { if (document.body.contains(p.el)) this.say(p, c.reply.a, c.reply.text, 'chat'); }, 2400); } } }
-    st.chair.sitK = 1; for (const mm of st.members) { mm.sitK = 1; mm.t += dt; if (mm.sign) mm.signT = (mm.signT || 0) + dt; }
+    st.chair.sitK = 1; for (const mm of st.members) { mm.sitK = mm.night ? 0 : 1; mm.t += dt; if (mm.sign) mm.signT = (mm.signT || 0) + dt; if (st.nightActive && !mm.night && !mm.sign) mm.mood = 'sleep'; else if (!st.nightActive && mm.mood === 'sleep') mm.mood = 'ok'; }
+    if (st.nightActive && !st.chair.gavel) st.chair.mood = st.session && !st.session.done ? st.chair.mood : 'sleep'; else if (!st.nightActive && st.chair.mood === 'sleep') st.chair.mood = 'ok';
     st.chair.t += dt;
     this.drawPeople(p);
     // during the Analyst's rebuttal, a dashed line runs from it to the member it's arguing with
@@ -6585,12 +6612,14 @@ const PERSONA_ABOUT = {
   hawk: 'Claude (AI) that only sees the news: headlines, the mood and earnings timing. Looks for catalysts and hidden risks the rules miss.',
   guard: 'Claude (AI) that only sees risk: position size, swings, drawdowns and worst days. Votes no when the downside is too big for the reward.',
   chart: 'Claude (AI) that only sees price action: the last month of closes, highs, lows, averages, RSI and volume. Reads the chart in plain words.',
+  watch: 'Night shift. While the Council sleeps (9 PM to 7 AM ET) it checks crypto at set times: YES in a steady uptrend, NO after a big overnight drop, in a downtrend or when prices swing wildly.',
+  owl: 'Night shift, Claude (AI). The only AI call overnight: it reads everything the Analyst would plus the Night Watch\'s vote, and can shrink a risky buy. One call instead of four.',
   doubt: 'The contrarian. NO when everyone is chasing a big week or a hype spike; YES when fear hits a healthy uptrend.',
 };
 const pickLine = a => a[Math.floor(Math.random() * a.length)];
 ACT.hqInfo = () => sheet({ title: 'Mango HQ', tall: true, html: `<p class="dialog-msg">Every bot is a little worker. What they do here is what they really do: when a bot starts its daily decision it walks to the Newsroom to read the news, takes buys and sells to the Council, then heads to the Trading desk. Bubbles show real journal entries and fills.</p>
   <div class="group">${Object.keys(HQ_ROOMS).map(k => { const th = HQT[store.get('hqTheme')] || HQT.office; return `<div class="cell"><div class="lead" style="color:${th.accents[k]}">${icon('grid')}</div><div class="main"><div class="title">${h(th.names[k])}</div><div class="sub">${h(ROOM_WHAT[k])}</div></div></div>`; }).join('')}</div>
-  <div class="section-h"><h2>The Council</h2></div><p class="note">${SET().councilWeighted !== false ? 'Votes are weighted. A member counts more when it has been right more often (after 20 graded votes), when the situation is its area (news on a big news day, risk when the market is wild, trend in a clean trend) and when it is sure. Every vote counts between ½ and 2, so nobody decides alone. You can turn this off in Settings.' : 'Every vote counts the same. Turn on weighted votes in Settings to let the members who have been right count for more.'}</p><div class="group">${Object.entries(PERSONA_ABOUT).map(([k, t]) => `<div class="cell"><div class="main"><div class="title">${h(memberName(k) + ' · ' + { ai: 'AI · debate', hawk: 'AI · news', guard: 'AI · risk', chart: 'AI · charts', surfer: 'Trend', rocket: 'Momentum', scoop: 'News', shield: 'Risk', prof: 'Value stats', doubt: 'Contrarian' }[k])}</div><div class="sub">${h(t)}</div></div></div>`).join('')}</div>
+  <div class="section-h"><h2>The Council</h2></div><p class="note">${SET().councilWeighted !== false ? 'Votes are weighted. A member counts more when it has been right more often (after 20 graded votes), when the situation is its area (news on a big news day, risk when the market is wild, trend in a clean trend) and when it is sure. Every vote counts between ½ and 2, so nobody decides alone. You can turn this off in Settings.' : 'Every vote counts the same. Turn on weighted votes in Settings to let the members who have been right count for more.'}</p><div class="group">${Object.entries(PERSONA_ABOUT).map(([k, t]) => `<div class="cell"><div class="main"><div class="title">${h(memberName(k) + ' · ' + { ai: 'AI · debate', hawk: 'AI · news', guard: 'AI · risk', chart: 'AI · charts', watch: 'Night shift', owl: 'Night shift · AI', surfer: 'Trend', rocket: 'Momentum', scoop: 'News', shield: 'Risk', prof: 'Value stats', doubt: 'Contrarian' }[k])}</div><div class="sub">${h(t)}</div></div></div>`).join('')}</div>
   <button class="btn btn-quiet btn-block mt12" data-act="councilNames">${icon('edit')}Rename the Council</button>
   <p class="note">${h(memberName('chair'))}, the chair, announces what the bot does. Every vote is checked a week later, so "Who called it?" shows which kind of evidence has actually been right for your bots. Drag to look around, pinch to zoom, tap a character for details. The eye button follows the action.</p>` });
 
@@ -6634,6 +6663,13 @@ ACT.standbyToggle = async el => {
 function councilCard() {
   return `<div class="group mt16"><div class="cell"><div class="lead">${icon('flag')}</div><div class="main"><div class="title">Weighted Council votes</div><div class="sub">Members count more when they've been right, when it's their area (news on big news days, risk when it's wild) and when they're sure. Each vote counts between ½ and 2. Decides the council veto and the verdict.</div></div>${sw(SET().councilWeighted !== false, 'data-act="setBool" data-k="councilWeighted"')}</div></div>`;
 }
+// ---------- the night shift ----------
+function nightCard() {
+  const on = SET().nightOn !== false, n = +(SET().nightRuns || 2), times = { 1: '1 AM', 2: '11 PM and 3 AM', 3: '10 PM, 2 AM and 6 AM' }[n];
+  return `<div class="group mt16"><div class="cell"><div class="lead">${icon('moon')}</div><div class="main"><div class="title">Night shift</div><div class="sub">From 9 PM to 7 AM ET the Council sleeps and the Night Watch${App.S?.analyst?.key ? ' and the Night Owl (one AI call)' : ''} check crypto bots at ${h(times)} ET. Only crypto, only bots that decide every day. Stocks wait for the morning.</div></div>${sw(on, 'data-act="setBool" data-k="nightOn"')}</div>
+    ${on ? `<div class="cell"><div class="main"><div class="title">Checks a night</div></div>${seg('nightRuns', [['1', '1'], ['2', '2'], ['3', '3']], String(n))}</div>` : ''}</div>`;
+}
+document.addEventListener('seg', e => { if (e.target.dataset?.seg === 'nightRuns') saveSetting({ nightRuns: +e.detail }); });
 // ---------- AI Council members card in Settings ----------
 function analystCard() {
   const a = App.S?.analyst; if (!a) return '';
@@ -6699,7 +6735,7 @@ PAGES.settings = {
   root() {
     const S = App.S;
     return `<div class="set-hero"><svg viewBox="0 0 120 120" class="av"><use href="#mango-mark"/></svg><div><div class="t-title">Mango <span class="set-ver">v${h(APP_VERSION)}</span></div><div class="t-foot">Logged in as ${h(S.user || 'you')} · ${(S.wallets || []).filter(w => !w.archived).length} wallet${(S.wallets || []).length === 1 ? '' : 's'}</div></div></div>
-      ${standbyCard()}${councilCard()}${analystCard()}
+      ${standbyCard()}${councilCard()}${nightCard()}${analystCard()}
       <div class="group mt16">${Object.entries(SECTIONS).map(([k, v]) => rowLink(v.icon, v.title, v.sub, 'settings/' + k)).join('')}</div>
       <div class="group mt16">${rowLink('wallet', 'Wallets', 'Create, rename, reset, move cash', 'wallets')}${rowToggle('hideBalances', 'Hide balances', 'Blur dollar amounts. Press and hold to peek.')}</div>
       <div class="group mt16">${rowLink('lock', 'Face ID and backups', 'Log in with Face ID, protect real money, save your data', 'security')}</div>
