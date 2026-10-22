@@ -308,7 +308,7 @@ const DEF = {
   confirmStyle: 'hold', confirmBuy: false, confirmSell: true, cashAPY: 0, startBalance: 10000,
   // notifications
   pushAlerts: true, pushOrders: true, notifySummary: true, notifyMoves: true, moveThreshold: 5,
-  notifyAchv: true, notifyGames: true, pushBots: true, botWeekly: true, pushReal: true, realDailyLossPct: 3, realHalt: false, standbyActive: false, standbyActiveAt: 0, faceReal: true, autoBackup: true, quietStart: '', quietEnd: '',
+  notifyAchv: true, notifyGames: true, pushBots: true, botWeekly: true, pushReal: true, realDailyLossPct: 3, realHalt: false, standbyActive: false, standbyActiveAt: 0, councilWeighted: true, aiOn: true, aiSize: true, aiDebate: true, aiHawk: true, aiGuard: true, aiChart: true, aiDailyMax: 120, faceReal: true, autoBackup: true, quietStart: '', quietEnd: '',
   // look and feel
   hideBalances: false, showCents: true, compactNums: false, defaultRange: '1D', defaultChart: 'Candles',
   theme: 'mango', accent: 'mango', plColors: 'classic', roundedNums: true, reduceMotion: false, celebrate: true,
@@ -320,6 +320,7 @@ const DEF = {
   f_divs: true, f_ext: true, f_movers: true, f_insights: true, f_taxes: true, f_statements: true, f_bots: true, f_buzz: true,
 };
 const LIMITS = {
+  aiDailyMax: [0, 500],
   realDailyLossPct: [0, 50],
   feeFlat: [0, 1000], feePct: [0, 10], slippage: [0, 5], maxPos: [0, 100], reservePct: [0, 100], autoSL: [0, 90], autoTP: [0, 1000],
   defaultBuy: [0, 1e9], cashAPY: [0, 100], startBalance: [100, 1e9], moveThreshold: [1, 50], defaultWallet: [1, 1e9],
@@ -3466,13 +3467,20 @@ async function runBotInner(id, { manual, dry }) {
   }
   // ---- the council: six kinds of evidence vote on each buy and sell ----
   phase('council');
-  const sessions = [];
+  const sessions = [], councilRec = await councilRecord();
   for (const d of Object.values(decisions).sort((a, b) => b.want - a.want)) {
     const buying = d.want * capital > d.have + Math.max(m.minTrade, 1), selling = d.have > 0 && !(d.target > 0);
     if (!(buying || selling) || sessions.length >= 12 || !series[d.sym]) continue;
     const bz = buzz[d.sym], up = bz?.upcoming?.find(u => u.k === 'earnings') || null;
     const s = councilSession(bot, d, series, bz, up, m, capital);
-    if (m.councilVeto && buying && d.target * capital > d.have + 1 && s.no > s.yes) { d.target = d.have / capital; d.why.push(`Skipped buying: the council voted ${s.yes}–${s.no} against, and council veto is on.`); }
+    // the AI members (Claude) vote too: specialists first, then the Analyst, who debates the others
+    const ais = await aiRound(d.sym, series[d.sym], { side: buying ? 'buy' : 'sell', target: d.target }, bz, up, { strategy: STRATEGIES[bot.strategy]?.name || bot.strategy, bench: series.SPY ? IND.ret(series.SPY.c, 63, series.SPY.c.length - 1) : null, have: d.have / capital, positions: Object.keys(held).length, maxPos: m.maxPosPct, stops: !!m.stops }, s.votes).catch(e => { warn('ai round', e.message); return []; });
+    if (ais.length) { s.votes.push(...ais); s.yes = s.votes.filter(v => v.vote === 'yes').length; s.no = s.votes.filter(v => v.vote === 'no').length;
+      // the Analyst has the last word on size; without its vote, the most cautious specialist decides
+      const an = ais.find(v => v.k === 'ai' && v.c === 'ai' && v.vote !== 'pass'), cut = an || ais.filter(v => v.c === 'ai' && v.vote !== 'pass').sort((a, b) => a.size - b.size)[0];
+      if (cut && buying && S.aiSize !== false && cut.size < 1 && d.target * capital > d.have + 1) { const add = d.target * capital - d.have, nt = (d.have + add * cut.size) / capital; d.why.push(`The ${nameOf(cut.k)} cut this buy to ${Math.round(cut.size * 100)}%: ${cut.line}`); d.target = nt; } }
+    Object.assign(s, weighVotes(s.votes, situation(series[d.sym], bz, up), councilRec));
+    if (m.councilVeto && buying && d.target * capital > d.have + 1 && leansNo(s)) { d.target = d.have / capital; d.why.push(`Skipped buying: the council voted ${tallyText(s)} against${weightedOn() ? ' (weighted)' : ''}, and council veto is on.`); }
     d.council = s; sessions.push(d);
   }
   phase('trade');
@@ -3956,7 +3964,7 @@ GET('/api/state', auth, async req => {
     settings: S, unread, counts: { trades: +counts.trades, events: +counts.events, conditional: ord.length + lims.length, seasons: +seasons[0].n },
     stats: { day: dayChange(pos), diversity: diversity(pos), protected: protectedPct(wid, pos), invested: marketValue(pos) },
     feeds: { crypto: { ok: feeds.crypto.ok, last: feeds.crypto.last }, stocks: { ok: feeds.stocks.ok, last: feeds.stocks.last, key: !!FINNHUB_KEY, live: feeds.stocks.ws } },
-    push: { key: VAPID_PUB, on: pushOn }, standby: standbyJson(),
+    push: { key: VAPID_PUB, on: pushOn }, standby: standbyJson(), analyst: { key: !!AI_KEY, on: S.aiOn !== false, debate: S.aiDebate !== false, bench: AI_BENCH.map(m => ({ k: m.k, name: m.name, on: S[m.set] !== false })) }, councilNames: await getCouncilNames(),
   };
   if (tokenExpiry(req.token) - Date.now() < (TOKEN_DAYS - 30) * 864e5) out.token = newToken(); // keeps you logged in while you use the app
   return out;
@@ -4960,9 +4968,51 @@ function councilSession(bot, d, series, buzz, earnings, m, capital) {
   const t = tally(votes);
   return { votes, yes: t.yes, no: t.no };
 }
+// ---------- weighted votes: some members count for more than others ----------
+// A vote's weight comes from three things, multiplied and kept between 0.5 and 2 so nobody decides alone:
+//   track record: members who have been right more often (20+ graded votes) count more, the rest less;
+//   the situation: members count more when it's their area (news on a big news day, risk when it's wild);
+//   confidence: a sure vote counts more than a shrug. A pass always weighs 0.
+let memberRec = { at: 0, map: {} };
+async function councilRecord() {
+  if (Date.now() - memberRec.at < 10 * 60e3) return memberRec.map;
+  const map = {};
+  for (const r of await rows('select right_ from council where settled order by id desc limit 2000').catch(() => [])) for (const [k, ok] of Object.entries(jsonOr(r.right_, {}) || {})) { const m = map[k] ||= { calls: 0, right: 0 }; m.calls++; if (ok) m.right++; }
+  memberRec = { at: Date.now(), map }; return map;
+}
+const recFactor = r => { if (!r || r.calls < 20) return { f: 1 }; const acc = (r.right + 5) / (r.calls + 10); return { f: clamp(1 + (acc - 0.5) * 3, 0.6, 1.6), acc: r.right / r.calls }; };
+function situation(b, bz, up) {
+  const i = b?.c?.length - 1; if (!(i >= 30)) return {};
+  const c = b.c[i], s200 = i >= 200 ? IND.sma(b.c, 200, i) : null, v20 = IND.vol(b.c, 20, i), v250 = i > 252 ? IND.vol(b.c, 250, i) : null, vr = v250 ? v20 / v250 : 1;
+  const rsi = IND.rsi(b.c, 14, i, b.memo), r5 = IND.ret(b.c, 5, i), atr = IND.atr(b, 14, i, b.memo) || c * 0.02;
+  return { news: !!bz && (bz.count >= 8 || bz.flags?.includes('severe_news') || bz.flags?.includes('attention_spike')), earn: !!up && up.tradingDays <= 5, quiet: !bz || bz.count < 3,
+    wild: vr > 1.3, trend: vr < 1.05 && s200 && Math.abs(c / s200 - 1) > 0.05, stretched: rsi != null && (rsi > 70 || rsi < 30), crowd: (r5 != null && Math.abs(r5 * c) > 2.5 * atr) || !!bz?.flags?.includes('attention_spike') };
+}
+const SIT = [ // [condition, members, factor, why]
+  ['news', ['hawk', 'scoop'], 1.35, 'big news day'], ['earn', ['hawk', 'scoop', 'shield', 'guard'], 1.25, 'earnings close'], ['quiet', ['hawk', 'scoop'], 0.8, 'no real news'],
+  ['wild', ['shield', 'guard'], 1.35, 'market is wild'], ['wild', ['surfer', 'rocket'], 0.8, 'choppy, trends break'],
+  ['trend', ['surfer', 'rocket', 'chart'], 1.25, 'clean trend'], ['stretched', ['prof', 'chart'], 1.2, 'price is stretched'], ['crowd', ['doubt'], 1.25, 'crowd piling in'],
+];
+function weighVotes(votes, sit, rec) {
+  let wy = 0, wn = 0;
+  for (const v of votes) {
+    if (v.vote === 'pass') { v.w = 0; continue; }
+    const why = [], R = recFactor(rec[v.k]); let f = R.f;
+    if (R.acc != null && Math.abs(R.f - 1) > 0.04) why.push(`right ${Math.round(R.acc * 100)}%`);
+    for (const [cond, ks, x, t] of SIT) if (sit[cond] && ks.includes(v.k)) { f *= x; why.push(t); }
+    const cf = 0.6 + 0.8 * clamp(num(v.conf, 0.5), 0, 1); f *= cf; if (v.conf >= 0.8) why.push('very sure'); else if (v.conf < 0.35) why.push('unsure');
+    v.w = round(clamp(f, 0.5, 2), 2); if (why.length) v.wr = why.slice(0, 3);
+    if (v.vote === 'yes') wy += v.w; else wn += v.w;
+  }
+  return { wy: round(wy, 2), wn: round(wn, 2) };
+}
+const weightedOn = () => S.councilWeighted !== false;
+// which way the council leans: by weight when that's on (and the votes have weights), otherwise by head count
+const leansNo = s => weightedOn() && s.wy != null ? s.wn > s.wy : s.no > s.yes;
+const tallyText = s => weightedOn() && s.wy != null ? `${s.wy.toFixed(1)}–${s.wn.toFixed(1)}` : `${s.yes}–${s.no}`;
 function chairLine(d, s) {
-  const t = `${s.yes}–${s.no}`;
-  if (d.action === 'buy' || d.action === 'add') return s.no > s.yes ? `Overruled ${t}: the strategy says buy, and it's within the limits.` : `Approved ${t}. Buying ${Math.round(d.target * 100)}% of the wallet.`;
+  const t = tallyText(s);
+  if (d.action === 'buy' || d.action === 'add') return leansNo(s) ? `Overruled ${t}: the strategy says buy, and it's within the limits.` : `Approved ${t}. Buying ${Math.round(d.target * 100)}% of the wallet.`;
   if (d.action === 'sell' || d.action === 'trim') return `Selling. ${d.why[0] || d.note || 'The strategy says it is time.'}`;
   const skip = (d.why || []).find(w => /^Skipped|^Not buying|^No new buys/.test(w));
   if (skip) return `Rejected ${t}. ${skip.replace(/^Skipped buying: /, '').replace(/^./, c => c.toUpperCase())}`;
@@ -4981,9 +5031,11 @@ async function settleCouncil() {
     const ret = now / +r.price - 1, votes = jsonOr(r.votes, []), right = {};
     for (const v of votes) if (v.vote !== 'pass') right[v.k] = v.vote === 'yes' ? ret > 0 : ret <= 0;
     await Q('update council set settled=true, result=$1, right_=$2 where id=$3', [round(ret, 5), JSON.stringify(right), r.id]);
+    memberRec.at = 0; // track records changed
   }
 }
-const councilJson = r => ({ id: r.id, ts: tsMs(r.ts), botId: r.bot_id, sym: r.sym, action: r.action, price: +r.price, votes: jsonOr(r.votes, []), yes: r.yes, no: r.no, chair: r.chair, settled: r.settled, result: r.result == null ? null : +r.result, right: jsonOr(r.right_, null), settleAt: tsMs(r.settle_at) });
+const wsum = (votes, side) => votes.some(v => v.w != null) ? round(votes.filter(v => v.vote === side).reduce((t, v) => t + (v.w ?? 1), 0), 2) : null;
+const councilJson = r => ({ wy: wsum(jsonOr(r.votes, []), 'yes'), wn: wsum(jsonOr(r.votes, []), 'no'), id: r.id, ts: tsMs(r.ts), botId: r.bot_id, sym: r.sym, action: r.action, price: +r.price, votes: jsonOr(r.votes, []), yes: r.yes, no: r.no, chair: r.chair, settled: r.settled, result: r.result == null ? null : +r.result, right: jsonOr(r.right_, null), settleAt: tsMs(r.settle_at) });
 GET('/api/council', auth, async req => {
   const bot = +req.query.bot || null, lim = clamp(num(req.query.limit, 20), 1, 100), before = +req.query.before || 2e9;
   return (await rows(`select * from council where id < $1 ${bot ? 'and bot_id=$3' : ''} order by id desc limit $2`, bot ? [before, lim, bot] : [before, lim])).map(councilJson);
@@ -4991,14 +5043,20 @@ GET('/api/council', auth, async req => {
 GET('/api/council/board', auth, async req => {
   const bot = +req.query.bot || null;
   const list = (await rows(`select * from council where settled ${bot ? 'and bot_id=$1' : ''} order by id desc limit 2000`, bot ? [bot] : [])).map(councilJson);
-  const members = COUNCIL.map(m => { let calls = 0, right = 0; for (const s of list) if (s.right && m.k in s.right) { calls++; if (s.right[m.k]) right++; } return { ...m, calls, right, acc: calls ? right / calls : null }; });
+  const members = [...COUNCIL, ...AI_ALL].filter(m => !m.ai || aiMembersOn().includes(m) || list.some(s => s.right && m.k in s.right)).map(m => { let calls = 0, right = 0; for (const s of list) if (s.right && m.k in s.right) { calls++; if (s.right[m.k]) right++; } return { ...m, calls, right, acc: calls ? right / calls : null }; });
   // What a council veto would have done: buys it would have blocked, and skips it wanted to buy.
-  const blocked = list.filter(s => (s.action === 'buy' || s.action === 'add') && s.no > s.yes), wanted = list.filter(s => s.action === 'skip' && s.yes > s.no);
+  const blocked = list.filter(s => (s.action === 'buy' || s.action === 'add') && leansNo(s)), wanted = list.filter(s => s.action === 'skip' && !leansNo(s) && (s.wy != null && weightedOn() ? s.wy > s.wn : s.yes > s.no));
   const avg = a => a.length ? a.reduce((t, s) => t + s.result, 0) / a.length : null;
   const pending = +(await row(`select count(*) n from council where not settled ${bot ? 'and bot_id=$1' : ''}`, bot ? [bot] : [])).n;
-  return { members: members.sort((a, b) => (b.acc ?? -1) - (a.acc ?? -1)), settled: list.length, pending, veto: { blocked: blocked.length, blockedAvg: avg(blocked), wanted: wanted.length, wantedAvg: avg(wanted) }, chair: { calls: list.filter(s => s.action !== 'hold').length } };
+  // scorecard: did the weighted majority call the move better than counting heads?
+  const card = { weighted: { calls: 0, right: 0 }, heads: { calls: 0, right: 0 } };
+  for (const s of list) { if (s.result == null || s.wy == null) continue; const up = s.result > 0;
+    if (s.yes !== s.no) { card.heads.calls++; if ((s.yes > s.no) === up) card.heads.right++; }
+    if (s.wy !== s.wn) { card.weighted.calls++; if ((s.wy > s.wn) === up) card.weighted.right++; } }
+  const rec = await councilRecord(); for (const m of members) m.weight = round(recFactor(rec[m.k]).f, 2);
+  return { weighted: weightedOn(), card, members: members.sort((a, b) => (b.acc ?? -1) - (a.acc ?? -1)), settled: list.length, pending, veto: { blocked: blocked.length, blockedAvg: avg(blocked), wanted: wanted.length, wantedAvg: avg(wanted) }, chair: { calls: list.filter(s => s.action !== 'hold').length } };
 });
-GET('/api/council/members', auth, () => COUNCIL);
+GET('/api/council/members', auth, () => councilMembers());
 
 // ---------- Mango HQ: everything the floor needs in one call ----------
 GET('/api/hq', auth, async () => {
@@ -5013,10 +5071,25 @@ GET('/api/hq', auth, async () => {
   const trades = +(await row("select count(*) n from bot_log where kind='trade' and ts > $1", [new Date(etToUtc(...etDate().split('-').map(Number), 0, 0))])).n;
   return {
     bots: cards.map(c => ({ id: c.id, name: c.name, strategy: c.strategy, status: c.status, activity: c.activity, holding: c.holding, value: c.value, ret: c.ret, day: c.day, spark: c.spark, broker: !!c.wallet?.broker, auto: !!STRATEGIES[c.strategy]?.auto, deciding: running.has(c.id), next: c.next, tryouts: STRATEGIES[c.strategy]?.auto ? (jsonOr(list.find(x => x.id === c.id)?.state, {})._board || []).map(t => ({ k: t.k, label: t.label, alloc: t.alloc, eligible: t.eligible })) : null })),
-    events, council, members: COUNCIL, tick, trades,
+    events, council, members: councilMembers(), names: await getCouncilNames(), tick, trades,
     market: { ...market(), spy: spy?.prev ? (spy.p / spy.prev - 1) * 100 : null, btc: btc?.prev ? (btc.p / btc.prev - 1) * 100 : null },
     vault: { total: totalPL, day }, alarm: { halt: !!S.realHalt, killed: cards.filter(c => c.status === 'killed').map(c => c.name), brake: cards.filter(c => c.activity?.k === 'brake').map(c => c.name), cooldown: cards.filter(c => c.activity?.k === 'cooldown').map(c => c.name) },
   };
+});
+
+// ---------- your own names for the Council (and the chair), optionally per theme ----------
+const NAME_KEYS = ['surfer', 'rocket', 'scoop', 'shield', 'prof', 'doubt', 'ai', 'hawk', 'guard', 'chart', 'chair'], NAME_THEMES = ['office', 'space', 'village', 'island'];
+let councilNames = null;
+async function getCouncilNames() { if (!councilNames) councilNames = jsonOr(await kvGet('council_names').catch(() => null), null) || { sync: true, all: {}, themes: {} }; return councilNames; }
+const cleanName = v => String(v ?? '').replace(/[\u0000-\u001f<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, 24);
+const cleanNameSet = o => { const out = {}; for (const k of NAME_KEYS) { const v = cleanName(o?.[k]); if (v) out[k] = v; } return out; };
+GET('/api/council/names', auth, () => getCouncilNames());
+POST('/api/council/names', auth, async req => {
+  const b = req.body || {}, cur = await getCouncilNames(), next = { sync: b.sync !== false, all: b.all !== undefined ? cleanNameSet(b.all) : cur.all, themes: { ...cur.themes } };
+  if (b.themes) for (const t of NAME_THEMES) if (b.themes[t] !== undefined) next.themes[t] = cleanNameSet(b.themes[t]);
+  councilNames = next; await kvSet('council_names', JSON.stringify(next));
+  broadcast({ t: 'evt', e: 'settings' });
+  return next;
 });
 // =====================================================================
 // Standby copy: a second Mango on another host (e.g. Render's free plan) that you only switch on when
@@ -5043,6 +5116,137 @@ POST('/api/standby', auth, async req => {
   broadcast({ t: 'evt', e: 'settings' });
   return standbyJson();
 });
+// =====================================================================
+// The AI members of the Council, backed by Claude (Haiku). The Analyst For each buy or sell the bots consider, it
+// reads the real evidence (trend, momentum, RSI, volatility, earnings, headlines) and votes like the
+// others. Its vote counts in the tally and the council veto, it can shrink a buy (never grow one), and
+// "Who called it?" grades it a week later like everyone else. Needs ANTHROPIC_API_KEY. If the key is
+// missing, the daily cap is hit, or the reply is unusable, it simply passes and the bot carries on.
+// =====================================================================
+const AI_KEY = (ENV.ANTHROPIC_API_KEY || '').trim();
+const AI_MODEL = (ENV.ANALYST_MODEL || 'claude-haiku-5-5').trim();
+const AI_BASE = (ENV.ANTHROPIC_BASE || 'https://api.anthropic.com').replace(/\/$/, '');
+const AI_PRICE = { in: +ENV.ANALYST_PRICE_IN || 0.10, out: +ENV.ANALYST_PRICE_OUT || 0.50 }; // dollars per million tokens
+// The AI bench: three specialists who each see only their own slice of the evidence, and the Analyst,
+// who goes last, reads every vote (rule-based and AI), picks the argument it disagrees with most,
+// rebuts it out loud, and then votes. All share one key and one daily cap.
+const ANALYST = { k: 'ai', name: 'Analyst', role: 'AI · debate', color: '#FF9F1C', ai: true };
+const AI_BENCH = [
+  { k: 'hawk', name: 'News Hawk', role: 'AI · news', color: '#E85D75', ai: true, set: 'aiHawk' },
+  { k: 'guard', name: 'Risk Officer', role: 'AI · risk', color: '#5BC0BE', ai: true, set: 'aiGuard' },
+  { k: 'chart', name: 'Chartist', role: 'AI · charts', color: '#C3E88D', ai: true, set: 'aiChart' },
+];
+const AI_ALL = [ANALYST, ...AI_BENCH], AI_KEYS = AI_ALL.map(m => m.k);
+const analystReady = () => !!AI_KEY && S.aiOn !== false;
+const benchOn = m => analystReady() && S[m.set] !== false;
+const aiMembersOn = () => analystReady() ? [ANALYST, ...AI_BENCH.filter(benchOn)] : [];
+const councilMembers = () => [...COUNCIL, ...aiMembersOn()];
+let aiUsage = null;
+async function aiUse() { if (!aiUsage) aiUsage = jsonOr(await kvGet('ai_usage').catch(() => null), {}) || {}; const d = etDate(), m = d.slice(0, 7); if (aiUsage.day !== d) Object.assign(aiUsage, { day: d, calls: 0, inT: 0, outT: 0, errors: 0, by: {} }); if (aiUsage.month !== m) Object.assign(aiUsage, { month: m, mCalls: 0, mIn: 0, mOut: 0 }); aiUsage.by ||= {}; return aiUsage; }
+const aiCost = (i, o) => (i * AI_PRICE.in + o * AI_PRICE.out) / 1e6;
+const aiCache = new Map(); // k|sym|day|side -> vote, so several bots asking about the same stock cost one call each
+const f1 = (x, d = 1) => x == null || !Number.isFinite(x) ? 'n/a' : (+x).toFixed(d);
+const pcf = x => x == null || !Number.isFinite(x) ? 'n/a' : (x * 100).toFixed(1) + '%';
+const proposal = (sym, d, ctx) => `Symbol: ${sym}${isCrypto(sym) ? ' (crypto)' : ''}
+Proposed: ${d.side === 'buy' ? `BUY up to ${Math.round(d.target * 100)}% of the wallet` : 'SELL the position'} (bot strategy: ${ctx.strategy})`;
+const headlines = (bz, n = 6) => (bz?.items || []).filter(x => x.src === 'news' || x.title).slice(0, n).map(x => `- ${String(x.title || x.headline || '').slice(0, 140)}${x.score != null ? ` (mood ${f1(x.score, 2)})` : ''}`).join('\n') || '- none';
+function aiFacts(sym, b, d, bz, up, ctx) {
+  const i = b.c.length - 1, c = b.c[i], s50 = IND.sma(b.c, 50, i), s200 = i >= 200 ? IND.sma(b.c, 200, i) : null, rsi = IND.rsi(b.c, 14, i, b.memo);
+  const v20 = IND.vol(b.c, 20, i), v250 = i > 252 ? IND.vol(b.c, 250, i) : null;
+  return `${proposal(sym, d, ctx)}
+Price ${c.toFixed(2)}. 5-day ${pcf(IND.ret(b.c, 5, i))}, 1-month ${pcf(IND.ret(b.c, 21, i))}, 3-month ${pcf(IND.ret(b.c, 63, i))}${ctx.bench != null ? ` (S&P 500 3-month ${pcf(ctx.bench)})` : ''}
+50-day avg ${f1(s50, 2)}, 200-day avg ${f1(s200, 2)}. RSI(14) ${f1(rsi, 0)}. Volatility now vs normal: ${v250 ? f1(v20 / v250, 2) + 'x' : 'n/a'}
+Earnings: ${up ? `in ${up.tradingDays} trading day(s)` : 'none in the next 2 weeks'}
+News mood ${bz ? f1(bz.sentiment, 2) : 'n/a'} across ${bz?.count || 0} stories${bz?.flags?.length ? `, flags: ${bz.flags.join(', ')}` : ''}
+Headlines:
+${headlines(bz)}`;
+}
+// each specialist only gets its own evidence, so they genuinely disagree
+const BENCH_FACTS = {
+  hawk: (sym, b, d, bz, up, ctx) => `${proposal(sym, d, ctx)}
+Price move: 5-day ${pcf(IND.ret(b.c, 5, b.c.length - 1))}
+Earnings: ${up ? `in ${up.tradingDays} trading day(s)` : 'none in the next 2 weeks'}
+News mood ${bz ? f1(bz.sentiment, 2) : 'n/a'} across ${bz?.count || 0} stories${bz?.flags?.length ? `, flags: ${bz.flags.join(', ')}` : ''}
+Headlines (newest first):
+${headlines(bz, 10)}`,
+  guard: (sym, b, d, bz, up, ctx) => { const i = b.c.length - 1, c = b.c[i], n = Math.min(i, 63), hi = Math.max(...b.c.slice(i - n, i + 1)); let worst = 0; for (let j = Math.max(1, i - 60); j <= i; j++) worst = Math.min(worst, b.c[j] / b.c[j - 1] - 1);
+    const v20 = IND.vol(b.c, 20, i), v250 = i > 252 ? IND.vol(b.c, 250, i) : null, atr = IND.atr(b, 14, i, b.memo);
+    return `${proposal(sym, d, ctx)}
+Position: currently ${pcf(ctx.have)} of the wallet, would go to ${pcf(d.target)}. Max allowed per position ${ctx.maxPos != null ? ctx.maxPos + '%' : 'n/a'}. Positions held: ${ctx.positions ?? 'n/a'}. Stop losses ${ctx.stops ? 'on' : 'off'}.
+Volatility (20-day, yearly) ${pcf(v20)}${v250 ? `, normal ${pcf(v250)}` : ''}. Average daily range ${atr ? pcf(atr / c) : 'n/a'} of price.
+Down ${pcf(1 - c / hi)} from its 3-month high. Worst single day in 60 days: ${pcf(worst)}.
+Earnings: ${up ? `in ${up.tradingDays} trading day(s)` : 'none in the next 2 weeks'}`; },
+  chart: (sym, b, d, bz, up, ctx) => { const i = b.c.length - 1, k = Math.min(30, i), closes = b.c.slice(i - k, i + 1).map(x => +x.toPrecision(5)).join(', '), vols = b.v ? b.v.slice(i - 20, i + 1) : [], vAvg = vols.length ? vols.slice(0, -1).reduce((t, x) => t + x, 0) / Math.max(1, vols.length - 1) : 0;
+    return `${proposal(sym, d, ctx)}
+Last ${k + 1} daily closes (oldest first): ${closes}
+20-day high ${f1(Math.max(...b.h.slice(i - 19, i + 1)), 2)}, low ${f1(Math.min(...b.l.slice(i - 19, i + 1)), 2)}. 50-day avg ${f1(IND.sma(b.c, 50, i), 2)}, 200-day avg ${f1(i >= 200 ? IND.sma(b.c, 200, i) : null, 2)}. RSI(14) ${f1(IND.rsi(b.c, 14, i, b.memo), 0)}.
+Volume today vs 20-day average: ${vAvg ? f1(vols[vols.length - 1] / vAvg, 2) + 'x' : 'n/a'}`; },
+};
+const JSON_SHAPE = `Reply with ONLY a JSON object, no other text:
+{"vote":"yes"|"no"|"pass","confidence":0.0-1.0,"size":0.25-1.0,"reason":"one plain sentence, max 110 characters, citing the key evidence"}
+"size" is how much of the proposed buy you'd actually take (1 = all of it); use less than 1 when you see real risk. For sells, "yes" means agree with selling.`;
+const BENCH_SYSTEM = {
+  hawk: `You are the News Hawk on a trading council for an automated paper-trading bot. You see ONLY the news, headlines and earnings timing, not the charts. Judge whether the news flow supports the proposed trade over roughly the next week: catalysts, surprises, risks hiding in the headlines, and whether the story is already priced in. Say "pass" when there is no real news. ${JSON_SHAPE}`,
+  guard: `You are the Risk Officer on a trading council for an automated paper-trading bot. You see ONLY risk facts: position size, volatility, drawdowns, worst days and earnings timing. Your job is to protect the wallet: vote "no" when the downside or the position size is too much for the likely reward, "yes" when the risk is reasonable. You are skeptical by nature but not a pessimist. ${JSON_SHAPE}`,
+  chart: `You are the Chartist on a trading council for an automated paper-trading bot. You see ONLY price action: recent closes, highs and lows, averages, RSI and volume. Read the chart in plain words (trend, support and resistance, breakouts, exhaustion) and judge the proposed trade over roughly the next week. ${JSON_SHAPE}`,
+};
+const AI_SYSTEM = `You are the Analyst on a trading council for an automated paper-trading bot. The bot's own strategy has already proposed a trade; you give an independent second opinion on whether it is a good idea over roughly the next week, using only the facts given. Be decisive but honest: say "pass" only when the evidence is genuinely balanced. ${JSON_SHAPE}`;
+const AI_DEBATE = `You are the Analyst on a trading council for an automated paper-trading bot, and you speak last. You have all the facts and every other member's vote with their reason. First, pick the ONE member whose argument you find weakest or most dangerous (usually on the winning side) and rebut it directly in one sentence addressed to them. Then cast your own vote, weighing everything. Don't just follow the majority; don't be contrarian for its own sake either. Reply with ONLY a JSON object, no other text:
+{"challenge":"<member key>","argument":"one sentence to that member, max 120 characters","vote":"yes"|"no"|"pass","confidence":0.0-1.0,"size":0.25-1.0,"reason":"one plain sentence, max 110 characters"}
+"size" is how much of the proposed buy you'd actually take (1 = all of it). For sells, "yes" means agree with selling.`;
+const clean = (t, n) => String(t || '').replace(/\s+/g, ' ').trim().slice(0, n);
+// one call to Claude for member k; returns a vote, or a pass explaining why it couldn't
+async function aiCall(k, system, user, side) {
+  const u = await aiUse(); u.calls++; u.mCalls++; u.by[k] = (u.by[k] || 0) + 1;
+  try {
+    const r = await fetch(AI_BASE + '/v1/messages', { method: 'POST', signal: AbortSignal.timeout(20e3), headers: { 'content-type': 'application/json', 'x-api-key': AI_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: AI_MODEL, max_tokens: 260, system, messages: [{ role: 'user', content: user }] }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j?.error?.message || 'HTTP ' + r.status);
+    u.inT += j.usage?.input_tokens || 0; u.outT += j.usage?.output_tokens || 0; u.mIn += j.usage?.input_tokens || 0; u.mOut += j.usage?.output_tokens || 0;
+    const text = (j.content || []).map(x => x.text || '').join(''), m = text.match(/\{[\s\S]*\}/), o = m ? JSON.parse(m[0]) : null;
+    if (!o || !['yes', 'no', 'pass'].includes(o.vote)) throw new Error('unreadable answer');
+    return { k, vote: o.vote, conf: round(clamp(num(o.confidence, 0.5), 0, 1), 2), size: side === 'buy' ? round(clamp(num(o.size, 1), 0.25, 1), 2) : 1, line: clean(o.reason, 140) || 'No reason given.', c: 'ai', _o: o };
+  } catch (e) { u.errors++; warn('analyst', k + ': ' + e.message); u.lastError = { ts: Date.now(), msg: String(e.message).slice(0, 160) }; return { k, vote: 'pass', conf: 0, line: "Couldn't reach the AI, sitting this one out.", c: 'ai_err' }; }
+  finally { kvSet('ai_usage', JSON.stringify(u)).catch(() => {}); }
+}
+const capPass = k => ({ k, vote: 'pass', conf: 0, line: 'Daily AI limit reached, sitting this one out.', c: 'ai_cap' });
+const cacheGet = key => aiCache.has(key) ? { ...aiCache.get(key), cached: true } : null;
+const cacheSet = (key, v) => { if (v.c === 'ai') { aiCache.set(key, v); if (aiCache.size > 800) aiCache.delete(aiCache.keys().next().value); } };
+const nameOf = k => (COUNCIL.find(m => m.k === k) || AI_ALL.find(m => m.k === k))?.name || k;
+// The whole AI round for one decision: specialists in parallel, then the Analyst (debating if on).
+// `rule` is the six rule-based votes. Returns the AI votes in speaking order.
+async function aiRound(sym, b, d, bz, up, ctx = {}, rule = []) {
+  if (!analystReady() || !b || !(b.c?.length > 30)) return [];
+  const side = d.side, day = etDate(), u = await aiUse(), max = S.aiDailyMax ?? 120;
+  const bench = AI_BENCH.filter(benchOn);
+  // the cap always leaves room for the Analyst: specialists sit out first (decided up front, since they run at once)
+  const aKey = `ai|${sym}|${day}|${side}|${S.aiDebate !== false ? 'd' : 's'}`;
+  let left = max - u.calls - (aiCache.has(aKey) ? 0 : 1);
+  const plan = bench.map(m => { const key = `${m.k}|${sym}|${day}|${side}`; if (aiCache.has(key)) return { m, key }; if (left > 0) { left--; return { m, key, call: true }; } return { m, key, cap: true }; });
+  const out = await Promise.all(plan.map(async ({ m, key, call, cap }) => {
+    if (cap) return capPass(m.k); if (!call) return cacheGet(key);
+    const v = await aiCall(m.k, BENCH_SYSTEM[m.k], BENCH_FACTS[m.k](sym, b, d, bz, up, ctx), side); delete v._o; cacheSet(key, v); return v;
+  }));
+  const debate = S.aiDebate !== false, key = aKey;
+  let a = cacheGet(key);
+  if (!a) {
+    if (u.calls >= max) a = capPass('ai');
+    else if (!debate) { a = await aiCall('ai', AI_SYSTEM, aiFacts(sym, b, d, bz, up, ctx), side); delete a._o; }
+    else {
+      const all = [...rule, ...out].filter(v => v && v.c !== 'ai_cap' && v.c !== 'ai_err');
+      const table = all.map(v => `- ${v.k} (${nameOf(v.k)}, ${(COUNCIL.find(m => m.k === v.k) || AI_ALL.find(m => m.k === v.k))?.role || ''}): ${v.vote.toUpperCase()} — ${v.line}`).join('\n');
+      a = await aiCall('ai', AI_DEBATE, `${aiFacts(sym, b, d, bz, up, ctx)}\n\nThe council's votes so far (key, name, role):\n${table || '- none'}`, side);
+      const o = a._o; delete a._o;
+      if (o && all.some(v => v.k === o.challenge)) { a.vs = o.challenge; a.arg = clean(o.argument, 150); a.vsVote = all.find(v => v.k === o.challenge).vote; }
+    }
+    cacheSet(key, a);
+  }
+  return [...out, a];
+}
+// kept for older callers: the Analyst alone
+async function analystVote(sym, b, d, bz, up, ctx = {}) { const r = await aiRound(sym, b, d, bz, up, ctx, []); return r[r.length - 1] || null; }
+GET('/api/analyst', auth, async () => { const u = await aiUse(); return { key: !!AI_KEY, on: S.aiOn !== false, sizing: S.aiSize !== false, debate: S.aiDebate !== false, bench: AI_BENCH.map(m => ({ k: m.k, name: m.name, role: m.role, on: S[m.set] !== false })), model: AI_MODEL, dailyMax: S.aiDailyMax ?? 120, today: { calls: u.calls, cost: aiCost(u.inT, u.outT), errors: u.errors, by: u.by || {} }, month: { calls: u.mCalls, cost: aiCost(u.mIn, u.mOut) }, lastError: u.lastError || null }; });
 
 // =====================================================================
 // Background jobs

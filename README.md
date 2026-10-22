@@ -2,7 +2,7 @@
 
 A paper trading app for iPhone with real market prices. It runs from the Home Screen and is built on Node and Postgres.
 
-Trade stocks, ETFs and crypto with practice money. You can also put strategies to work as bots, let Autopilot run a mix of them, and watch it all happen in **Mango HQ**: a small isometric world where your bots walk around and a six-member Council votes on every trade. If you connect an Alpaca account, the same app can trade it, on paper or with real money, on a separate side with its own safeguards.
+Trade stocks, ETFs and crypto with practice money. You can also put strategies to work as bots, let Autopilot run a mix of them, and watch it all happen in **Mango HQ**: a small isometric world where your bots walk around and a Council of up to ten members votes on every trade. If you connect an Alpaca account, the same app can trade it, on paper or with real money, on a separate side with its own safeguards.
 
 ---
 
@@ -25,6 +25,9 @@ Trade stocks, ETFs and crypto with practice money. You can also put strategies t
 - Each bot is a character in one of four themed worlds: **Office**, **Starship**, **Village** or **Island**. Each world has its own rooms, furniture, people, sky and way of talking.
 - Bots really do what they're shown doing: they read the news, take buys and sells to the Council, and trade at the desk. Speech bubbles carry real trades and journal entries.
 - **The Council** is six rule-based voters (trend, momentum, news, risk, stats and contrarian) who vote on every buy and sell. Votes are checked a week later, and "Who called it?" shows who has been right. An optional council veto lets a majority NO block a buy.
+- **AI members** (Claude Haiku, optional): three specialists who each see only one slice of the evidence (the **News Hawk** sees headlines and earnings, the **Risk Officer** sees position size, swings and drawdowns, and the **Chartist** sees the price chart and volume), plus the **Analyst**, who speaks last. In a **debate**, the Analyst reads every vote, calls out the argument it disagrees with most, and then votes. Their votes count, they can shrink a risky buy but never grow one, and they're graded like everyone else. Each member can be switched off in Settings, and they share one daily call cap.
+- **Weighted votes** (on by default): a member's vote counts for more when it has been right more often (after 20 graded votes), when the situation is its area (news on a big news day, risk when the market is wild, trend in a clean trend) and when it's sure. Each vote counts between ½ and 2, so no one decides alone. The weighted vote decides the council veto and the verdict, and "Who called it?" compares weighted calls with simply counting heads.
+- You can rename every Council member and the chair, with the same names in every world or different names for each one.
 - Day and night follow the market clock. You can drag, fling, pinch to zoom, replay the day, follow a bot, or turn on the auto camera.
 
 **Alpaca (real brokerage)**
@@ -63,6 +66,7 @@ It needs **Node 20+** and a **Postgres** database. The database tables are creat
 | `ALPACA_ENV` | optional | `paper` (default) or `live`. Real money only ever turns on here, never from inside the app. |
 | `ALPACA_MAX_ORDER` | optional | Largest real-money order allowed, in dollars |
 | `ALPACA_FEED` | optional | `iex` (default) or `sip` |
+| `ANTHROPIC_API_KEY` | optional | Turns on the **AI Council members** (Analyst, News Hawk, Risk Officer, Chartist), powered by Claude Haiku. It costs well under $1 a month, with a shared daily cap you set in Settings. |
 | `VAPID_EMAIL` | optional | Contact address for push notifications (`mailto:...`) |
 | `MANGO_STANDBY` | optional | Set to `1` on a backup copy only (see below) |
 | `PUBLIC_URL` | optional | The standby copy's own address, if the host doesn't provide one (Render does) |

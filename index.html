@@ -992,7 +992,7 @@ button.tile:active { transform: scale(.98); }
 
 /* speech bubbles */
 .hq-bub { transform-origin: 50% 100%; max-width: 210px; width: max-content; padding: 7px 10px; border-radius: 13px; background: #FFFDF6; color: #1B1430; font-size: 12px; line-height: 1.3; font-weight: 600; box-shadow: 0 6px 18px rgba(0, 0, 0, .35); animation: hq-pop .32s cubic-bezier(.3, 1.5, .5, 1) both; }
-.hq-bub::after { content: ''; position: absolute; left: 50%; bottom: -5px; width: 10px; height: 10px; background: inherit; transform: translateX(-50%) rotate(45deg); border-radius: 2px; }
+.hq-bub::after { content: ''; position: absolute; left: calc(50% + var(--tx, 0px)); bottom: -5px; width: 10px; height: 10px; background: inherit; transform: translateX(-50%) rotate(45deg); border-radius: 2px; }
 .hq-bub.buy, .hq-bub.good, .hq-bub.yes { background: #D6FBE9; }
 .hq-bub.sell, .hq-bub.bad, .hq-bub.no { background: #FFE0E6; }
 .hq-bub.line { font-size: 11.5px; }
@@ -1096,6 +1096,13 @@ button.tile:active { transform: scale(.98); }
 #standby-bar span { opacity: .75; overflow: hidden; text-overflow: ellipsis; }
 [data-standby=on] #standby-bar { background: #0F3A2A; color: #BFF5DC; } [data-standby=on] #standby-bar i { background: #3DDC97; }
 .standby-card.on { box-shadow: inset 0 0 0 1.5px #3DDC97; }
+
+/* the Analyst calling someone out */
+.hq-bub.line.debate, [data-hqt] .hq-bub.line.debate { background: #FFE9CC; box-shadow: 0 0 0 2px rgba(255, 159, 28, .85), 0 6px 18px rgba(0, 0, 0, .35); }
+.tc-arg { display: block; margin: 2px 0 3px; color: #FF9F1C; font-style: italic; }
+.tc-w { display: inline-block; margin: 0 6px 0 0; padding: 0 6px; border-radius: 6px; background: rgba(255,255,255,.07); color: var(--t3, #9A93B0); font-size: 11.5px; font-weight: 650; vertical-align: 1px; } .tc-w.hi { color: #FFD646; background: rgba(255,214,70,.12); }
+.hb-w { display: block; font-size: 10px; color: #B9B2CC; font-weight: 700; } .hb-w.hi { color: #FFD646; }
+.hb-card { display: flex; gap: 8px; margin: 10px 0 4px; } .hb-card span { flex: 1; padding: 8px 10px; border-radius: 12px; background: rgba(255,255,255,.06); font-size: 11.5px; color: #B9B2CC; } .hb-card b { display: block; font-size: 20px; color: #fff; font-variant-numeric: tabular-nums; }
 
 /* ---------- motion ---------- */
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -3801,11 +3808,11 @@ function thinkRows(rows, { all = false } = {}) {
       ${r.buzz ? `<p class="th-buzz">${icon('radar')}<span>${h(r.buzz)}</span></p>` : ''}${councilChips(r.council)}${flagChips(r.flags)}</div>`; }).join('')}
     ${holdLine}${quiet ? `<button class="th-more" data-act="thinkAll">${shown.length ? `See all ${list.length}` : `${quiet} more with nothing to do`} ${icon('down')}</button>` : ''}</div>`;
 }
-const COUNCIL_C = { surfer: '#4EA8FF', rocket: '#FF7A45', scoop: '#F5C542', shield: '#9AA6B8', prof: '#3DDC97', doubt: '#B48CFF' };
-const COUNCIL_N = { surfer: 'Surfer', rocket: 'Rocket', scoop: 'Scoop', shield: 'Shield', prof: 'Professor', doubt: 'Doubt' };
+const COUNCIL_C = { surfer: '#4EA8FF', rocket: '#FF7A45', scoop: '#F5C542', shield: '#9AA6B8', prof: '#3DDC97', doubt: '#B48CFF', ai: '#FF9F1C', hawk: '#E85D75', guard: '#5BC0BE', chart: '#C3E88D' };
+const COUNCIL_N = { surfer: 'Surfer', rocket: 'Rocket', scoop: 'Scoop', shield: 'Shield', prof: 'Professor', doubt: 'Doubt', ai: 'Analyst (AI)', hawk: 'News Hawk (AI)', guard: 'Risk Officer (AI)', chart: 'Chartist (AI)' };
 function councilChips(c) {
   if (!c?.votes?.length) return '';
-  return `<details class="th-council"><summary><span class="tc-dots">${c.votes.map(v => `<i class="v-${v.vote}" style="--c:${COUNCIL_C[v.k] || '#888'}"></i>`).join('')}</span><span>Council ${c.yes}–${c.no}${c.chair ? ` · ${h(c.chair.split('.')[0])}` : ''}</span></summary>${c.votes.map(v => `<p class="tc-line"><b style="color:${COUNCIL_C[v.k]}">${COUNCIL_N[v.k] || v.k}</b><span class="tc-v v-${v.vote}">${v.vote === 'yes' ? 'YES' : v.vote === 'no' ? 'NO' : 'pass'}</span>${h(v.line)}</p>`).join('')}</details>`;
+  return `<details class="th-council"><summary><span class="tc-dots">${c.votes.map(v => `<i class="v-${v.vote}" style="--c:${COUNCIL_C[v.k] || '#888'}"></i>`).join('')}</span><span>Council ${tallyOf(c)}${c.chair ? ` · ${h(c.chair.split(/\.\s/)[0].replace(/\.$/, ''))}` : ''}</span></summary>${c.votes.map(v => `<p class="tc-line"><b style="color:${COUNCIL_C[v.k]}">${h(memberName(v.k))}</b><span class="tc-v v-${v.vote}">${v.vote === 'yes' ? 'YES' : v.vote === 'no' ? 'NO' : 'pass'}</span>${isWeighted(c) && weightNote(v) ? `<span class="tc-w${v.w > 1 ? ' hi' : ''}">${h(weightNote(v))}</span>` : ''}${v.arg && v.vs ? `<span class="tc-arg">To ${h(memberName(v.vs))}: “${h(v.arg)}”</span>` : ''}${h(v.line)}</p>`).join('')}</details>`;
 }
 ACT.thinkAll = el => { const box = el.closest('.think'), rows = box?._rows; if (rows) box.outerHTML = thinkRows(rows, { all: true }); };
 const mountThink = (root, rows) => { const b = $('.think', root); if (b) b._rows = rows; };
@@ -4640,7 +4647,7 @@ const HQ_L = (() => {
   const edges = [['n1', 'j1'], ['j1', 'n3'], ['n3', 'n4'], ['n4', 'n5'], ['n5', 'n6'], ['j1', 'c1'], ['c1', 'j2'], ['j2', 'm1'], ['m1', 'm2']];
   const halls = [{ x: 0, y: 8, w: 36, d: 3, main: true }, { x: 12, y: 11, w: 2, d: 8.5 }, { x: 14, y: 17.5, w: 22, d: 2 }];
   const table = [6, 18.4], throne = [6, 23.9];
-  const seats = []; for (let i = 0; i < 6; i++) { const t = Math.PI * (1.0 + i * 0.2); seats.push([table[0] + Math.cos(t) * 2.85, table[1] + Math.sin(t) * 2.85]); }
+  const seats = []; for (let i = 0; i < 10; i++) { const t = Math.PI * (0.82 + i * (1.36 / 9)); seats.push([table[0] + Math.cos(t) * 2.85, table[1] + Math.sin(t) * 2.85]); }
   // furniture: k = kind (the theme draws it), occ = can hide a character standing behind it
   const A = [
     // newsroom
@@ -4720,6 +4727,8 @@ const HQ_L = (() => {
 })();
 const HQ_ROOMS = HQ_L.rooms;
 const TABLE = HQ_L.table, THRONE = HQ_L.throne, SEATS = HQ_L.seats;
+// each Council member has a fixed seat; the Analyst sits facing the throne
+const SEAT_OF = { hawk: 0, surfer: 1, rocket: 2, scoop: 3, shield: 4, ai: 5, prof: 6, doubt: 7, guard: 8, chart: 9 };
 function hqPath(a, b) { // breadth-first over the hallway graph
   if (a === b) return [a];
   const adj = {}; for (const [x, y] of HQ_L.edges) { (adj[x] = adj[x] || []).push(y); (adj[y] = adj[y] || []).push(x); }
@@ -5582,6 +5591,10 @@ const CAST = {
       shield: { shirt: '#9AA6B8', pants: '#2A2D33', blazer: '#2A2D33', hat: 'cap', hatCol: '#2A2D33', prop: 'shield', face: 'serious' },
       prof: { shirt: '#F5F5F0', pants: '#3A3F48', blazer: '#3DDC97', tie: '#B5523B', face: 'glasses', hairCol: '#D9D9D9', prop: 'clipboard' },
       doubt: { shirt: '#B48CFF', pants: '#1A1A1A', face: 'skeptic', hairCol: '#141414', prop: null },
+      ai: { shirt: '#2A2D33', pants: '#1A1A1A', blazer: '#FF9F1C', face: 'glasses', hat: 'headset', prop: 'tablet', hairCol: '#141414' },
+      hawk: { shirt: '#E85D75', pants: '#2A2D33', blazer: '#8A2A3E', face: 'glasses', prop: 'tablet', hairCol: '#3A2A22', badge: 1 },
+      guard: { shirt: '#F5F5F0', pants: '#1F3A3A', blazer: '#2F6E6C', tie: '#5BC0BE', face: 'serious', prop: 'clipboard', hairCol: '#8A8A8A' },
+      chart: { shirt: '#C3E88D', pants: '#3A3F48', face: 'glasses', prop: 'tablet', hat: 'cap', hatCol: '#4A5A2A' },
     },
     chair: { shirt: '#FF9F1C', pants: '#2A2D33', blazer: '#FF9F1C', tie: '#2A2D33', hat: 'crown', face: 'glasses', prop: 'gavel' },
     sign: 'card',
@@ -5595,6 +5608,10 @@ const CAST = {
       shield: { shirt: '#9AA6B8', pants: '#4A5366', belt: '#1A1E26', hat: 'knight', hatCol: '#5A6478', prop: 'shield', face: 'serious', badge: 2 },
       prof: { shirt: '#3DDC97', pants: '#1F5A44', belt: '#1A1E26', face: 'goggles', prop: 'pda', badge: 2, hairCol: '#D9D9D9' },
       doubt: { shirt: '#B48CFF', pants: '#5A3A8A', skin: '#8FD6A0', face: 'alien', hat: 'alien', hair: 0 },
+      ai: { shirt: '#C9D2E6', pants: '#8A93A6', skin: '#B8C4D8', face: 'visor', belt: '#FF9F1C', badge: 2, hair: 0, helmet: '#FF9F1C' },
+      hawk: { shirt: '#E85D75', pants: '#6A2A3A', belt: '#1A1E26', hat: 'headset', face: 'visor', helmet: '#E85D75', badge: 2 },
+      guard: { shirt: '#5BC0BE', pants: '#2A5A5A', belt: '#1A1E26', hat: 'knight', hatCol: '#3A7A78', prop: 'shield', face: 'serious', badge: 2 },
+      chart: { shirt: '#C3E88D', pants: '#4A5A2A', belt: '#1A1E26', face: 'goggles', prop: 'pda', badge: 2, hairCol: '#6A4A2A' },
     },
     chair: { shirt: '#FF9F1C', pants: '#7A4A10', belt: '#1A1E26', hat: 'captain', hatCol: '#FF9F1C', face: 'normal', prop: 'gavel', crownToo: 1, badge: 2 },
     sign: 'holo',
@@ -5608,6 +5625,10 @@ const CAST = {
       shield: { shirt: '#9AA6B8', pants: '#5A6478', hat: 'knight', hatCol: '#B8C2CE', prop: 'shield', face: 'hidden', armor: 1 },
       prof: { shirt: '#3DDC97', pants: '#2A6A4A', robe: '#2A8A5A', hat: 'wizard', hatCol: '#2A8A5A', prop: 'staff', face: 'wizard', hairCol: '#EDEDED' },
       doubt: { shirt: '#B48CFF', pants: '#FFD646', hat: 'jester', hatCol: '#B48CFF', face: 'skeptic' },
+      ai: { shirt: '#6A3A8A', pants: '#4A2A6A', robe: '#7A4AA8', hat: 'hood', hatCol: '#5A2A7A', prop: 'staff', face: 'normal' },
+      hawk: { shirt: '#E85D75', pants: '#5A3A22', belt: '#3A2A1A', hat: 'hood', hatCol: '#8A2A3E', prop: 'scroll', face: 'normal' },
+      guard: { shirt: '#5BC0BE', pants: '#5A6478', hat: 'knight', hatCol: '#7FA8A6', prop: 'shield', face: 'hidden', armor: 1 },
+      chart: { shirt: '#C3E88D', pants: '#4A3A2A', apron: '#6B4A2A', hat: 'straw', hatCol: '#C9A55A', prop: 'scroll', face: 'beard', hairCol: '#8A6A4A' },
     },
     chair: { shirt: '#FF9F1C', pants: '#7A2A2A', cape: '#9C2B2B', hat: 'crown', face: 'beard', hairCol: '#C98B4A', prop: 'gavel' },
     sign: 'wood',
@@ -5621,6 +5642,10 @@ const CAST = {
       shield: { shirt: '#9AA6B8', pants: '#E84A5F', shorts: 1, hat: 'cap', hatCol: '#E84A5F', prop: 'whistle', face: 'shades', cross: 1 },
       prof: { shirt: '#3DDC97', floral: 1, pants: '#E8E0D0', shorts: 1, hat: 'straw', face: 'beard', hairCol: '#EDEDED', prop: 'staff' },
       doubt: { shirt: '#B48CFF', pants: '#2A2A2A', shorts: 1, hat: 'bandana', hatCol: '#2A2A2A', face: 'patch', prop: 'parrot' },
+      ai: { shirt: '#FF9F1C', floral: 1, pants: '#7A4AA8', shorts: 1, hat: 'flowers', face: 'normal', prop: 'parrot', lei: 1 },
+      hawk: { shirt: '#E85D75', floral: 1, pants: '#2A4A5A', shorts: 1, hat: 'bandana', hatCol: '#E85D75', face: 'shades', prop: 'coffee' },
+      guard: { shirt: '#5BC0BE', pants: '#E84A5F', shorts: 1, hat: 'cap', hatCol: '#2F6E6C', prop: 'whistle', face: 'serious', cross: 1 },
+      chart: { shirt: '#C3E88D', floral: 1, pants: '#D9C08A', shorts: 1, hat: 'straw', face: 'normal', prop: 'fish', hairCol: '#5A3A22' },
     },
     chair: { shirt: '#FF9F1C', floral: 1, pants: '#7A4A28', shorts: 1, hat: 'flowers', crownToo: 1, face: 'shades', prop: 'gavel', lei: 1 },
     sign: 'surf',
@@ -5777,14 +5802,17 @@ function drawPerson(iso, a, th, o = {}) {
 }
 let _hqCalm = false; const st_calm = () => _hqCalm;
 function drawSign(iso, a, topZ, style) {
-  const g = iso.g, s = iso.zoom, lift = Math.max(0, 0.15 - (a.signT || 0)) * 2, [cx, cy] = iso.P(a.x + 0.32, a.y - 0.1, topZ + 0.45 + lift), v = a.sign;
+  // heavier votes get a bigger sign
+  const W = a.signW, g = iso.g, s = iso.zoom * (W ? clamp(0.62 + 0.38 * W, 0.8, 1.4) : 1), lift = Math.max(0, 0.15 - (a.signT || 0)) * 2, [cx, cy] = iso.P(a.x + 0.32, a.y - 0.1, topZ + 0.45 + lift), v = a.sign;
   const c = v === 'yes' ? '#3DDC97' : v === 'no' ? '#FF5C77' : '#8E81A8', word = v === 'yes' ? 'YES' : v === 'no' ? 'NO' : '–';
   g.fillStyle = style === 'holo' ? rgba(c, 0.5) : '#5B4A33'; g.fillRect(cx - 1 * s, cy, 2 * s, 15 * s);
   if (style === 'holo') { g.save(); g.globalCompositeOperation = 'lighter'; g.fillStyle = rgba(c, 0.35); g.fillRect(cx - 12 * s, cy - 14 * s, 24 * s, 18 * s); g.strokeStyle = c; g.lineWidth = 1.5 * s; g.strokeRect(cx - 12 * s, cy - 14 * s, 24 * s, 18 * s); g.restore(); }
   else if (style === 'wood') { g.fillStyle = '#B88A5A'; g.fillRect(cx - 13 * s, cy - 14 * s, 26 * s, 17 * s); g.strokeStyle = '#6B4A2A'; g.lineWidth = 2 * s; g.strokeRect(cx - 13 * s, cy - 14 * s, 26 * s, 17 * s); }
   else if (style === 'surf') { g.fillStyle = c; g.beginPath(); g.ellipse(cx, cy - 6 * s, 14 * s, 9 * s, 0, 0, 7); g.fill(); g.strokeStyle = '#fff'; g.lineWidth = 1.6 * s; g.stroke(); }
   else { g.beginPath(); g.arc(cx, cy - 5 * s, 10 * s, 0, 7); g.fillStyle = c; g.fill(); g.lineWidth = 2 * s; g.strokeStyle = '#fff'; g.stroke(); }
-  g.fillStyle = style === 'wood' ? c : '#fff'; g.font = `800 ${7.5 * s}px ${style === 'wood' ? SERIF : FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(word, cx, cy - 5 * s); g.textAlign = 'left'; g.textBaseline = 'alphabetic';
+  g.fillStyle = style === 'wood' ? c : '#fff'; g.font = `800 ${7.5 * s}px ${style === 'wood' ? SERIF : FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(word, cx, cy - 5 * s);
+  if (W && Math.abs(W - 1) >= 0.15) { const t = '×' + W.toFixed(1), z = iso.zoom; g.font = `800 ${8 * z}px ${FONT}`; const tw = g.measureText(t).width; g.fillStyle = 'rgba(20,14,36,.82)'; g.beginPath(); g.roundRect ? g.roundRect(cx + 11 * s, cy - 15 * s, tw + 6 * z, 11 * z, 4 * z) : g.rect(cx + 11 * s, cy - 15 * s, tw + 6 * z, 11 * z); g.fill(); g.fillStyle = W > 1 ? '#FFD646' : '#B9B2CC'; g.textAlign = 'left'; g.fillText(t, cx + 11 * s + 3 * z, cy - 15 * s + 5.5 * z); }
+  g.textAlign = 'left'; g.textBaseline = 'alphabetic';
 }
 
 // ===================================================================
@@ -5814,7 +5842,7 @@ const VOICE = {
     },
     quip: { market: s => `SPY is ${s} today. ${parseFloat(s) >= 0 ? 'Green screens.' : 'Rough tape.'}`, own: r => `I'm ${r} since launch.`, hold: (sym, ch) => `${sym} is ${ch} today.`, next: n => `Next call ${n}.`, sleep: ['Out of office.', 'On PTO. Back when you unpause me.'], fluff: ['Coffee first, then charts.', 'Who keeps scheduling 4pm meetings?', 'Another reply-all. Really?', 'The printer is jammed again.'] },
     convo: { ask: sym => `How's ${sym} looking?`, answer: (sym, ch, r) => `${ch} today, ${r} overall. ${parseFloat(ch) >= 0 ? 'Holding.' : 'Watching it.'}`, askMkt: () => 'What do you make of the market?', answerMkt: (s, r) => `SPY ${s}. I'm ${r} overall, sticking to the plan.` },
-    roles: { surfer: 'Trend analyst', rocket: 'Momentum trader', scoop: 'News desk', shield: 'Chief risk officer', prof: 'Quant', doubt: 'Short seller' },
+    roles: { hawk: 'AI · news hawk', guard: 'AI · risk officer', chart: 'AI · chartist', ai: 'AI analyst', surfer: 'Trend analyst', rocket: 'Momentum trader', scoop: 'News desk', shield: 'Chief risk officer', prof: 'Quant', doubt: 'Short seller' },
   },
   space: {
     wallet: 'our reserves',
@@ -5835,7 +5863,7 @@ const VOICE = {
     },
     quip: { market: s => `Fleet index (SPY) at ${s} today.`, own: r => `Mission return so far: ${r}.`, hold: (sym, ch) => `${sym} reading ${ch} on the scanners.`, next: n => `Next jump ${n}.`, sleep: ['In cryosleep.', 'Hibernating until reactivated.'], fluff: ['The food synth made mango again.', 'Who left the airlock light on?', 'Running diagnostics. All green.', 'Smooth flying today.'] },
     convo: { ask: sym => `Status on ${sym}?`, answer: (sym, ch, r) => `${ch} today, ${r} overall. ${parseFloat(ch) >= 0 ? 'Holding orbit.' : 'Monitoring.'}`, askMkt: () => 'How are the markets looking from up here?', answerMkt: (s, r) => `SPY ${s}. I'm ${r} overall. Course unchanged.` },
-    roles: { surfer: 'Pilot · trend', rocket: 'Engineer · momentum', scoop: 'Comms officer · news', shield: 'Security chief · risk', prof: 'Science officer · stats', doubt: 'Alien advisor · contrarian' },
+    roles: { hawk: 'Sensor array · AI news', guard: 'Shield computer · AI risk', chart: 'Navigator · AI charts', ai: 'Ship computer · AI', surfer: 'Pilot · trend', rocket: 'Engineer · momentum', scoop: 'Comms officer · news', shield: 'Security chief · risk', prof: 'Science officer · stats', doubt: 'Alien advisor · contrarian' },
   },
   village: {
     wallet: 'the purse',
@@ -5856,7 +5884,7 @@ const VOICE = {
     },
     quip: { market: s => `The great market (SPY) moved ${s} today.`, own: r => `My purse is ${r} since I began.`, hold: (sym, ch) => `Our ${sym} fetches ${ch} today.`, next: n => `I'll trade again ${n}.`, sleep: ['Napping by the fire.', 'Resting my feet till I\'m called.'], fluff: ['Fine weather for market day.', 'The mangoes are ripe this season.', 'Mind the goat on the road.', 'The blacksmith is loud today.'] },
     convo: { ask: sym => `How fares our ${sym}?`, answer: (sym, ch, r) => `${ch} today, ${r} overall. ${parseFloat(ch) >= 0 ? 'We keep it.' : 'We watch it close.'}`, askMkt: () => 'What news of the great market?', answerMkt: (s, r) => `SPY ${s} today. I'm ${r} overall. We stay the course.` },
-    roles: { surfer: 'Riverman · trend', rocket: 'Blacksmith · momentum', scoop: 'Town crier · news', shield: 'Knight · risk', prof: 'Wizard · stats', doubt: 'Jester · contrarian' },
+    roles: { hawk: 'Raven keeper · AI news', guard: 'Watchman · AI risk', chart: 'Mapmaker · AI charts', ai: 'Oracle · AI', surfer: 'Riverman · trend', rocket: 'Blacksmith · momentum', scoop: 'Town crier · news', shield: 'Knight · risk', prof: 'Wizard · stats', doubt: 'Jester · contrarian' },
   },
   island: {
     wallet: 'the stash',
@@ -5877,19 +5905,44 @@ const VOICE = {
     },
     quip: { market: s => `SPY's ${s} today. ${parseFloat(s) >= 0 ? 'Good vibes.' : 'Bit choppy.'}`, own: r => `Up to ${r} since I washed ashore.`, hold: (sym, ch) => `${sym} is ${ch} today.`, next: n => `Next trade ${n}.`, sleep: ['Napping in the hammock.', 'Do not disturb. Sunbathing.'], fluff: ['Perfect day for it.', 'Anyone seen my flip flop?', 'Coconut break.', 'The fish are biting today.'] },
     convo: { ask: sym => `How's ${sym} treating you?`, answer: (sym, ch, r) => `${ch} today, ${r} overall. ${parseFloat(ch) >= 0 ? 'Riding it.' : 'Keeping an eye on it.'}`, askMkt: () => 'How\'s the market, friend?', answerMkt: (s, r) => `SPY ${s}. I'm ${r} overall. No stress.` },
-    roles: { surfer: 'Surfer · trend', rocket: 'Fisher · momentum', scoop: 'Gossip (with parrot) · news', shield: 'Lifeguard · risk', prof: 'Old sage · stats', doubt: 'Pirate · contrarian' },
+    roles: { hawk: 'Dockhand · AI news', guard: 'Storm watcher · AI risk', chart: 'Tide reader · AI charts', ai: 'Fortune teller · AI', surfer: 'Surfer · trend', rocket: 'Fisher · momentum', scoop: 'Gossip (with parrot) · news', shield: 'Lifeguard · risk', prof: 'Old sage · stats', doubt: 'Pirate · contrarian' },
   },
 };
 const voiceOf = th => VOICE[th.id] || VOICE.office;
+// weighted votes: some members count for more. Used when it's on and the session has weights.
+const isWeighted = s => App.S?.settings?.councilWeighted !== false && s?.wy != null;
+const leansNo = s => isWeighted(s) ? s.wn > s.wy : s.no > s.yes;
+const tallyOf = s => isWeighted(s) ? `${(+s.wy).toFixed(1)}–${(+s.wn).toFixed(1)}` : `${s.yes}–${s.no}`;
+const weightNote = v => v.w != null && v.vote !== 'pass' && Math.abs(v.w - 1) >= 0.15 ? `counts ×${(+v.w).toFixed(1)}${v.wr?.length ? ': ' + v.wr.join(', ') : ''}` : '';
+// the AI members: how each one opens a vote in each world
+const AI_K = new Set(['ai', 'hawk', 'guard', 'chart']);
+const AI_PRE = {
+  office: { ai: ['Model says:', 'Running the numbers:'], hawk: ['Wire check:', 'Newsflash:'], guard: ['Risk memo:', 'Downside check:'], chart: ['On the chart:', 'Technically speaking:'] },
+  space: { ai: ['Computing…', 'Ship computer:'], hawk: ['Long-range scan:', 'Intercepted transmission:'], guard: ['Hull integrity check:', 'Shields report:'], chart: ['Star chart reads:', 'Plotting the trajectory:'] },
+  village: { ai: ['The oracle sees:', 'The stars say:'], hawk: ['Word from the road:', 'The ravens bring news:'], guard: ['The watchman warns:', 'From the wall:'], chart: ['The old maps show:', 'By the tally sticks:'] },
+  island: { ai: ['The tiki says:', 'Cards say:'], hawk: ['Message in a bottle:', 'Heard at the docks:'], guard: ['Storm watch:', 'From the lifeguard tower:'], chart: ['Reading the tides:', 'By the tide chart:'] },
+};
+// the Analyst's rebuttal, and how the member it called out answers back
+const DEBATE = {
+  office: { open: (n, a) => `Hold on, ${n}. ${a}`, keep: ['I stand by my number.', 'Agree to disagree.', 'Noted. My call stays.'], fair: ['Fair point.', "Okay, that's a real risk.", 'Hm. Point taken.'] },
+  space: { open: (n, a) => `Objection logged, ${n}: ${a}`, keep: ['Recalculating… no, I stand by it.', 'Negative, computer. Holding my reading.', 'Logged. Not changing course.'], fair: ['Acknowledged.', 'Copy that. Fair reading.', 'Affirmative, good catch.'] },
+  village: { open: (n, a) => `Hark, ${n}! ${a}`, keep: ['Hmph! I stand by my word.', 'Say what you will, oracle.', 'My gut has served me well.'], fair: ['Mayhaps you speak true.', 'Aye… fair enough.', 'The oracle has a point.'] },
+  island: { open: (n, a) => `Whoa there, ${n}. ${a}`, keep: ['Nah, I still feel it.', 'Respectfully, no, brah.', 'The vibes say otherwise.'], fair: ['Eh, fair, brah.', 'Okay, okay, I hear you.', 'Shaka, good point.'] },
+};
 // themed versions of every line, falling back to the original wording when something's unknown
 const SAY = {
   phase(th, ph, seed = Math.random() * 100) { const L = voiceOf(th).phase[ph]; return L ? pickOf(L, seed) : null; },
-  vote(th, v) { const f = v?.c && voiceOf(th).vote[v.c]; try { return f ? f(v.v || {}) : v.line; } catch (e) { return v.line; } },
+  vote(th, v) {
+    if (AI_K.has(v?.k)) { const P = (AI_PRE[th.id] || AI_PRE.office)[v.k] || ['AI:'];
+      if (v.c === 'ai_cap') return { office: 'Out of AI budget today. Abstaining.', space: 'Power reserves low. Standing by.', village: 'My visions are spent for today.', island: 'Crystal ball needs a nap.' }[th.id] || v.line;
+      if (v.c === 'ai_err') return { office: "Can't reach the model. Abstaining.", space: 'Uplink lost. No reading.', village: 'The mists are too thick today.', island: 'Signal lost out here.' }[th.id] || v.line;
+      return `${P[(v.line || '').length % P.length]} ${v.line}${v.size && v.size < 1 ? ` (${Math.round(v.size * 100)}% size)` : ''}`; }
+    const f = v?.c && voiceOf(th).vote[v.c]; try { return f ? f(v.v || {}) : v.line; } catch (e) { return v.line; } },
   chair(th, s, verdict) {
-    const V = voiceOf(th), t = `${s.yes}–${s.no}`, raw = String(s.chair || ''), wallet = d => d.replace(/the wallet/g, V.wallet);
-    if (verdict === 'APPROVED') return V.chair.approved(t, wallet((raw.match(/Approved [\d–-]+\.\s*(.*)$/) || [])[1] || ''));
+    const V = voiceOf(th), t = tallyOf(s), raw = String(s.chair || ''), wallet = d => d.replace(/the wallet/g, V.wallet);
+    if (verdict === 'APPROVED') return V.chair.approved(t, wallet((raw.match(/Approved [\d.–-]+?\.\s+(.*)$/) || [])[1] || ''));
     if (verdict === 'OVERRULED') return V.chair.overruled(t);
-    if (verdict === 'REJECTED') return V.chair.rejected(t, (raw.match(/Rejected [\d–-]+\.\s*(.*)$/) || [])[1] || '');
+    if (verdict === 'REJECTED') return V.chair.rejected(t, (raw.match(/Rejected [\d.–-]+?\.\s+(.*)$/) || [])[1] || '');
     if (verdict === 'SELL') return V.chair.selling((raw.match(/^Selling\.\s*(.*)$/) || [])[1] || '');
     return V.chair.holding(t);
   },
@@ -5913,6 +5966,9 @@ const SAY = {
   alert(th, title) { return voiceOf(th).alert(title); },
   report(th, title) { return voiceOf(th).report(title); },
   role(th, k) { return voiceOf(th).roles[k]; },
+  debate(th, name, arg) { return (DEBATE[th.id] || DEBATE.office).open(name, arg); },
+  // if the Analyst ended up on their side anyway, they take the point; otherwise they hold their ground
+  react(th, v) { const D = DEBATE[th.id] || DEBATE.office; return pickOf(v.vote === v.vsVote || v.vote === 'pass' ? D.fair : D.keep, (v.arg || '').length); },
 };
 const price$ = v => (typeof price === 'function' ? price(v) : '$' + (+v).toFixed(2));
 // ---------- idle chatter, built from live data ----------
@@ -5937,6 +5993,44 @@ function hqChatter(st) {
   if (r < 0.82 && b.next) return { a: A, text: Q.next(typeof nextRunText === 'function' ? nextRunText(b.next).replace(/^Decides /, '').replace(/^Next decision /, '') : 'soon') };
   return { a: A, text: pickOf(Q.fluff, Math.random() * 9) };
 }
+
+// ---------- names you gave the Council ----------
+const NAME_DEFAULT = { surfer: 'Surfer', rocket: 'Rocket', scoop: 'Scoop', shield: 'Shield', prof: 'Professor', doubt: 'Doubt', ai: 'Analyst', hawk: 'News Hawk', guard: 'Risk Officer', chart: 'Chartist', chair: 'Big Mango' };
+const NAME_ORDER = ['chair', 'surfer', 'rocket', 'scoop', 'shield', 'prof', 'doubt', 'ai', 'hawk', 'guard', 'chart'];
+const curThemeId = () => (HQT[store.get('hqTheme')] || HQT.office).id;
+function memberName(k, themeId = curThemeId()) {
+  const N = App.S?.councilNames || { sync: true, all: {} };
+  return (!N.sync && N.themes?.[themeId]?.[k]) || N.all?.[k] || NAME_DEFAULT[k] || k;
+}
+async function editCouncilNames(onSaved) {
+  const N0 = JSON.parse(JSON.stringify(App.S?.councilNames || { sync: true, all: {}, themes: {} }));
+  N0.all = N0.all || {}; N0.themes = N0.themes || {};
+  let sync = N0.sync !== false, tab = curThemeId();
+  const roleOf = k => k === 'chair' ? 'The chair' : SAY.role(HQT[sync ? curThemeId() : tab] || HQT.office, k) || '';
+  const sh = sheet({ title: 'Council names', tall: true, html: '<div id="cn-body"></div>', foot: `<button class="btn btn-primary btn-block btn-lg" id="cn-save">Save names</button>` });
+  const body = $('#cn-body', sh.body);
+  const read = () => { const set = {}; for (const el of $$('.cn-in', body)) if (el.value.trim()) set[el.dataset.k] = el.value.trim(); if (sync) N0.all = set; else N0.themes[tab] = set; };
+  const draw = () => {
+    const vals = sync ? N0.all : (N0.themes[tab] || {});
+    body.innerHTML = `<div class="group"><div class="cell"><div class="main"><div class="title">Same names in every theme</div><div class="sub">Turn off to give each world its own names</div></div>${sw(sync, 'id="cn-sync"')}</div></div>
+      ${sync ? '' : `<div class="mt12">${seg('cnTheme', Object.values(HQT).map(t => [t.id, t.name]), tab)}</div>`}
+      <div class="mt12">${NAME_ORDER.map(k => `<label class="field"><span>${h(roleOf(k))}</span><input class="cn-in" data-k="${k}" maxlength="24" autocomplete="off" placeholder="${h((!sync && N0.all[k]) || NAME_DEFAULT[k])}" value="${h(vals[k] || '')}"></label>`).join('')}</div>
+      <p class="note">Leave a box empty to keep the ${sync ? 'default' : 'shared'} name. Up to 24 characters.</p><button class="btn btn-quiet btn-block mt8" id="cn-reset">Reset ${sync ? 'all names' : 'this theme'}</button>`;
+    raf(() => placeThumbs(body));
+  };
+  body.addEventListener('click', e => {
+    if (e.target.closest('#cn-sync')) { read(); sync = !sync; draw(); buzz(5); }
+    if (e.target.closest('#cn-reset')) { if (sync) N0.all = {}; else N0.themes[tab] = {}; draw(); }
+  });
+  onSeg(body, 'cnTheme', v => { read(); tab = v; draw(); });
+  draw();
+  $('#cn-save', sh.el).addEventListener('click', async e => {
+    read(); busy(e.currentTarget, true);
+    try { const r = await post('council/names', { sync, all: N0.all, themes: N0.themes }); App.S.councilNames = r; toast('Names saved'); sh.close ? sh.close() : history.back(); onSaved && onSaved(); emit('settings'); }
+    catch (x) { busy(e.currentTarget, false); toastErr(x); }
+  });
+}
+ACT.councilNames = () => editCouncilNames(() => { const top = Router.layers.filter(l => l.type === 'page').pop()?.page; if (top?.hq) PAGES.hq.renameAll(top); });
 
 // ===================================================================
 // Mango HQ: your bots as little workers in a themed isometric world, and the Council that votes
@@ -6060,7 +6154,8 @@ PAGES.hq = {
       const d = await api('hq'); st.data = d;
       const real = isRealSpace(), bots = d.bots.filter(b => real ? b.broker : !b.broker);
       st.bots = bots; st.tryouts = bots.find(b => b.auto)?.tryouts || [];
-      if (!st.members.length) st.members = d.members.map((m, i) => new Agent({ ...m, id: 100 + i, persona: true, color: m.color, x: SEATS[i][0], y: SEATS[i][1], room: 'council', speed: 0, sit: true, seatZ: 0.37, faceIdle: ({ n: 'l', w: 'r', s: 'b', e: 'w' })[HQ_L.chairs.find(c => c.seat === i)?.back] || 'l', seatIdx: i }));
+      if (st.members.map(m => m.k).join() !== d.members.map(m => m.k).join() && !st.session) st.members = d.members.map((m, i) => { const si = SEAT_OF[m.k] ?? i; return new Agent({ ...m, id: 100 + si, persona: true, color: m.color, x: SEATS[si][0], y: SEATS[si][1], room: 'council', speed: 0, sit: true, seatZ: 0.37, faceIdle: ({ n: 'l', w: 'r', s: 'b', e: 'w' })[HQ_L.chairs.find(c => c.seat === si)?.back] || 'l', seatIdx: si }); });
+      if (d.names) App.S.councilNames = d.names; this.renameAll(p);
       for (const b of bots) {
         let a = st.agents.get(b.id);
         if (!a) { a = new Agent({ id: b.id, bot: b, color: hueOf(b.strategy), big: b.auto, hat: b.auto ? null : 'antenna', name: b.name }); const home = this.homeOf(b); a.mood = b.status === 'paused' ? 'sleep' : 'ok'; a.place(home, hqSpot(home, a.mood === 'sleep', a.id)); st.agents.set(b.id, a); }
@@ -6132,20 +6227,31 @@ PAGES.hq = {
   // ---------- council sessions ----------
   runSession(p, s) {
     const st = p.hq, bot = st.bots?.find(b => b.id === s.botId);
-    st.session = { s, t: 0, i: -1, done: false };
-    const tally = { yes: 0, no: 0 };
+    // the Analyst's rebuttal plays out before its vote: it calls someone out, they answer, then it votes
+    const beats = s.votes.flatMap(v => v.k === 'ai' && v.vs && v.arg ? [{ arg: v }, { react: v }, { v }] : [{ v }]);
+    st.session = { s, t: 0, i: -1, done: false, beats };
+    const tally = { yes: 0, no: 0 }, weighted = isWeighted(s), fmtT = n => weighted ? n.toFixed(1) : String(n);
     st.members.forEach(m => { m.sign = null; m.mood = 'ok'; });
     const card = $('#hq-case', p.body);
-    const verdict = s.action === 'buy' || s.action === 'add' ? (s.no > s.yes ? 'OVERRULED' : 'APPROVED') : s.action === 'skip' ? 'REJECTED' : s.action === 'sell' || s.action === 'trim' ? 'SELL' : 'HOLD';
+    const verdict = s.action === 'buy' || s.action === 'add' ? (leansNo(s) ? 'OVERRULED' : 'APPROVED') : s.action === 'skip' ? 'REJECTED' : s.action === 'sell' || s.action === 'trim' ? 'SELL' : 'HOLD';
     const vClass = verdict === 'APPROVED' ? 'up' : verdict === 'REJECTED' || verdict === 'SELL' ? 'dn' : 'ac';
-    const draw = () => { card.innerHTML = `<div class="hc-q"><span class="t-cap">${h(SAY.asks(st.theme, bot?.name || 'A bot'))}${s.replay ? ' · replay' : ''}</span><b>${s.action === 'sell' || s.action === 'trim' ? 'Sell' : 'Buy'} ${h(s.sym)} at ${price(s.price)}?</b></div><div class="hc-tally"><span class="up">YES ${tally.yes}</span><i style="--y:${tally.yes};--n:${tally.no}"></i><span class="dn">${tally.no} NO</span></div>${st.session.done ? `<div class="hc-stamp ${vClass}">${h(SAY.stamp(st.theme, verdict))}</div><p class="hc-chair">${icon('flag')}${h(SAY.chair(st.theme, s, verdict))}</p>` : ''}${s.settled && st.session.done ? `<p class="t-foot">A week later it moved ${pct(s.result * 100)}. ${Object.entries(s.right || {}).filter(([, v]) => v).length} of ${Object.keys(s.right || {}).length} called it.</p>` : ''}`; };
+    const draw = () => { card.innerHTML = `<div class="hc-q"><span class="t-cap">${h(SAY.asks(st.theme, bot?.name || 'A bot'))}${s.replay ? ' · replay' : ''}</span><b>${s.action === 'sell' || s.action === 'trim' ? 'Sell' : 'Buy'} ${h(s.sym)} at ${price(s.price)}?</b></div><div class="hc-tally"><span class="up">YES ${fmtT(tally.yes)}</span><i style="--y:${tally.yes};--n:${tally.no}"></i><span class="dn">${fmtT(tally.no)} NO</span></div>${st.session.done ? `<div class="hc-stamp ${vClass}">${h(SAY.stamp(st.theme, verdict))}</div><p class="hc-chair">${icon('flag')}${h(SAY.chair(st.theme, s, verdict))}</p>` : ''}${s.settled && st.session.done ? `<p class="t-foot">A week later it moved ${pct(s.result * 100)}. ${Object.entries(s.right || {}).filter(([, v]) => v).length} of ${Object.keys(s.right || {}).length} called it.</p>` : ''}`; };
     card.classList.toggle('hidden', !!s.replay && st.mode === 'floor'); draw();
     st.session.next = () => {
       const ss = st.session; ss.i++;
-      if (ss.i < s.votes.length) {
-        const v = s.votes[ss.i], m = st.members.find(x => x.k === v.k); if (!m) return ss.next();
-        m.sign = v.vote; m.signT = 0; m.mood = v.vote === 'yes' ? 'happy' : v.vote === 'no' ? 'sad' : 'ok';
-        if (v.vote === 'yes') tally.yes++; if (v.vote === 'no') tally.no++;
+      st.debate = null;
+      if (ss.i < beats.length) {
+        const B = beats[ss.i];
+        if (B.arg || B.react) {
+          const an = st.members.find(x => x.k === 'ai'), tg = st.members.find(x => x.k === B.arg?.vs || x.k === B.react?.vs); if (!an || !tg) return ss.next();
+          st.debate = { a: an, b: tg, t: 0 };
+          if (B.arg) { an.mood = 'ok'; this.say(p, an, SAY.debate(st.theme, memberName(tg.k, st.theme.id), B.arg.arg), 'line debate'); buzz(6); }
+          else { tg.mood = 'ok'; this.say(p, tg, SAY.react(st.theme, B.react), `line ${B.react.vsVote || ''}`); }
+          return;
+        }
+        const v = B.v, m = st.members.find(x => x.k === v.k); if (!m) return ss.next();
+        m.sign = v.vote; m.signT = 0; m.signW = weighted && v.vote !== 'pass' ? v.w : null; m.mood = v.vote === 'yes' ? 'happy' : v.vote === 'no' ? 'sad' : 'ok';
+        const wt = weighted ? (v.w ?? 1) : 1; if (v.vote === 'yes') tally.yes += wt; if (v.vote === 'no') tally.no += wt;
         this.say(p, m, SAY.vote(st.theme, v), `line ${v.vote}`); draw(); buzz(4);
       } else if (!ss.done) {
         ss.done = true; st.chair.mood = verdict === 'APPROVED' ? 'happy' : verdict === 'REJECTED' ? 'sad' : 'ok'; st.chair.gavel = 1;
@@ -6178,7 +6284,7 @@ PAGES.hq = {
     for (const c of [st.cache, st.hi && st.cache && st.hi.key === st.cache.key ? st.hi : null]) if (c) { const k = iso.zoom / c.zc; g.drawImage(c.c, iso.w / 2 + iso.ox - c.X0 * k, iso.h / 2 + iso.oy - c.Y0 * k, c.c.width * k, c.c.height * k); }
     // session timing
     if (!st.session && st.queue.length) this.runSession(p, st.queue.shift());
-    if (st.session) { const ss = st.session; ss.t += dt; const beat = ss.done ? 4.5 : 1.35; if (ss.t >= beat) { ss.t = 0; if (ss.done) { st.session = null; st.members.forEach(mm => { mm.sign = null; }); st.councilGlow = null; if (!st.queue.length) setTimeout(() => { if (!p.hq.session) $('#hq-case', p.body)?.classList.add('hidden'); }, 400); } else ss.next(); } }
+    if (st.session) { const ss = st.session; ss.t += dt; const beat = ss.done ? 4.5 : 1.35; if (ss.t >= beat) { ss.t = 0; if (ss.done) { st.session = null; st.debate = null; st.members.forEach(mm => { mm.sign = null; mm.signW = null; }); st.councilGlow = null; if (!st.queue.length) setTimeout(() => { if (!p.hq.session) $('#hq-case', p.body)?.classList.add('hidden'); }, 400); } else ss.next(); } }
     // move bots, idle wander
     for (const a of st.agents.values()) { const moving = a.step(dt); if (!moving && !a.busy) { a.wait -= dt; if (a.wait <= 0) { a.wait = a.sit ? 14 + Math.random() * 18 : 5 + Math.random() * 6; if (a.mood !== 'sleep') a.goRoom(a.room); } } }
     // idle chatter: bots remark on the market, their holdings and each other, in the theme's voice
@@ -6187,6 +6293,11 @@ PAGES.hq = {
     st.chair.sitK = 1; for (const mm of st.members) { mm.sitK = 1; mm.t += dt; if (mm.sign) mm.signT = (mm.signT || 0) + dt; }
     st.chair.t += dt;
     this.drawPeople(p);
+    // during the Analyst's rebuttal, a dashed line runs from it to the member it's arguing with
+    if (st.debate) { const D = st.debate; D.t += dt; const [x1, y1] = D.a.headScreen || iso.P(D.a.x, D.a.y, 2), [x2, y2] = D.b.headScreen || iso.P(D.b.x, D.b.y, 2), k = iso.zoom, mx = (x1 + x2) / 2, my = Math.min(y1, y2) - (34 + Math.hypot(x2 - x1, y2 - y1) * 0.18) * k, a = Math.min(1, D.t * 3);
+      g.save(); g.globalAlpha = a; g.lineCap = 'round'; g.strokeStyle = 'rgba(255,159,28,.9)'; g.lineWidth = 2.6 * k; g.setLineDash([7 * k, 6 * k]); g.lineDashOffset = st.calm ? 0 : -D.t * 40 * k;
+      g.beginPath(); g.moveTo(x1, y1); g.quadraticCurveTo(mx, my, x2, y2); g.stroke(); g.setLineDash([]);
+      const ang = Math.atan2(y2 - my, x2 - mx); g.fillStyle = 'rgba(255,159,28,.95)'; g.beginPath(); g.moveTo(x2, y2); g.lineTo(x2 - Math.cos(ang - 0.45) * 11 * k, y2 - Math.sin(ang - 0.45) * 11 * k); g.lineTo(x2 - Math.cos(ang + 0.45) * 11 * k, y2 - Math.sin(ang + 0.45) * 11 * k); g.closePath(); g.fill(); g.restore(); }
     if (st.chair.gavel > 0) { st.chair.gavel -= dt * 2; const [cx, cy] = iso.P(THRONE[0] + 0.55, THRONE[1] + 0.15, 1.3 + Math.max(0, st.chair.gavel) * 0.5); g.fillStyle = '#8B5A2B'; g.save(); g.translate(cx, cy); g.rotate(-st.chair.gavel); g.fillRect(-8 * iso.zoom, -3 * iso.zoom, 16 * iso.zoom, 6 * iso.zoom); g.restore(); }
     // particles
     st.parts = st.parts.filter(q => (q.life -= dt) > 0);
@@ -6262,9 +6373,10 @@ PAGES.hq = {
       if (S.dyn && (it.dyn || it.item) && !it.part) th.dyn(iso, S.o, st, st.t);
     }
   },
+  renameAll(p) { const st = p.hq; if (st.chair) st.chair.name = memberName('chair', st.theme.id); for (const m of st.members) m.name = memberName(m.k, st.theme.id); if (st.mode === 'council') this.loadBoard(p); },
   setTheme(p, id) {
     const st = p.hq; if (!HQT[id] || st.theme.id === id) return;
-    st.theme = HQT[id]; store.set('hqTheme', id); st.cache = null; st.hi = null; st._stars = null; st._clouds = null; st.amb = null;
+    st.theme = HQT[id]; store.set('hqTheme', id); this.renameAll(p); st.cache = null; st.hi = null; st._stars = null; st._clouds = null; st.amb = null;
     $('#hq', p.body).dataset.hqt = id;
     for (const L of st.labels || []) L.el.remove(); st.labels = null;
     for (const b of st.bubbles) b.el.remove(); st.bubbles = [];
@@ -6312,6 +6424,7 @@ PAGES.hq = {
       for (let k = 0; k < 5; k++) { const r = [x - w / 2, y - hh, x + w / 2, y], q = bplaced.find(q => r[0] < q[2] && r[2] > q[0] && r[1] < q[3] && r[3] > q[1]); if (!q) break; y = q[1] - 4; }
       bplaced.push([x - w / 2, y - hh, x + w / 2, y]);
       b.el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -100%) scale(${bsc})`;
+      const tx = clamp((ax - x) / bsc, -(b.w / 2 - 16), b.w / 2 - 16); if (Math.abs((b.tx || 0) - tx) > 0.5) { b.tx = tx; b.el.style.setProperty('--tx', tx.toFixed(1) + 'px'); }
     }
   },
   // ---------- camera ----------
@@ -6335,8 +6448,9 @@ PAGES.hq = {
       const b = await api('council/board');
       if (el._min == null) el._min = p.hq.iso.w < 600; el.classList.toggle('min', el._min); el.onclick = e => { if (e.target.closest('.hb-h')) { el._min = !el._min; el.classList.toggle('min', el._min); } };
       el.innerHTML = `<div class="hb-h"><b>Who called it? ${icon('down')}</b><span class="t-cap">${b.settled ? `${b.settled} votes checked a week later` : 'Votes get checked a week after each session'}${b.pending ? ` · ${b.pending} waiting` : ''}</span></div>
-        ${b.members.map(m => `<div class="hb-row" style="--c:${m.color}"><span class="hb-n">${h(m.name)}<small>${h(m.role)}</small></span><i><em style="width:${m.acc == null ? 0 : Math.round(m.acc * 100)}%"></em></i><b class="n">${m.acc == null ? '–' : Math.round(m.acc * 100) + '%'}</b></div>`).join('')}
-        ${b.settled ? `<p class="t-foot">${b.veto.blocked ? `A council veto would have blocked ${b.veto.blocked} buy${b.veto.blocked === 1 ? '' : 's'}${b.veto.blockedAvg != null ? ` that went ${pct(b.veto.blockedAvg * 100)} on average` : ''}` : 'So far the Council hasn\'t voted down any buy the bots made'}${b.veto.wanted ? `, and it wanted ${b.veto.wanted} the bots skipped${b.veto.wantedAvg != null ? ` (${pct(b.veto.wantedAvg * 100)})` : ''}` : ''}. Turn on "Council veto" in a bot's limits to let a majority NO block buys.</p>` : ''}`;
+        ${b.members.map(m => `<div class="hb-row" style="--c:${m.color}"><span class="hb-n">${h(memberName(m.k))}<small>${h(m.role)}</small></span><i><em style="width:${m.acc == null ? 0 : Math.round(m.acc * 100)}%"></em></i><b class="n">${m.acc == null ? '–' : Math.round(m.acc * 100) + '%'}${b.weighted && m.weight && Math.abs(m.weight - 1) >= 0.05 ? `<small class="hb-w${m.weight > 1 ? ' hi' : ''}">×${m.weight.toFixed(1)}</small>` : ''}</b></div>`).join('')}
+        ${(() => { const c = b.card, W = c?.weighted, H = c?.heads; if (!W?.calls) return b.weighted ? '<p class="t-foot">Votes are weighted: track record (after 20 graded votes), the situation and how sure each member is. A scorecard shows up here once sessions get checked.</p>' : ''; const pw = Math.round(W.right / W.calls * 100), ph = H.calls ? Math.round(H.right / H.calls * 100) : null; return `<div class="hb-card"><span><b>${pw}%</b>weighted votes called it</span><span><b>${ph == null ? '–' : ph + '%'}</b>counting heads did</span></div><p class="t-foot">${ph == null ? '' : pw > ph ? 'Weighting is helping. ' : pw < ph ? (b.weighted ? 'Head count is ahead so far. You can turn weighting off in Settings. ' : '') : 'Even so far. '}${b.weighted ? 'The weighted vote decides the council veto and the verdict.' : 'Weighting is off: every vote counts the same.'}</p>`; })()}
+        ${b.settled ? `<p class="t-foot">${b.veto.blocked ? `A council veto would have blocked ${b.veto.blocked} buy${b.veto.blocked === 1 ? '' : 's'}${b.veto.blockedAvg != null ? ` that went ${pct(b.veto.blockedAvg * 100)} on average` : ''}` : 'So far the Council hasn\'t voted down any buy the bots made'}${b.veto.wanted ? `, and it wanted ${b.veto.wanted} the bots skipped${b.veto.wantedAvg != null ? ` (${pct(b.veto.wantedAvg * 100)})` : ''}` : ''}. Turn on "Council veto" in a bot's limits to let a ${b.weighted ? 'weighted ' : ''}majority NO block buys.</p>` : ''}`;
     } catch (e) { el.innerHTML = ''; }
   },
   // Replays the last day of journal entries on the floor at speed.
@@ -6438,8 +6552,8 @@ PAGES.hq = {
     const card = $('#hq-card', p.body); card.classList.remove('hidden'); buzz(6);
     if (a.persona || a.k === 'chair') {
       const m = st.data?.members.find(x => x.k === a.k);
-      card.innerHTML = a.k === 'chair' ? `<div class="hk-h"><b>Big Mango</b><span class="t-cap">The chair</span></div><p class="t-foot">Announces what the bot actually does. The bot's strategy and your limits decide; with "Council veto" on in a bot's limits, a majority NO blocks a buy.</p><button class="btn btn-quiet btn-sm" data-hq="close">Close</button>`
-        : `<div class="hk-h" style="--c:${a.color}"><b>${h(m?.name || a.k)}</b><span class="t-cap">${h(SAY.role(st.theme, a.k) || m?.role || '')}</span></div><p class="t-foot">${h(PERSONA_ABOUT[a.k] || '')}</p><button class="btn btn-quiet btn-sm" data-hq="board">Who called it?</button><button class="btn btn-quiet btn-sm" data-hq="close">Close</button>`;
+      card.innerHTML = a.k === 'chair' ? `<div class="hk-h"><b>${h(memberName('chair'))}</b><span class="t-cap">The chair</span></div><p class="t-foot">Announces what the bot actually does. The bot's strategy and your limits decide; with "Council veto" on in a bot's limits, a majority NO blocks a buy.</p><div class="btns"><button class="btn btn-quiet btn-sm" data-act="councilNames">${icon('edit')}Rename</button><button class="btn btn-quiet btn-sm" data-hq="close">Close</button></div>`
+        : `<div class="hk-h" style="--c:${a.color}"><b>${h(memberName(a.k))}</b><span class="t-cap">${h(SAY.role(st.theme, a.k) || m?.role || '')}</span></div><p class="t-foot">${h(PERSONA_ABOUT[a.k] || '')}</p><div class="btns"><button class="btn btn-quiet btn-sm" data-hq="board">Who called it?</button><button class="btn btn-quiet btn-sm" data-act="councilNames">${icon('edit')}Rename</button><button class="btn btn-quiet btn-sm" data-hq="close">Close</button></div>`;
     } else {
       const b = a.bot, act = b.activity || {};
       card.innerHTML = `<div class="hk-h" style="--c:${a.color}"><b>${h(b.name)}</b><span class="n ${cls(b.ret)}">${money(b.value || 0)} · ${pct(b.ret)}</span></div><div class="hk-act"><i class="tone-${act.tone || 'mu'}"></i><div><b>${h(act.text || b.status)}</b>${act.sub ? `<span>${h(act.sub)}</span>` : ''}</div></div><div class="btns"><button class="btn btn-quiet btn-sm" data-hq="follow">${icon('eye')}Follow</button><button class="btn btn-primary btn-sm" data-hq="open">${icon('bot')}Open bot</button></div>`;
@@ -6455,13 +6569,18 @@ const PERSONA_ABOUT = {
   scoop: 'Reads the news and social mood. NO on serious bad news or gloomy coverage, YES on clearly good press.',
   shield: 'Looks for danger: earnings in the next few days, unusually wild swings, or too much in one position.',
   prof: 'The numbers person: RSI and how far price sits from its 20-day average. NO when stretched, YES when cheap.',
+  ai: 'Claude (AI) speaks last. It reads all the evidence and every other vote, calls out the argument it disagrees with most, then casts its own vote. It has the final say on shrinking a risky buy (never growing one).',
+  hawk: 'Claude (AI) that only sees the news: headlines, the mood and earnings timing. Looks for catalysts and hidden risks the rules miss.',
+  guard: 'Claude (AI) that only sees risk: position size, swings, drawdowns and worst days. Votes no when the downside is too big for the reward.',
+  chart: 'Claude (AI) that only sees price action: the last month of closes, highs, lows, averages, RSI and volume. Reads the chart in plain words.',
   doubt: 'The contrarian. NO when everyone is chasing a big week or a hype spike; YES when fear hits a healthy uptrend.',
 };
 const pickLine = a => a[Math.floor(Math.random() * a.length)];
 ACT.hqInfo = () => sheet({ title: 'Mango HQ', tall: true, html: `<p class="dialog-msg">Every bot is a little worker. What they do here is what they really do: when a bot starts its daily decision it walks to the Newsroom to read the news, takes buys and sells to the Council, then heads to the Trading desk. Bubbles show real journal entries and fills.</p>
   <div class="group">${Object.keys(HQ_ROOMS).map(k => { const th = HQT[store.get('hqTheme')] || HQT.office; return `<div class="cell"><div class="lead" style="color:${th.accents[k]}">${icon('grid')}</div><div class="main"><div class="title">${h(th.names[k])}</div><div class="sub">${h(ROOM_WHAT[k])}</div></div></div>`; }).join('')}</div>
-  <div class="section-h"><h2>The Council</h2></div><div class="group">${Object.entries(PERSONA_ABOUT).map(([k, t]) => `<div class="cell"><div class="main"><div class="title">${h({ surfer: 'Surfer · Trend', rocket: 'Rocket · Momentum', scoop: 'Scoop · News', shield: 'Shield · Risk', prof: 'Professor · Value stats', doubt: 'Doubt · Contrarian' }[k])}</div><div class="sub">${h(t)}</div></div></div>`).join('')}</div>
-  <p class="note">Big Mango, the chair, announces what the bot does. Every vote is checked a week later, so "Who called it?" shows which kind of evidence has actually been right for your bots. Drag to look around, pinch to zoom, tap a character for details. The eye button follows the action.</p>` });
+  <div class="section-h"><h2>The Council</h2></div><p class="note">${SET().councilWeighted !== false ? 'Votes are weighted. A member counts more when it has been right more often (after 20 graded votes), when the situation is its area (news on a big news day, risk when the market is wild, trend in a clean trend) and when it is sure. Every vote counts between ½ and 2, so nobody decides alone. You can turn this off in Settings.' : 'Every vote counts the same. Turn on weighted votes in Settings to let the members who have been right count for more.'}</p><div class="group">${Object.entries(PERSONA_ABOUT).map(([k, t]) => `<div class="cell"><div class="main"><div class="title">${h(memberName(k) + ' · ' + { ai: 'AI · debate', hawk: 'AI · news', guard: 'AI · risk', chart: 'AI · charts', surfer: 'Trend', rocket: 'Momentum', scoop: 'News', shield: 'Risk', prof: 'Value stats', doubt: 'Contrarian' }[k])}</div><div class="sub">${h(t)}</div></div></div>`).join('')}</div>
+  <button class="btn btn-quiet btn-block mt12" data-act="councilNames">${icon('edit')}Rename the Council</button>
+  <p class="note">${h(memberName('chair'))}, the chair, announces what the bot does. Every vote is checked a week later, so "Who called it?" shows which kind of evidence has actually been right for your bots. Drag to look around, pinch to zoom, tap a character for details. The eye button follows the action.</p>` });
 
 ACT.hqTheme = () => {
   const top = Router.layers.filter(l => l.type === 'page').pop()?.page; if (!top?.hq) return;
@@ -6498,6 +6617,26 @@ ACT.standbyToggle = async el => {
   if (on) { const ok = await askText({ title: 'Switch the standby on?', msg: 'Bots will start trading on this copy. Only do this while your main server is down, and switch it off again when the main one is back (restore a fresh backup there first).', placeholder: 'Type ON', ok: 'Switch on' }); if (ok == null || ok.trim().toUpperCase() !== 'ON') return; }
   try { const r = await post('standby', { on }); App.S.standby = r; standbyBar(); emit('settings'); toast(on ? 'Standby is on' : 'Standby is off', { sub: on ? 'Bots trade here and it stays awake.' : 'Bots paused. It can sleep now.' }); } catch (e) { toastErr(e); }
 };
+
+// ---------- the Council's voting rules ----------
+function councilCard() {
+  return `<div class="group mt16"><div class="cell"><div class="lead">${icon('flag')}</div><div class="main"><div class="title">Weighted Council votes</div><div class="sub">Members count more when they've been right, when it's their area (news on big news days, risk when it's wild) and when they're sure. Each vote counts between ½ and 2. Decides the council veto and the verdict.</div></div>${sw(SET().councilWeighted !== false, 'data-act="setBool" data-k="councilWeighted"')}</div></div>`;
+}
+// ---------- AI Council members card in Settings ----------
+function analystCard() {
+  const a = App.S?.analyst; if (!a) return '';
+  if (!a.key) return `<div class="group mt16"><div class="cell"><div class="lead">${icon('sparkle')}</div><div class="main"><div class="title">AI Council members</div><div class="sub">Off. Add an ANTHROPIC_API_KEY variable on your server to give the Council up to four AI members powered by Claude. It costs cents a month.</div></div></div></div>`;
+  const on = SET().aiOn !== false;
+  setTimeout(async () => { const el = $('#ai-usage'); if (!el) return; try { const u = await api('analyst'); el.textContent = `Today ${u.today.calls} call${u.today.calls === 1 ? '' : 's'} · this month about ${money(u.month.cost, { dp: u.month.cost < 1 ? 3 : 2 })}${u.lastError && Date.now() - u.lastError.ts < 864e5 ? ` · last problem: ${u.lastError.msg}` : ''}`; } catch (e) {} }, 50);
+  return `<div class="group mt16"><div class="cell"><div class="lead">${icon('sparkle')}</div><div class="main"><div class="title">AI Council members</div><div class="sub" id="ai-usage">Claude votes on every buy and sell</div></div>${sw(on, 'data-act="setBool" data-k="aiOn"')}</div>
+    ${on ? `${rowToggle('aiDebate', 'Analyst debates the others', 'It speaks last, calls out the vote it disagrees with most, then votes')}
+    ${rowToggle('aiHawk', 'News Hawk', 'Sees only the headlines and earnings')}
+    ${rowToggle('aiGuard', 'Risk Officer', 'Sees only position size, swings and drawdowns')}
+    ${rowToggle('aiChart', 'Chartist', 'Sees only the price chart and volume')}
+    ${rowToggle('aiSize', 'Let them shrink risky buys', 'The Analyst has the final say. They can cut a buy down, never make one bigger')}
+    <div class="cell"><div class="main"><div class="title">Most AI calls a day</div><div class="sub">Shared by all AI members. Specialists sit out first so the Analyst always gets a vote. Each call costs about a hundredth of a cent.</div></div>${seg('aiMax', [['40', '40'], ['120', '120'], ['300', '300']], String(SET().aiDailyMax ?? 120))}</div>` : ''}</div>`;
+}
+document.addEventListener('seg', e => { if (e.target.dataset?.seg === 'aiMax') saveSetting({ aiDailyMax: +e.detail }); });
 
 // ===================================================================
 // Settings
@@ -6548,7 +6687,7 @@ PAGES.settings = {
   root() {
     const S = App.S;
     return `<div class="set-hero"><svg viewBox="0 0 120 120" class="av"><use href="#mango-mark"/></svg><div><div class="t-title">Mango</div><div class="t-foot">Logged in as ${h(S.user || 'you')} · ${(S.wallets || []).filter(w => !w.archived).length} wallet${(S.wallets || []).length === 1 ? '' : 's'}</div></div></div>
-      ${standbyCard()}
+      ${standbyCard()}${councilCard()}${analystCard()}
       <div class="group mt16">${Object.entries(SECTIONS).map(([k, v]) => rowLink(v.icon, v.title, v.sub, 'settings/' + k)).join('')}</div>
       <div class="group mt16">${rowLink('wallet', 'Wallets', 'Create, rename, reset, move cash', 'wallets')}${rowToggle('hideBalances', 'Hide balances', 'Blur dollar amounts. Press and hold to peek.')}</div>
       <div class="group mt16">${rowLink('lock', 'Face ID and backups', 'Log in with Face ID, protect real money, save your data', 'security')}</div>
