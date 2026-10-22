@@ -1229,7 +1229,7 @@ button.tile:active { transform: scale(.98); }
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '2.13.1';
+const BUILD = '__BUILD__', APP_VERSION = '2.13.2';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -4922,6 +4922,7 @@ for (const S of HQ_STATIC) S.sb = hqScreenBox(S.f, S.h);
 const hqBehind = (A, B, e = 0.02) => A[0] + A[2] <= B[0] + e || A[1] + A[3] <= B[1] + e;
 function hqFrontOf(f, h, self) { const sb = hqScreenBox(f, h); return HQ_STATIC.filter(S => S !== self && S.o !== self && S.w !== self && hqBehind(f, S.f) && !hqBehind(S.f, f) && sb[0] < S.sb[2] - 1 && sb[2] > S.sb[0] + 1 && sb[1] < S.sb[3] - 1 && sb[3] > S.sb[1] + 1); }
 for (const S of HQ_STATIC) S.front = hqFrontOf(S.f, S.h, S);
+HQ_STATIC.forEach((S, i) => { S.id = i; });
 
 // ===================================================================
 // Mango HQ themes: Office, Starship, Village and Island. Same floor plan and the same live data,
@@ -6504,32 +6505,41 @@ PAGES.hq = {
     if (st._scen?.id !== th.id) st._scen = { id: th.id, list: (th.scenery?.({ st, R: rng(7), names: th.names }) || []).map(m => { const f = m.f || [m.x - 0.5, m.y - 0.5, 1, 1], h = m.h || 4; return { f, h, draw: m.draw, sb: hqScreenBox(f, h) }; }) };
     const live = [...set.values(), ...items].map(it => ({ f: it.f, sb: it.S?.sb || hqScreenBox(it.f, it.a ? 2.4 : it.h || 2) }));
     const scenery = st._scen.list.filter(sc => live.some(L => hqBehind(L.f, sc.f) && !hqBehind(sc.f, L.f) && L.sb[0] < sc.sb[2] && L.sb[2] > sc.sb[0] && L.sb[1] < sc.sb[3] && L.sb[3] > sc.sb[1])).map(sc => ({ f: sc.f, h: sc.h, scen: sc }));
-    // evening and night: the cached world is tinted, so anything redrawn on top gets the same tint. The tint goes on the
-    // piece itself (drawn into a scratch layer first), never on a box around it, so nothing behind it gets darkened twice.
-    const layer = this._layer || (this._layer = document.createElement('canvas')), lg = layer.getContext('2d'), D = iso.dpr || 1, tint = env.night ? th.night : th.dusk || 'rgba(120,70,90,.25)'; // same as the cached world
-    const mask = this._mask || (this._mask = document.createElement('canvas')), mg = mask.getContext('2d'), lamps = dim ? th.lights?.(st) || [] : [];
-    const paint = (it, fn, alpha = 1) => {
-      if (!dim) { if (alpha < 1) g.globalAlpha = alpha; fn(); g.globalAlpha = 1; return; }
-      const [x0, y0, x1, y1] = hqBox(iso, it.f[0], it.f[1], it.f[2], it.f[3], (it.h || 2) + 1), pad = 40 * iso.zoom + 10;
-      const bx = Math.max(0, Math.floor(x0 - pad)), by = Math.max(0, Math.floor(y0 - pad)), bw = Math.min(iso.w, Math.ceil(x1 + pad)) - bx, bh = Math.min(iso.h, Math.ceil(y1 + pad)) - by; if (bw <= 0 || bh <= 0) return;
-      const W = Math.ceil(bw * D), H = Math.ceil(bh * D); if (layer.width < W) layer.width = W; if (layer.height < H) layer.height = H;
-      lg.setTransform(1, 0, 0, 1, 0, 0); lg.globalCompositeOperation = 'source-over'; lg.globalAlpha = 1; lg.clearRect(0, 0, W, H); lg.setTransform(D, 0, 0, D, -bx * D, -by * D);
-      const g0 = iso.g; iso.g = lg; try { fn(); } finally { iso.g = g0; }
-      lg.setTransform(1, 0, 0, 1, 0, 0);
-      // keep a copy of the piece's shape, tint it, add the same lamp and fire glow the cached world has, then trim back to the shape
-      if (mask.width < W) mask.width = W; if (mask.height < H) mask.height = H; mg.setTransform(1, 0, 0, 1, 0, 0); mg.globalCompositeOperation = 'copy'; mg.drawImage(layer, 0, 0, W, H, 0, 0, W, H);
-      lg.globalCompositeOperation = 'source-atop'; lg.globalAlpha = 1; lg.fillStyle = tint; lg.fillRect(0, 0, W, H);
-      lg.globalCompositeOperation = 'lighter';
-      for (const [lx, ly, r, col, la] of lamps) { const [cx, cy] = iso.P(lx, ly, 0), R = r * iso.TW * iso.zoom; if (cx + R < bx || cx - R > bx + bw || cy + R < by || cy - R > by + bh) continue; const X = (cx - bx) * D, Y = (cy - by) * D, gr = lg.createRadialGradient(X, Y, 0, X, Y, R * D); gr.addColorStop(0, rgba(col, (la ?? 0.42) * (env.night ? 1 : 0.6))); gr.addColorStop(1, rgba(col, 0)); lg.fillStyle = gr; lg.fillRect(X - R * D, Y - R * D, R * 2 * D, R * 2 * D); }
-      lg.globalCompositeOperation = 'destination-in'; lg.drawImage(mask, 0, 0, W, H, 0, 0, W, H); lg.globalCompositeOperation = 'source-over';
-      g.globalAlpha = alpha; g.drawImage(layer, 0, 0, W, H, bx, by, bw, bh); g.globalAlpha = 1;
+    // Pieces redrawn over people are drawn from little pre-made images, painted once like the big cached world
+    // (same tint and lamp glow at night), so each frame only copies pixels. They're re-made when the world image
+    // changes or you settle on a very different zoom.
+    const lvl = [0.55, 0.8, 1.05, 1.35, 1.7, 2.2, 2.8, 3.6], zNeed = iso.zoom * (iso.dpr || 1), zWant = lvl.find(l => l >= zNeed * 0.9) || lvl[lvl.length - 1], busy = st.drag || st.cam || st.vel.x || st.vel.y || performance.now() - st.zoomT < 220;
+    const skey = (st.cache?.key || '') + '|' + (env.night ? 'n' : env.dusk ? 'd' : 'a');
+    if (!st.sprites || st.sprites.key !== skey || (st.sprites.zc !== zWant && !busy)) st.sprites = { key: skey, zc: st.sprites?.key === skey && busy ? st.sprites.zc : zWant, map: new Map() };
+    const SPR = st.sprites, tint = env.night ? th.night : th.dusk || 'rgba(120,70,90,.25)', lamps = dim ? th.lights?.(st) || [] : [];
+    const sprite = (id, it, fn) => {
+      let c = SPR.map.get(id);
+      if (!c) {
+        const zc = SPR.zc, f = it.f, hh = (it.h || 2) + 1.2, P1 = (x, y, z) => [(x - y) * 28, (x + y) * 14 - z * 30], pts = [P1(f[0], f[1], hh), P1(f[0] + f[2], f[1], 0), P1(f[0] + f[2], f[1] + f[3], 0), P1(f[0], f[1] + f[3], 0), P1(f[0], f[1] + f[3], hh), P1(f[0] + f[2], f[1], hh), P1(f[0], f[1], 0)];
+        const pad = 34, a0 = Math.min(...pts.map(q => q[0])) - pad, b0 = Math.min(...pts.map(q => q[1])) - pad, a1 = Math.max(...pts.map(q => q[0])) + pad, b1 = Math.max(...pts.map(q => q[1])) + pad;
+        const cv = document.createElement('canvas'); cv.width = Math.max(1, Math.ceil((a1 - a0) * zc)); cv.height = Math.max(1, Math.ceil((b1 - b0) * zc));
+        const I = new Iso(cv); I.zoom = zc; I.ox = -a0 * zc; I.oy = -b0 * zc; const cg = I.g;
+        try { fn(I); } catch (e) {}
+        if (dim) {
+          const mask = document.createElement('canvas'); mask.width = cv.width; mask.height = cv.height; mask.getContext('2d').drawImage(cv, 0, 0);
+          cg.globalCompositeOperation = 'source-atop'; cg.fillStyle = tint; cg.fillRect(0, 0, cv.width, cv.height);
+          cg.globalCompositeOperation = 'lighter';
+          for (const [lx, ly, r, col, la] of lamps) { const [cx, cy] = I.P(lx, ly, 0), R = r * I.TW * zc; if (cx + R < 0 || cx - R > cv.width || cy + R < 0 || cy - R > cv.height) continue; const gr = cg.createRadialGradient(cx, cy, 0, cx, cy, R); gr.addColorStop(0, rgba(col, (la ?? 0.42) * (env.night ? 1 : 0.6))); gr.addColorStop(1, rgba(col, 0)); cg.fillStyle = gr; cg.fillRect(cx - R, cy - R, R * 2, R * 2); }
+          cg.globalCompositeOperation = 'destination-in'; cg.drawImage(mask, 0, 0); cg.globalCompositeOperation = 'source-over';
+        }
+        c = { c: cv, X0: I.ox, Y0: I.oy, zc }; SPR.map.set(id, c);
+      }
+      const k = iso.zoom / c.zc; g.drawImage(c.c, iso.w / 2 + iso.ox - c.X0 * k, iso.h / 2 + iso.oy - c.Y0 * k, c.c.width * k, c.c.height * k);
     };
+    // in the day nothing needs tinting, so pieces are just drawn; at night they come from the pre-tinted images. Off-screen ones are skipped.
+    const onScreen = it => { const b = hqBox(iso, it.f[0], it.f[1], it.f[2], it.f[3], (it.h || 2) + 1.2), m = 40 * iso.zoom; return !(b[2] < -m || b[0] > iso.w + m || b[3] < -m || b[1] > iso.h + m); };
+    const paint = (id, it, fn, alpha = 1) => { if (!onScreen(it)) return; if (alpha < 1) g.globalAlpha = alpha; if (dim) sprite(id, it, fn); else fn(iso); g.globalAlpha = 1; };
     for (const it of isoSort([...items, ...set.values(), ...scenery])) {
       if (it.a) { drawPerson(iso, it.a, th); continue; }
-      if (it.scen) { paint(it, () => it.scen.draw(iso, ctx)); continue; }
+      if (it.scen) { paint('s' + st._scen.list.indexOf(it.scen), it, I => it.scen.draw(I, ctx)); continue; }
       const S = it.S;
       if (it.item) {
-        paint(it, () => { if (S.w) th.wall(iso, S.w, ctx); else th.item(iso, S.o, it.part ? { ...ctx, part: it.part } : ctx); }, it.fade ? 0.42 : 1);
+        paint(S.id + (it.part ? ':' + it.part : ''), it, I => { if (S.w) th.wall(I, S.w, ctx); else th.item(I, S.o, it.part ? { ...ctx, part: it.part } : ctx); }, it.fade ? 0.42 : 1);
       }
       if (S.dyn && (it.dyn || it.item) && !it.part) th.dyn(iso, S.o, st, st.t);
     }
