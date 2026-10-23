@@ -1229,7 +1229,7 @@ button.tile:active { transform: scale(.98); }
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '2.13.4';
+const BUILD = '__BUILD__', APP_VERSION = '2.13.5';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -5166,6 +5166,15 @@ HQT.office = {
 // The tower the office sits on: a glass curtain wall that follows the building's faces. Each window is a pane
 // set between mullions and floor bands; in the day the glass reflects the sky (with a sheen that slides across
 // as you pan), at dusk and night some offices have their lights on. Only panes on screen are drawn.
+// The city is laid out once (positions and sizes in building units, windows seeded per building), so it never
+// changes while you pan or zoom; each frame only places and scales it.
+const SKYLINE = [0, 1, 2].map(L => { const R = rng(91 + L * 17), out = []; let x = 0;
+  for (let i = 0; i < 140; i++) {
+    const bw = 0.9 + R() * 1.3, tall = R(), bh = tall > 0.9 ? 3 + R() * 1.4 : tall > 0.6 ? 1.8 + R() * 1.2 : 0.8 + R() * 1.1, gap = R() < 0.25 ? 0.15 : 0, kind = R(), tint = (R() - 0.5) * 0.1;
+    const set = kind < 0.3 && bh > 1.6 ? { w: 0.62, h: 0.4 + R() * 0.5, mast: R() < 0.6 } : null;
+    out.push({ x, bw, bh, kind, tint, set, seed: i * 131 + L * 7 }); x += bw + gap;
+  }
+  return out; });
 function skyline(g, iso, e, t, w, h, depth) {
   const k = clamp(iso.zoom, 0.18, 2.6), horizon = iso.P(HQ_L.W / 2, -6, -depth)[1] + 40 * k;
   const night = e.night, dusk = e.dusk, grey = e.mood < -0.8;
@@ -5176,32 +5185,28 @@ function skyline(g, iso, e, t, w, h, depth) {
     [0.58, 1.0, night ? '#19234A' : dusk ? '#382E50' : grey ? '#727C8C' : '#6F8CAB', 0.62, 0.12],
   ];
   layers.forEach(([par, sc, col, wa, haze], L) => {
-    const R = rng(91 + L * 17), unit = 90 * k * sc, base = horizon - L * 18 * k + iso.oy * par * 0.12, x0 = iso.w / 2 + iso.ox * par - unit * 60;
-    let x = x0;
-    for (let i = 0; i < 140 && x < iso.w + unit * 2; i++) {
-      // a real building: width 1–2.2 units, height 1–3.6 units (tall ones are rarer), gaps between some
-      const bw = unit * (0.9 + R() * 1.3), tall = R(), bh = unit * (tall > 0.9 ? 3 + R() * 1.4 : tall > 0.6 ? 1.8 + R() * 1.2 : 0.8 + R() * 1.1), gap = R() < 0.25 ? unit * 0.15 : 0;
-      const kind = R(), bx = x, by = base - bh; x += bw + gap;
-      if (bx > iso.w + 10 || bx + bw < -10) continue;
-      const body = shade(col, (R() - 0.5) * 0.1), sideW = bw * 0.18;
+    const unit = 90 * k * sc, base = horizon - L * 18 * k + iso.oy * par * 0.12, x0 = iso.w / 2 + iso.ox * par - unit * 60;
+    SKYLINE[L].forEach((B, i) => {
+      const bx = x0 + B.x * unit, bw = B.bw * unit, bh = B.bh * unit, by = base - bh;
+      if (bx > iso.w + 10 || bx + bw < -10) return;
+      const body = shade(col, B.tint), sideW = bw * 0.18;
       g.fillStyle = body; g.fillRect(bx, by, bw, bh + h);
       g.fillStyle = shade(body, -0.18); g.fillRect(bx + bw - sideW, by, sideW, bh + h); // the shaded side
       // setbacks and roof details
-      if (kind < 0.3 && bh > unit * 1.6) { const sw = bw * 0.62, sh = unit * (0.4 + R() * 0.5); g.fillStyle = body; g.fillRect(bx + (bw - sw) / 2, by - sh, sw, sh); g.fillStyle = shade(body, -0.18); g.fillRect(bx + (bw + sw) / 2 - sw * 0.18, by - sh, sw * 0.18, sh);
-        if (R() < 0.6) { g.fillStyle = shade(body, -0.1); g.fillRect(bx + bw / 2 - 1 * k, by - sh - unit * 0.5, 2 * k, unit * 0.5); if (Math.sin(t * 2.5 + i) > 0) { g.fillStyle = '#FF5C77'; g.beginPath(); g.arc(bx + bw / 2, by - sh - unit * 0.5, 2 * k, 0, 7); g.fill(); } } }
-      else if (kind < 0.45) { g.fillStyle = shade(body, -0.25); g.fillRect(bx + bw * 0.6, by - unit * 0.22, bw * 0.2, unit * 0.22); g.fillRect(bx + bw * 0.62, by - unit * 0.3, bw * 0.16, unit * 0.08); } // water tower
-      else if (kind < 0.6) { g.fillStyle = shade(body, -0.12); g.fillRect(bx + bw * 0.15, by - unit * 0.12, bw * 0.3, unit * 0.12); g.fillRect(bx + bw * 0.55, by - unit * 0.08, bw * 0.2, unit * 0.08); } // rooftop machinery
+      if (B.set) { const sw = bw * B.set.w, sh = unit * B.set.h; g.fillStyle = body; g.fillRect(bx + (bw - sw) / 2, by - sh, sw, sh); g.fillStyle = shade(body, -0.18); g.fillRect(bx + (bw + sw) / 2 - sw * 0.18, by - sh, sw * 0.18, sh);
+        if (B.set.mast) { g.fillStyle = shade(body, -0.1); g.fillRect(bx + bw / 2 - 1 * k, by - sh - unit * 0.5, 2 * k, unit * 0.5); if (Math.sin(t * 2.5 + i) > 0) { g.fillStyle = '#FF5C77'; g.beginPath(); g.arc(bx + bw / 2, by - sh - unit * 0.5, 2 * k, 0, 7); g.fill(); } } }
+      else if (B.kind >= 0.3 && B.kind < 0.45) { g.fillStyle = shade(body, -0.25); g.fillRect(bx + bw * 0.6, by - unit * 0.22, bw * 0.2, unit * 0.22); g.fillRect(bx + bw * 0.62, by - unit * 0.3, bw * 0.16, unit * 0.08); } // water tower
+      else if (B.kind >= 0.45 && B.kind < 0.6) { g.fillStyle = shade(body, -0.12); g.fillRect(bx + bw * 0.15, by - unit * 0.12, bw * 0.3, unit * 0.12); g.fillRect(bx + bw * 0.55, by - unit * 0.08, bw * 0.2, unit * 0.08); } // rooftop machinery
       g.fillStyle = shade(body, 0.1); g.fillRect(bx, by, bw, Math.max(1, 2 * k)); // roof edge catching the light
-      // windows: a grid of floors and bays, only where it's on screen and big enough to see
+      // windows: a fixed grid of floors and bays; each window's light is decided by its own position, not by drawing order
       const fy = unit * 0.12, wx = unit * 0.1, ww = wx * 0.5, wh = fy * 0.58;
-      if (ww >= 1.2) {
-        const R2 = rng(i * 131 + L * 7), y0 = Math.max(by + fy * 0.6, -fy), y1 = Math.min(base + unit * 2, h + fy);
-        for (let yy = by + fy * 0.6; yy < y1; yy += fy) { if (yy < y0) { for (let xx = bx + wx * 0.6; xx < bx + bw - sideW - wx * 0.4; xx += wx) R2(); continue; }
-          for (let xx = bx + wx * 0.6; xx < bx + bw - sideW - wx * 0.4; xx += wx) { const r = R2();
-            if (night || dusk) { if (r < (night ? 0.3 : 0.16)) { g.fillStyle = r < 0.03 ? `rgba(200,225,255,${wa})` : `rgba(255,212,140,${wa})`; g.fillRect(xx, yy, ww, wh); } }
-            else if (r < 0.85) { g.fillStyle = r < 0.12 ? 'rgba(255,255,255,.22)' : 'rgba(20,40,70,.16)'; g.fillRect(xx, yy, ww, wh); } } }
-      }
-    }
+      if (ww < 1.2) return;
+      const cols = Math.max(0, Math.floor((bw - sideW - wx * 1.0) / wx)), rows = Math.ceil((bh + unit * 2) / fy);
+      for (let r = 0; r < rows; r++) { const yy = by + fy * 0.6 + r * fy; if (yy > h + fy) break; if (yy < -fy) continue;
+        for (let c = 0; c < cols; c++) { const xx = bx + wx * 0.6 + c * wx, q = (((B.seed * 73856093) ^ (r * 19349663) ^ (c * 83492791)) >>> 0) % 1000 / 1000;
+          if (night || dusk) { if (q < (night ? 0.3 : 0.16)) { g.fillStyle = q < 0.03 ? `rgba(200,225,255,${wa})` : `rgba(255,212,140,${wa})`; g.fillRect(xx, yy, ww, wh); } }
+          else if (q < 0.85) { g.fillStyle = q < 0.12 ? 'rgba(255,255,255,.22)' : 'rgba(20,40,70,.16)'; g.fillRect(xx, yy, ww, wh); } } }
+    });
     // atmospheric haze over the farther layers
     if (haze > 0) { const hz = night ? `rgba(20,28,60,${haze * 0.6})` : dusk ? `rgba(230,150,140,${haze * 0.5})` : `rgba(215,232,248,${haze})`; const top = base - unit * 5, gr = g.createLinearGradient(0, top, 0, base - unit * 1.5); gr.addColorStop(0, hz.replace(/[\d.]+\)$/, '0)')); gr.addColorStop(1, hz); g.fillStyle = gr; g.fillRect(0, top, iso.w, h - top + 10); }
   });
