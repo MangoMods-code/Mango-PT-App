@@ -308,7 +308,7 @@ const DEF = {
   confirmStyle: 'hold', confirmBuy: false, confirmSell: true, cashAPY: 0, startBalance: 10000,
   // notifications
   pushAlerts: true, pushOrders: true, notifySummary: true, notifyMoves: true, moveThreshold: 5,
-  notifyAchv: true, notifyGames: true, pushBots: true, botWeekly: true, pushReal: true, realDailyLossPct: 3, realHalt: false, standbyActive: false, standbyActiveAt: 0, councilWeighted: true, nightOn: true, nightRuns: 2, aiOn: true, aiSize: true, aiDebate: true, aiHawk: true, aiGuard: true, aiChart: true, aiDailyMax: 120, faceReal: true, autoBackup: true, quietStart: '', quietEnd: '',
+  notifyAchv: true, notifyGames: true, pushBots: true, botWeekly: true, pushReal: true, realDailyLossPct: 3, realHalt: false, standbyActive: false, standbyActiveAt: 0, councilWeighted: true, vetoAll: true, aiVeto: true, aiReview: true, aiSizeUp: true, nightOn: true, nightRuns: 2, aiOn: true, aiSize: true, aiDebate: true, aiHawk: true, aiGuard: true, aiChart: true, aiDailyMax: 120, faceReal: true, autoBackup: true, quietStart: '', quietEnd: '',
   // look and feel
   hideBalances: false, showCents: true, compactNums: false, defaultRange: '1D', defaultChart: 'Candles',
   theme: 'mango', accent: 'mango', plColors: 'classic', roundedNums: true, reduceMotion: false, celebrate: true,
@@ -3483,8 +3483,32 @@ async function runBotInner(id, { manual, dry, night }) {
     // at night the Night Owl gets the same say over size that the Analyst has in the day
     if (night && buying && S.aiSize !== false && d.target * capital > d.have + 1) { const ow = s.votes.find(v => v.k === 'owl' && v.c === 'ai' && v.vote !== 'pass'); if (ow && ow.size < 1) { const add = d.target * capital - d.have; d.target = (d.have + add * ow.size) / capital; d.why.push(`The Night Owl cut this buy to ${Math.round(ow.size * 100)}%: ${ow.line}`); } }
     Object.assign(s, weighVotes(s.votes, situation(series[d.sym], bz, up), councilRec));
-    if (m.councilVeto && buying && d.target * capital > d.have + 1 && leansNo(s)) { d.target = d.have / capital; d.why.push(`Skipped buying: the council voted ${tallyText(s)} against${weightedOn() ? ' (weighted)' : ''}, and council veto is on.`); }
+    const lead = s.votes.find(v => (v.k === 'ai' || v.k === 'owl') && v.c === 'ai'), stillBuying = () => buying && d.target * capital > d.have + 1;
+    // AI veto: a confident NO from the Analyst (or the Night Owl), backed by at least one other member, stops the buy
+    if (stillBuying() && S.aiVeto !== false && lead?.vote === 'no' && lead.conf >= 0.75 && s.votes.some(v => v !== lead && v.vote === 'no' && (v.c === 'ai' || night))) { d.target = d.have / capital; d.why.push(`Skipped buying: the ${nameOf(lead.k)} vetoed it (${Math.round(lead.conf * 100)}% sure): ${lead.line}`); }
+    // council veto (on for every bot unless switched off in Settings): a majority NO stops the buy
+    if ((m.councilVeto || S.vetoAll !== false) && stillBuying() && leansNo(s)) { d.target = d.have / capital; d.why.push(`Skipped buying: the council voted ${tallyText(s)} against${weightedOn() ? ' (weighted)' : ''}, and council veto is on.`); }
+    // sizing up: when the AI lead is very sure and the council agrees, the buy can grow, but never past the bot's max position
+    if (stillBuying() && S.aiSizeUp !== false && lead?.vote === 'yes' && lead.size > 1 && lead.conf >= 0.7 && !leansNo(s) && (s.wy ?? s.yes) > (s.wn ?? s.no)) {
+      const add = d.target * capital - d.have, cap = (m.maxPosPct || 25) / 100 * capital, nt = Math.min(d.have + add * lead.size, cap) / capital;
+      if (nt > d.target + 1e-4) { d.why.push(`The ${nameOf(lead.k)} sized this buy up to ${Math.round(nt / d.target * 100)}% (${Math.round(lead.conf * 100)}% sure): ${lead.line}`); d.target = nt; } }
     d.council = s; sessions.push(d);
+  }
+  // the daily position check: the Analyst reviews what the bot already holds and can trim or sell a position that's turning
+  if (!night && !dry && S.aiReview !== false && analystReady()) {
+    let n = 0;
+    for (const d of Object.values(decisions)) {
+      if (n >= 8 || !held[d.sym] || sessions.includes(d) || !(d.target > 0) || !series[d.sym] || !priceOf(d.sym)) continue;
+      const h = held[d.sym], bz = buzz[d.sym], up = bz?.upcoming?.find(u => u.k === 'earnings') || null; n++;
+      const r = await aiReview(d.sym, series[d.sym], bz, up, { strategy: STRATEGIES[bot.strategy]?.name || bot.strategy, entry: h.entry, pnl: priceOf(d.sym) / h.entry - 1, days: h.days, stopPx: h.stopPx, weight: d.have / capital, high: h.high }, id).catch(() => null);
+      if (!r || r.c !== 'ai') continue;
+      d.review = { action: r.action, conf: r.conf, line: r.line };
+      if (r.action === 'sell' && r.conf >= 0.75) { d.target = 0; d.why.push(`Selling: the Analyst's daily check says it's time (${Math.round(r.conf * 100)}% sure): ${r.line}`); }
+      else if (r.action === 'trim' && r.conf >= 0.6) { d.aiTrim = true; d.target = d.have / 2 / capital; d.why.push(`Trimming by half: the Analyst's daily check (${Math.round(r.conf * 100)}% sure): ${r.line}`); }
+      else continue;
+      const s = { votes: [{ k: 'ai', vote: 'no', conf: r.conf, size: 1, line: r.line, c: 'ai', review: r.action }], yes: 0, no: 1 }; Object.assign(s, weighVotes(s.votes, {}, councilRec));
+      d.council = s; sessions.push(d);
+    }
   }
   phase('trade');
   // ---- orders: sells first to free cash, then buys ----
@@ -3523,7 +3547,8 @@ async function runBotInner(id, { manual, dry, night }) {
     const px = priceOf(d.sym); if (!px || !held[d.sym]) continue;
     if (!(isCrypto(d.sym) || tradable.includes(d.sym))) continue;
     const targetV = d.target * capital, diff = targetV - d.have;
-    if (d.target <= 0) { d.action = 'sell'; await placeOrder(d.sym, 'sell', { pct: 100 }, `${st.short}: ${d.why[0] || d.note}`); delete state[d.sym]; }
+    if (d.target <= 0) { d.action = 'sell'; await placeOrder(d.sym, 'sell', { pct: 100 }, `${st.short}: ${d.why.find(w => /^Selling/.test(w)) || d.why[0] || d.note}`); delete state[d.sym]; }
+    else if (d.aiTrim) { d.action = 'trim'; await placeOrder(d.sym, 'sell', { qty: held[d.sym].qty / 2 }, `${st.short}: ${d.why.find(w => /^Trimming/.test(w))}`); }
     else if (rebalanceDue && st.rebalance !== 'none' && -diff > Math.max(m.minTrade, capital * band)) { d.action = 'trim'; await placeOrder(d.sym, 'sell', { qty: Math.min(held[d.sym].qty, -diff / px) }, `${st.short}: rebalance down to ${pct0n(d.target)} of the wallet`); }
   }
   for (const d of Object.values(decisions).sort((a, b) => b.target - a.target)) {
@@ -3575,7 +3600,7 @@ async function runBotInner(id, { manual, dry, night }) {
     // a night run doesn't count as the day's decision, so the day crew still meets at its usual time
     if (night) await Q('update bots set state=$1, last_run=now(), peak=$2, day_start=$3, day_date=$4, summary=$5 where id=$6', [JSON.stringify(state), peak, dayStart, today, summary, id]);
     else await Q('update bots set state=$1, last_run=now(), last_day=$2, peak=$3, day_start=$4, day_date=$5, summary=$6 where id=$7', [JSON.stringify(state), today, peak, dayStart, today, summary, id]);
-    const rows = Object.values(decisions).map(d => ({ sym: d.sym, action: d.action, want: round(d.want, 4), target: round(d.target, 4), have: round(d.have, 2), note: d.note, why: d.why, buzz: d.buzz, flags: d.flags, council: d.council || null }));
+    const rows = Object.values(decisions).map(d => ({ sym: d.sym, action: d.action, want: round(d.want, 4), target: round(d.target, 4), have: round(d.have, 2), note: d.note, why: d.why, buzz: d.buzz, flags: d.flags, review: d.review || null, council: d.council || null }));
     if (dec.report) { await botLog(id, 'report', dec.report.title, dec.report.body, dec.report.data); await notify('bot', `🧭 ${bot.name}: ${dec.report.title.toLowerCase()}`, dec.report.body.split('\n').filter(l => !/: none/.test(l)).slice(0, 5).join('\n') || 'Holding cash: no strategy is working well enough right now.', { wid: bot.wid, url: '/#/bot/' + id }); }
     await botLog(id, 'decision', `${night ? 'Night shift' : manual ? 'Manual run' : 'Daily decision'}: ${summary}`, [...log.risk, ...log.skips].join('\n'), { rows, equity, capital, dd, dayRet, regime: ctx.regime || null, missing });
     if (m.notify === 'all' || (m.notify === 'trades' && log.orders.length)) await notify(brk ? 'real' : 'bot', `${brk ? (liveMoney ? '🔴 LIVE · ' : '🔵 Alpaca · ') : '🤖 '}${bot.name}: ${summary}`, log.orders.map(o => `${o.text}. ${o.label || ''}`.trim()).join('\n').slice(0, 600) || [...log.risk, ...log.skips].join(' ') || 'Nothing to do today.', { wid: bot.wid, url: '/#/bot/' + id });
@@ -5070,7 +5095,7 @@ const tallyText = s => weightedOn() && s.wy != null ? `${s.wy.toFixed(1)}–${s.
 function chairLine(d, s) {
   const t = tallyText(s);
   if (d.action === 'buy' || d.action === 'add') return leansNo(s) ? `Overruled ${t}: the strategy says buy, and it's within the limits.` : `Approved ${t}. Buying ${Math.round(d.target * 100)}% of the wallet.`;
-  if (d.action === 'sell' || d.action === 'trim') return `Selling. ${d.why[0] || d.note || 'The strategy says it is time.'}`;
+  if (d.action === 'sell' || d.action === 'trim') { const w = (d.why || []).find(x => /^(Selling|Trimming)/.test(x)) || d.why?.[0] || d.note || 'The strategy says it is time.'; return `${d.action === 'trim' ? 'Trimming by half' : 'Selling'}. ${w.replace(/^(Selling|Trimming by half): /, '').replace(/^./, c => c.toUpperCase())}`; }
   const skip = (d.why || []).find(w => /^Skipped|^Not buying|^No new buys/.test(w));
   if (skip) return `Rejected ${t}. ${skip.replace(/^Skipped buying: /, '').replace(/^./, c => c.toUpperCase())}`;
   return `Holding ${t}. Nothing to do.`;
@@ -5241,7 +5266,7 @@ Volume today vs 20-day average: ${vAvg ? f1(vols[vols.length - 1] / vAvg, 2) + '
 };
 const JSON_SHAPE = `Reply with ONLY a JSON object, no other text:
 {"vote":"yes"|"no"|"pass","confidence":0.0-1.0,"size":0.25-1.0,"reason":"one plain sentence, max 110 characters, citing the key evidence"}
-"size" is how much of the proposed buy you'd actually take (1 = all of it); use less than 1 when you see real risk. For sells, "yes" means agree with selling.`;
+"size" is how much of the proposed buy you'd actually take: 1 = as proposed, less than 1 when you see real risk, up to 1.5 only when the evidence is unusually strong and aligned. For sells, "yes" means agree with selling.`;
 const BENCH_SYSTEM = {
   hawk: `You are the News Hawk on a trading council for an automated paper-trading bot. You see ONLY the news, headlines and earnings timing, not the charts. Judge whether the news flow supports the proposed trade over roughly the next week: catalysts, surprises, risks hiding in the headlines, and whether the story is already priced in. Say "pass" when there is no real news. ${JSON_SHAPE}`,
   guard: `You are the Risk Officer on a trading council for an automated paper-trading bot. You see ONLY risk facts: position size, volatility, drawdowns, worst days and earnings timing. Your job is to protect the wallet: vote "no" when the downside or the position size is too much for the likely reward, "yes" when the risk is reasonable. You are skeptical by nature but not a pessimist. ${JSON_SHAPE}`,
@@ -5250,7 +5275,7 @@ const BENCH_SYSTEM = {
 const AI_SYSTEM = `You are the Analyst on a trading council for an automated paper-trading bot. The bot's own strategy has already proposed a trade; you give an independent second opinion on whether it is a good idea over roughly the next week, using only the facts given. Be decisive but honest: say "pass" only when the evidence is genuinely balanced. ${JSON_SHAPE}`;
 const AI_DEBATE = `You are the Analyst on a trading council for an automated paper-trading bot, and you speak last. You have all the facts and every other member's vote with their reason. First, pick the ONE member whose argument you find weakest or most dangerous (usually on the winning side) and rebut it directly in one sentence addressed to them. Then cast your own vote, weighing everything. Don't just follow the majority; don't be contrarian for its own sake either. Reply with ONLY a JSON object, no other text:
 {"challenge":"<member key>","argument":"one sentence to that member, max 120 characters","vote":"yes"|"no"|"pass","confidence":0.0-1.0,"size":0.25-1.0,"reason":"one plain sentence, max 110 characters"}
-"size" is how much of the proposed buy you'd actually take (1 = all of it). For sells, "yes" means agree with selling.`;
+"size" is how much of the proposed buy you'd actually take: 1 = as proposed, less than 1 for risk, up to 1.5 only when the case is unusually strong. For sells, "yes" means agree with selling.`;
 const clean = (t, n) => String(t || '').replace(/\s+/g, ' ').trim().slice(0, n);
 // one call to Claude for member k; returns a vote, or a pass explaining why it couldn't
 async function aiCall(k, system, user, side) {
@@ -5263,7 +5288,7 @@ async function aiCall(k, system, user, side) {
     u.inT += j.usage?.input_tokens || 0; u.outT += j.usage?.output_tokens || 0; u.mIn += j.usage?.input_tokens || 0; u.mOut += j.usage?.output_tokens || 0;
     const text = (j.content || []).map(x => x.text || '').join(''), m = text.match(/\{[\s\S]*\}/), o = m ? JSON.parse(m[0]) : null;
     if (!o || !['yes', 'no', 'pass'].includes(o.vote)) throw new Error('unreadable answer');
-    return { k, vote: o.vote, conf: round(clamp(num(o.confidence, 0.5), 0, 1), 2), size: side === 'buy' ? round(clamp(num(o.size, 1), 0.25, 1), 2) : 1, line: clean(o.reason, 140) || 'No reason given.', c: 'ai', _o: o };
+    return { k, vote: o.vote, conf: round(clamp(num(o.confidence, 0.5), 0, 1), 2), size: side === 'buy' ? round(clamp(num(o.size, 1), 0.25, 1.5), 2) : 1, line: clean(o.reason, 140) || 'No reason given.', c: 'ai', _o: o };
   } catch (e) { u.errors++; warn('analyst', k + ': ' + e.message); u.lastError = { ts: Date.now(), msg: String(e.message).slice(0, 160) }; return { k, vote: 'pass', conf: 0, line: "Couldn't reach the AI, sitting this one out.", c: 'ai_err' }; }
   finally { kvSet('ai_usage', JSON.stringify(u)).catch(() => {}); }
 }
@@ -5309,6 +5334,21 @@ async function owlVote(sym, b, d, bz, up, ctx, watch) {
   const u = await aiUse(), key = `owl|${sym}|${etDate()}|${etParts().h}|${d.side}`, hit = cacheGet(key); if (hit) return hit;
   if (u.calls >= (S.aiDailyMax ?? 120)) return capPass('owl');
   const v = await aiCall('owl', OWL_SYSTEM, `${aiFacts(sym, b, d, bz, up, ctx)}\n\nThe Night Watch voted ${watch.vote.toUpperCase()}: ${watch.line}`, d.side); delete v._o; cacheSet(key, v); return v;
+}
+// the daily position check: once a day the Analyst looks at each position a bot is holding (that nobody is voting on)
+// and says hold, trim (sell half) or sell. Holding is the default; it only acts when the case has turned.
+const REVIEW_SYSTEM = `You are the Analyst on a trading council, doing the daily position check for an automated paper-trading bot. The bot already holds this position and its strategy wants to keep it. Decide whether to keep holding, trim (sell half) or sell it all, looking roughly a week ahead and using only the facts given. Holding is the default: only say trim or sell when the evidence has clearly turned against the position (a broken trend, bad news, or a stretched run with risk building). Reply with ONLY a JSON object, no other text:
+{"vote":"yes"|"no","action":"hold"|"trim"|"sell","confidence":0.0-1.0,"reason":"one plain sentence, max 110 characters, citing the key evidence"}
+"vote" is "yes" to keep the position as is and "no" to trim or sell.`;
+async function aiReview(sym, b, bz, up, ctx, botId) {
+  if (!analystReady() || S.aiReview === false || !b || !(b.c?.length > 30)) return null;
+  const u = await aiUse(), key = `review|${botId}|${sym}|${etDate()}`, hit = cacheGet(key); if (hit) return hit;
+  if (u.calls >= (S.aiDailyMax ?? 120)) return null;
+  const market = aiFacts(sym, b, { side: 'sell', target: 0 }, bz, up, ctx).split('\n').filter(l => !/^Proposed:/.test(l)).join('\n');
+  const pos = `Holding: bought at ${f1(ctx.entry, 2)}, now ${f1(priceOf(sym), 2)} (${pcf(ctx.pnl)}), held ${ctx.days ?? 'n/a'} trading days, ${pcf(ctx.weight)} of the wallet. Highest since buying ${f1(ctx.high, 2)}.${ctx.stopPx ? ` Stop loss at ${f1(ctx.stopPx, 2)}.` : ''}`;
+  const v = await aiCall('ai', REVIEW_SYSTEM, `${market}\n${pos}`, 'sell'), o = v._o; delete v._o;
+  if (v.c === 'ai') { v.action = ['hold', 'trim', 'sell'].includes(o?.action) ? o.action : 'hold'; v.review = true; }
+  cacheSet(key, v); return v;
 }
 // kept for older callers: the Analyst alone
 async function analystVote(sym, b, d, bz, up, ctx = {}) { const r = await aiRound(sym, b, d, bz, up, ctx, []); return r[r.length - 1] || null; }
@@ -5510,7 +5550,7 @@ const ICONS = {};
 const icon = (name, fn) => ICONS[name] || (ICONS[name] = fn());
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD646"/><stop offset=".5" stop-color="#FFA028"/><stop offset="1" stop-color="#FA5256"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="#1E1430"/><ellipse cx="31" cy="36" rx="18" ry="22" transform="rotate(30 31 36)" fill="url(#g)"/><path d="M20 41l6.5-6 5 3.5 9.5-10" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37 28.5h4.5V33" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="45" cy="11.5" rx="9" ry="4.6" transform="rotate(-24 45 11.5)" fill="#3BD68A"/></svg>`;
 let BUILD = 'dev', INDEX = null, INDEX_GZ = null;
-const APP_VERSION = '2.13.6'; // stamped by build.sh from package.json
+const APP_VERSION = '2.14.0'; // stamped by build.sh from package.json
 function loadIndex() {
   const file = path.join(__dirname, 'index.html');
   let html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<!doctype html><title>Mango</title><p>index.html is missing next to server.js.</p>';
