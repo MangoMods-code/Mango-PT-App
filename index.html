@@ -971,18 +971,18 @@ button.tile:active { transform: scale(.98); }
 /* ---------- Mango HQ ---------- */
 .hq-page .page-body { padding: 0; margin-top: 0; overflow: hidden; position: relative; }
 .hq-page .page-body > .inner { max-width: none; height: 100%; }
-.hq-page .page-head { background: linear-gradient(rgba(10, 7, 22, .78), rgba(10, 7, 22, 0)); backdrop-filter: none; -webkit-backdrop-filter: none; border-bottom: 0; }
+.hq-page .page-head { background: rgba(12, 8, 26, .84); backdrop-filter: blur(14px) saturate(1.2); -webkit-backdrop-filter: blur(14px) saturate(1.2); border-bottom: 0; }
 .hq { position: absolute; inset: 0; overflow: hidden; background: #0C0820; touch-action: none; user-select: none; -webkit-user-select: none; color: #F3EEFF; }
 .hq canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .hq-ov { position: absolute; inset: 0; pointer-events: none; }
 .hq-ov > * { position: absolute; left: 0; top: 0; will-change: transform; }
 
-.hq-top { position: absolute; z-index: 3; left: 0; right: 0; top: calc(var(--safe-t) + 50px); padding: 0 calc(12px + var(--safe-r)) 0 calc(12px + var(--safe-l)); display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; }
+.hq-top { position: absolute; z-index: 3; left: 0; right: 0; top: 0; padding: 4px calc(12px + var(--safe-r)) 10px calc(12px + var(--safe-l)); display: flex; flex-direction: column; gap: 8px; align-items: center; background: rgba(12, 8, 26, .84); backdrop-filter: blur(14px) saturate(1.2); -webkit-backdrop-filter: blur(14px) saturate(1.2); box-shadow: 0 1px 0 rgba(255, 255, 255, .06), 0 8px 24px rgba(0, 0, 0, .25); }
 .hq-top > * { pointer-events: auto; }
-.hq-top .seg { background: rgba(20, 14, 42, .82); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); width: min(340px, 100%); }
+.hq-top .seg { background: rgba(255, 255, 255, .06); width: min(340px, 100%); }
 .hq-stats { display: flex; gap: 6px; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
 .hq-stats::-webkit-scrollbar { display: none; }
-.hq-stats > div { flex: none; padding: 6px 10px; border-radius: 12px; background: rgba(20, 14, 42, .82); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .07); }
+.hq-stats > div { flex: none; padding: 6px 10px; border-radius: 12px; background: rgba(255, 255, 255, .06); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .06); }
 .hq-stats span { display: block; font-size: 10.5px; color: #A79CC6; }
 .hq-stats b { font-size: 14px; font-weight: 750; }
 
@@ -1025,7 +1025,7 @@ button.tile:active { transform: scale(.98); }
 .hq-case .t-foot { color: #A79CC6; margin: 6px 0 0; }
 
 /* who called it */
-.hq-board { position: absolute; z-index: 3; right: calc(10px + var(--safe-r)); top: calc(var(--safe-t) + 150px); width: min(230px, 46vw); padding: 10px 12px; border-radius: 16px; background: rgba(22, 14, 40, .86); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08); max-height: 46%; overflow-y: auto; }
+.hq-board { position: absolute; z-index: 3; right: calc(10px + var(--safe-r)); top: calc(var(--hq-bar, 108px) + 10px); width: min(230px, 46vw); padding: 10px 12px; border-radius: 16px; background: rgba(22, 14, 40, .86); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08); max-height: 46%; overflow-y: auto; }
 .hb-h { cursor: pointer; } .hb-h b { font-size: 14px; display: flex; align-items: center; justify-content: space-between; gap: 6px; } .hb-h b svg { width: 14px; height: 14px; transition: rotate .2s; }
 .hq-board.min { width: auto; } .hq-board.min > :not(.hb-h), .hq-board.min .hb-h .t-cap { display: none; } .hq-board.min .hb-h b svg { rotate: -90deg; } .hb-h .t-cap { display: block; color: #A79CC6; margin-bottom: 6px; }
 .hb-row { display: grid; grid-template-columns: 1fr 44px 34px; gap: 6px; align-items: center; padding: 4px 0; }
@@ -1049,7 +1049,7 @@ button.tile:active { transform: scale(.98); }
 .hq-card .btns { display: flex; gap: 8px; } .hq-card .btns .btn { flex: 1; }
 .hq-card .btn-quiet { background: rgba(255, 255, 255, .1); color: #fff; }
 
-.hq-alarm { position: absolute; z-index: 3; left: 50%; transform: translateX(-50%); top: calc(var(--safe-t) + 150px); display: flex; gap: 6px; align-items: center; padding: 6px 12px; border-radius: 12px; background: rgba(216, 50, 75, .9); color: #fff; font-size: 12.5px; font-weight: 700; animation: hq-alarm 1.4s ease-in-out infinite; white-space: nowrap; max-width: calc(100% - 24px); }
+.hq-alarm { position: absolute; z-index: 3; left: 50%; transform: translateX(-50%); top: calc(var(--hq-bar, 108px) + 10px); display: flex; gap: 6px; align-items: center; padding: 6px 12px; border-radius: 12px; background: rgba(216, 50, 75, .9); color: #fff; font-size: 12.5px; font-weight: 700; animation: hq-alarm 1.4s ease-in-out infinite; white-space: nowrap; max-width: calc(100% - 24px); }
 .hq-alarm span { overflow: hidden; text-overflow: ellipsis; }
 .hq-alarm svg { width: 15px; height: 15px; flex: none; }
 @keyframes hq-alarm { 50% { box-shadow: 0 0 24px rgba(255, 92, 119, .8); } }
@@ -1229,7 +1229,7 @@ button.tile:active { transform: scale(.98); }
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '2.13.2';
+const BUILD = '__BUILD__', APP_VERSION = '2.13.3';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -5068,7 +5068,7 @@ HQT.office = {
         if (i % 4 === 0) { g.fillStyle = Math.sin(t * 3 + i) > 0 ? '#FF5C77' : 'rgba(255,92,119,.2)'; g.fillRect(x + bw / 2 - 1, by - bh - 5 * k, 2, 2); } }
     }
     officeTower(g, iso, e, w, h);
-    if (!e.night) { st._clouds = st._clouds || Array.from({ length: 6 }, (_, i) => [Math.random(), 0.05 + Math.random() * 0.25, 0.5 + Math.random()]); g.fillStyle = 'rgba(255,255,255,.55)'; for (const c of st._clouds) { const cx = ((c[0] * w * 1.5 + t * 6 * c[2] + iso.ox * 0.08) % (w * 1.5)) - w * 0.25, cy = c[1] * h * 0.5; for (let k = 0; k < 4; k++) { g.beginPath(); g.ellipse(cx + k * 22 * c[2], cy + Math.sin(k) * 4, 26 * c[2], 12 * c[2], 0, 0, 7); g.fill(); } } }
+    if (!e.night) drawClouds(g, iso, st, t, w, h, { id: 'office', phase: e.dusk ? 'd' : e.mood < -0.8 ? 'g' : 'a', seed: 31, n: 9, wind: 9, top0: 0.14, band: 0.26, alpha: e.dusk ? 0.85 : 0.92, top: e.dusk ? '#FFE1CC' : e.mood < -0.8 ? '#E3E6EB' : '#FFFFFF', bot: e.dusk ? '#B9789A' : e.mood < -0.8 ? '#9AA3B0' : '#C9D6E6' });
   },
   plinth(iso) { slab(iso, this, '#C9CED6', '#6F7682'); tiles(iso, -1, -1, HQ_L.W + 2, HQ_L.D + 2, '#CCD1D8', 'rgba(120,128,140,.25)', 1.5, { vary: 0.035 }); },
   hall(iso, h) { if (h.main) { iso.onFloor(h.x + 0.4, h.y + 0.9, 0.004, g => { g.fillStyle = '#3B4658'; g.fillRect(0, 0, (h.w - 0.8) * 100, 120); g.fillStyle = '#E8833A'; g.fillRect(0, 8, (h.w - 0.8) * 100, 5); g.fillRect(0, 107, (h.w - 0.8) * 100, 5); }); } },
@@ -5168,14 +5168,72 @@ HQT.office = {
   night: 'rgba(30,36,70,.55)',
 };
 // the rest of the skyscraper below the 40th floor: two glass faces running off the bottom of the screen
+// The tower the office sits on: a glass curtain wall that follows the building's faces. Each window is a pane
+// set between mullions and floor bands; in the day the glass reflects the sky (with a sheen that slides across
+// as you pan), at dusk and night some offices have their lights on. Only panes on screen are drawn.
 function officeTower(g, iso, e, w, h) {
   const m = HQT.office.margin, dep = HQT.office.depth, W = HQ_L.W, D = HQ_L.D, A = iso.P(-m, D + m, -dep), B = iso.P(W + m, D + m, -dep), C = iso.P(W + m, -m, -dep), drop = h + 400;
-  const face = (p, q, col, glass) => { g.beginPath(); g.moveTo(...p); g.lineTo(...q); g.lineTo(q[0], q[1] + drop); g.lineTo(p[0], p[1] + drop); g.closePath(); const gr = g.createLinearGradient(0, p[1], 0, p[1] + drop * 0.6); gr.addColorStop(0, col); gr.addColorStop(1, shade(col, -0.35)); g.fillStyle = gr; g.fill();
-    g.save(); g.clip(); const fh = 1.4 * iso.ZH * iso.zoom, n = 14; g.strokeStyle = 'rgba(255,255,255,.12)'; g.lineWidth = Math.max(1, 1.5 * iso.zoom); for (let i = 0; i <= n; i++) { const t = i / n, x0 = p[0] + (q[0] - p[0]) * t, y0 = p[1] + (q[1] - p[1]) * t; g.beginPath(); g.moveTo(x0, y0); g.lineTo(x0, y0 + drop); g.stroke(); }
-    for (let k = 1; k * fh < drop; k++) { g.beginPath(); g.moveTo(p[0], p[1] + k * fh); g.lineTo(q[0], q[1] + k * fh); g.strokeStyle = 'rgba(0,0,0,.18)'; g.stroke(); }
-    if (e.night || e.dusk) { const R = rng(9); g.fillStyle = 'rgba(255,214,130,.55)'; for (let k = 0; k * fh < drop; k++) for (let i = 0; i < n; i++) if (R() < 0.3) { const t = (i + 0.2) / n, x0 = p[0] + (q[0] - p[0]) * t, y0 = p[1] + (q[1] - p[1]) * t + k * fh + fh * 0.25; g.fillRect(x0, y0, (q[0] - p[0]) / n * 0.6, fh * 0.45); } }
-    g.fillStyle = glass; g.beginPath(); g.moveTo(p[0], p[1]); g.lineTo(q[0], q[1]); g.lineTo(q[0], q[1] + drop * 0.5); g.closePath(); g.fill(); g.restore(); };
-  face(A, B, e.night ? '#1B2440' : '#5E7A99', 'rgba(255,255,255,.08)'); face(B, C, e.night ? '#263055' : '#7F9CBB', 'rgba(255,255,255,.12)');
+  const fh = 1.25 * iso.ZH * iso.zoom, grey = e.mood < -0.8;
+  const face = (p, q, side, len) => {
+    // the floor bands and frame (what shows between panes)
+    g.beginPath(); g.moveTo(...p); g.lineTo(...q); g.lineTo(q[0], q[1] + drop); g.lineTo(p[0], p[1] + drop); g.closePath();
+    const base = e.night ? (side ? '#2A3350' : '#202842') : e.dusk ? (side ? '#5A5470' : '#4A4560') : grey ? (side ? '#B4BCC8' : '#9CA5B2') : side ? '#9AA6B6' : '#808C9E';
+    const gr = g.createLinearGradient(0, p[1], 0, p[1] + drop * 0.7); gr.addColorStop(0, base); gr.addColorStop(1, shade(base, -0.35)); g.fillStyle = gr; g.fill();
+    g.save(); g.clip();
+    const n = Math.round(len / 1.15), dx = (q[0] - p[0]) / n, dy = (q[1] - p[1]) / n;
+    // glass colours: sky reflection by day (lighter up top), dark at night
+    const glassTop = e.night ? '#141B30' : e.dusk ? '#C9788A' : grey ? '#8E9CB0' : side ? '#8CC4EE' : '#6FA6D6', glassBot = e.night ? '#0C1222' : e.dusk ? '#4A3A62' : grey ? '#3A4658' : side ? '#2F5F8E' : '#244C78';
+    const gg = g.createLinearGradient(0, Math.min(p[1], q[1]), 0, Math.min(p[1], q[1]) + Math.min(drop, h * 1.2)); gg.addColorStop(0, glassTop); gg.addColorStop(1, glassBot);
+    const kMax = Math.ceil(drop / fh), lit = new Path2D(), cool = new Path2D(), glass = new Path2D(), sheen = new Path2D();
+    const sheenAt = ((iso.ox * 0.004) % 1 + 1) % 1; // the reflection band slides as you pan
+    for (let k = 0; k < kMax; k++) {
+      const y0 = k * fh + fh * 0.16, y1 = k * fh + fh * 0.84;
+      // only the panes of this floor that are on screen
+      const rowTop = Math.min(p[1], q[1]) + y0, rowBot = Math.max(p[1], q[1]) + y1; if (rowBot < -10) continue; if (rowTop > h + 10) break;
+      const iA = Math.max(0, Math.floor(Math.min((-20 - p[0]) / dx, (w + 20 - p[0]) / dx))), iB = Math.min(n, Math.ceil(Math.max((-20 - p[0]) / dx, (w + 20 - p[0]) / dx)));
+      for (let i = iA; i < iB; i++) {
+        const ax = p[0] + dx * (i + 0.1), ay = p[1] + dy * (i + 0.1), bx = p[0] + dx * (i + 0.9), by = p[1] + dy * (i + 0.9);
+        if (Math.max(ay, by) + y1 < -4 || Math.min(ay, by) + y0 > h + 4) continue;
+        const pane = P2 => { P2.moveTo(ax, ay + y0); P2.lineTo(bx, by + y0); P2.lineTo(bx, by + y1); P2.lineTo(ax, ay + y1); P2.closePath(); };
+        const hsh = ((i * 73856093) ^ (k * 19349663) ^ (side * 83492791)) >>> 0, r = (hsh % 1000) / 1000;
+        if ((e.night || e.dusk) && r < (e.night ? 0.34 : 0.18)) pane(r < 0.04 ? cool : lit); else pane(glass);
+        if (!e.night && Math.abs(((i / n + k * 0.012 - sheenAt) % 1 + 1) % 1 - 0.5) < 0.035) pane(sheen);
+      }
+    }
+    g.fillStyle = gg; g.fill(glass);
+    if (!e.night) { g.fillStyle = 'rgba(255,255,255,.3)'; g.fill(sheen); }
+    if (e.night || e.dusk) { g.fillStyle = 'rgba(255,212,138,.88)'; g.fill(lit); g.fillStyle = 'rgba(210,230,255,.85)'; g.fill(cool); }
+    // a soft fade toward the bottom, as if the tower goes on into the haze
+    const fade = g.createLinearGradient(0, Math.min(p[1], q[1]) + h * 0.5, 0, Math.min(p[1], q[1]) + h * 1.3); fade.addColorStop(0, 'rgba(0,0,0,0)'); fade.addColorStop(1, e.night ? 'rgba(7,11,28,.7)' : 'rgba(40,60,90,.35)'); g.fillStyle = fade; g.fillRect(Math.min(p[0], q[0]), Math.min(p[1], q[1]), Math.abs(q[0] - p[0]), drop);
+    g.restore();
+  };
+  face(A, B, 0, W + 2 * m); face(B, C, 1, D + 2 * m);
+}
+// ---------- clouds ----------
+// Puffy clouds at different heights. Far ones drift slowly, barely move when you pan and hardly change size when you
+// zoom; near ones drift faster, slide more with the camera and grow as you zoom in (parallax), all in one wind.
+// Each shape is painted once into a small image (lit from above, shaded underneath) and reused.
+function cloudSprite(seed, top, bot) {
+  const c = document.createElement('canvas'), W = 300, H = 130; c.width = W; c.height = H; const g = c.getContext('2d'), R = rng(seed);
+  const puffs = []; const n = 6 + Math.floor(R() * 4); for (let i = 0; i < n; i++) { const t = i / (n - 1), r = (24 + R() * 20) * (1 - Math.abs(t - 0.5) * 0.9); puffs.push([40 + t * (W - 80) + (R() - 0.5) * 14, H - 30 - r * (0.55 + R() * 0.5), r]); }
+  const shape = () => { g.beginPath(); for (const [x, y, r] of puffs) { g.moveTo(x + r, y); g.arc(x, y, r, 0, Math.PI * 2); } g.rect(36, H - 44, W - 72, 16); };
+  const gr = g.createLinearGradient(0, 10, 0, H - 26); gr.addColorStop(0, top); gr.addColorStop(0.65, top); gr.addColorStop(1, bot);
+  g.save(); shape(); g.clip(); g.fillStyle = gr; g.fillRect(0, 0, W, H); // flat-bottomed, lit from above
+  g.fillStyle = 'rgba(255,255,255,.35)'; for (const [x, y, r] of puffs) { g.beginPath(); g.arc(x - r * 0.2, y - r * 0.25, r * 0.6, 0, 7); g.fill(); } g.restore();
+  return c;
+}
+function drawClouds(g, iso, st, t, w, h, o) {
+  const key = o.id + o.phase;
+  if (st._cloudSet?.key !== key) { const R = rng(o.seed); st._cloudSet = { key, sprites: Array.from({ length: 4 }, (_, i) => cloudSprite(o.seed * 10 + i, o.top, o.bot)), list: Array.from({ length: o.n }, (_, i) => ({ u: R(), v: R(), d: 0.18 + R() * 0.7, s: i % 4, sz: 0.55 + R() * 0.55 })).sort((a, b) => a.d - b.d) }; }
+  const S = st._cloudSet, span = w * 1.8 + 600;
+  for (const c of S.list) {
+    const kz = clamp(1 + (iso.zoom - 0.8) * c.d * 0.7, 0.55, 2.4) * c.sz * (0.55 + c.d * 0.75), sp = S.sprites[c.s], cw = sp.width * kz * 0.7, ch = sp.height * kz * 0.7;
+    const x = ((c.u * span + t * o.wind * (0.35 + c.d) + iso.ox * c.d * 0.55) % span + span) % span - 300;
+    const y = o.top0 * h + c.v * o.band * h + iso.oy * c.d * 0.3 - ch * 0.6;
+    if (x > w + 20 || x + cw < -20 || y > h || y + ch < -20) continue;
+    g.globalAlpha = o.alpha * (0.6 + c.d * 0.4); g.drawImage(sp, x, y, cw, ch);
+  }
+  g.globalAlpha = 1;
 }
 function deposits(iso, a, face, door, knob) { onAnchor(iso, a, (g, W, H) => { const cols = 3, rows = 6, cw = W / cols, rh = H / rows; g.fillStyle = shade(face, -0.35); g.fillRect(-4, -4, W + 8, H + 4); for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) { g.fillStyle = (r + c) % 2 ? face : shade(face, -0.08); g.fillRect(c * cw + 2, r * rh + 2, cw - 4, rh - 4); g.fillStyle = door; g.fillRect(c * cw + cw * 0.15, r * rh + rh * 0.2, cw * 0.7, rh * 0.6); g.fillStyle = knob; g.beginPath(); g.arc(c * cw + cw * 0.8, r * rh + rh / 2, 2.4, 0, 7); g.fill(); } }); }
 function vesselPos(a, i) { return [a.x + 0.55 + (i % 6) * 1.55, a.y + 0.55 + Math.floor(i / 6) * 1.15]; }
@@ -5308,7 +5366,7 @@ HQT.village = {
     { const k = clamp(iso.zoom, 0.18, 2.6), top = iso.P(HQ_L.W / 2, -this.margin - 2, 0)[1], mist = e.night ? '#121C3A' : e.dusk ? '#E8B090' : '#CFE8F2';
       for (const [i, col, par] of [[0, e.night ? '#1C2E3A' : '#9CC9A6', 0.3], [1, e.night ? '#16261F' : '#7DB37E', 0.5]]) { const base = top + (20 + i * 30) * k; g.beginPath(); g.moveTo(-10, base + 300 * k); for (let x = -10; x <= w + 10; x += 12) { const u = (x - iso.ox * par) / k; g.lineTo(x, base - (Math.sin(u * 0.006 + i * 2) * 50 + Math.sin(u * 0.017) * 20 + 30) * k); } g.lineTo(w + 10, base + 300 * k); g.closePath(); const gr = g.createLinearGradient(0, base - 80 * k, 0, base + 300 * k); gr.addColorStop(0, col); gr.addColorStop(1, mist); g.fillStyle = gr; g.fill(); }
       g.fillStyle = mist; g.fillRect(0, top + 330 * k, w, h); }
-    if (!e.night) { st._clouds = st._clouds || Array.from({ length: 7 }, () => [Math.random(), 0.04 + Math.random() * 0.3, 0.6 + Math.random()]); g.fillStyle = 'rgba(255,255,255,.8)'; for (const c of st._clouds) { const cx = ((c[0] * w * 1.5 + t * 5 * c[2] + iso.ox * 0.06) % (w * 1.5)) - w * 0.25, cy = c[1] * h * 0.45; for (let k = 0; k < 5; k++) { g.beginPath(); g.arc(cx + k * 18 * c[2], cy - Math.sin(k * 1.3) * 8 * c[2], 18 * c[2], 0, 7); g.fill(); } } }
+    if (!e.night) drawClouds(g, iso, st, t, w, h, { id: 'village', phase: e.dusk ? 'd' : e.mood < -0.8 ? 'g' : 'a', seed: 57, n: 10, wind: 7, top0: 0.14, band: 0.28, alpha: 0.95, top: e.dusk ? '#FFE6D2' : e.mood < -0.8 ? '#E6E9EE' : '#FFFFFF', bot: e.dusk ? '#C98AA0' : e.mood < -0.8 ? '#A2AAB6' : '#D2E0EE' });
   },
   plinth(iso) {
     const b = slab(iso, this, VL.grass, '#7A5232', { left: '#6A4528', right: '#80573A' });
@@ -6275,7 +6333,9 @@ PAGES.hq = {
       st.rafId = requestAnimationFrame(loop);
     };
     st.rafId = requestAnimationFrame(loop);
-    p.cleanups.push(() => { cancelAnimationFrame(st.rafId); st.ro.disconnect(); });
+    // the stats bar is docked under the header; panels below it follow its height
+    const bar = $('.hq-top', p.body), bro = new ResizeObserver(() => p.body.style.setProperty('--hq-bar', bar.offsetHeight + 'px')); bro.observe(bar);
+    p.cleanups.push(() => { cancelAnimationFrame(st.rafId); st.ro.disconnect(); bro.disconnect(); });
   },
   async load(p, quiet) {
     const st = p.hq;
