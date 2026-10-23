@@ -1230,7 +1230,7 @@ button.tile:active { transform: scale(.98); }
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '2.14.1';
+const BUILD = '__BUILD__', APP_VERSION = '2.14.2';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -4948,14 +4948,84 @@ function plantPot(iso, x, y, s, pot, leaf, o = {}) {
   for (let i = 0; i < n; i++) { const t = (i / n) * Math.PI * 2 + R(), r = (0.12 + R() * 0.22) * s; iso.ball(x + Math.cos(t) * r, y + Math.sin(t) * r, (0.5 + R() * 0.55) * s, (0.16 + R() * 0.08) * s, shade(leaf, (R() - 0.5) * 0.35)); }
   iso.ball(x, y, 0.95 * s, 0.2 * s, shade(leaf, 0.12));
 }
-function treeRound(iso, x, y, s, trunk, leaf) { iso.cyl(x, y, 0, 0.12 * s, 0.9 * s, trunk); const R = rng(Math.round(x * 31 + y * 7)); for (let i = 0; i < 7; i++) iso.ball(x + (R() - 0.5) * 0.6 * s, y + (R() - 0.5) * 0.6 * s, (1.1 + R() * 0.7) * s, (0.38 + R() * 0.2) * s, shade(leaf, (R() - 0.5) * 0.3)); iso.ball(x, y, 1.9 * s, 0.42 * s, shade(leaf, 0.15)); }
-function treePine(iso, x, y, s, trunk, leaf) { iso.cyl(x, y, 0, 0.1 * s, 0.5 * s, trunk); for (let i = 0; i < 4; i++) iso.cone(x, y, (0.35 + i * 0.5) * s, (0.75 - i * 0.15) * s, 0.9 * s, shade(leaf, i * 0.06)); }
+// ---------- trees ----------
+// Drawn from many small pieces with light from the upper left (the same sun as the rest of the world), a soft
+// shadow on the ground, and a little randomness per tree so no two match. They're painted into the cached world,
+// so the detail costs nothing per frame.
+const SUN = [-0.55, -0.35]; // where the light comes from, in screen terms (up and to the left)
+function treeShadow(iso, x, y, r) { iso.ellipse(x + 0.18, y + 0.12, 0.004, r, 'rgba(20,30,10,.18)'); iso.ellipse(x + 0.1, y + 0.06, 0.005, r * 0.6, 'rgba(20,30,10,.12)'); }
+function trunkShape(iso, x, y, z0, z1, w0, w1, col, lean = 0) {
+  const g = iso.g, k = iso.TW / 2 * iso.zoom, [bx, by] = iso.P(x, y, z0), [tx, ty] = iso.P(x + lean, y - lean * 0.4, z1), b = w0 * k, t = w1 * k;
+  g.beginPath(); g.moveTo(bx - b, by); g.quadraticCurveTo((bx + tx) / 2 - b * 0.6, (by + ty) / 2, tx - t, ty); g.lineTo(tx + t, ty); g.quadraticCurveTo((bx + tx) / 2 + b * 0.6, (by + ty) / 2, bx + b, by); g.closePath();
+  const gr = g.createLinearGradient(bx - b, 0, bx + b, 0); gr.addColorStop(0, shade(col, 0.18)); gr.addColorStop(0.55, col); gr.addColorStop(1, shade(col, -0.35)); g.fillStyle = gr; g.fill();
+  // bark lines
+  g.strokeStyle = rgba(shade(col, -0.45), 0.45); g.lineWidth = Math.max(0.6, 0.8 * iso.zoom); const R = rng(Math.round(x * 17 + y * 5));
+  for (let i = 0; i < 5; i++) { const u = 0.15 + R() * 0.7, f = (R() - 0.5) * 0.9; g.beginPath(); g.moveTo(bx + f * b + (tx - bx) * u, by + (ty - by) * u); g.lineTo(bx + f * b * 0.9 + (tx - bx) * (u + 0.12), by + (ty - by) * (u + 0.12)); g.stroke(); }
+  return [tx, ty];
+}
+// a broadleaf tree: a tapered trunk with a fork, and a canopy of overlapping leaf clumps lit from the upper left
+function treeRound(iso, x, y, s, trunk, leaf) {
+  const R = rng(Math.round(x * 31 + y * 7)), H = (0.9 + R() * 0.3) * s, g = iso.g;
+  treeShadow(iso, x, y, 0.95 * s);
+  trunkShape(iso, x, y, 0, H, 0.12 * s, 0.07 * s, trunk, (R() - 0.5) * 0.15);
+  // two branches reaching into the canopy
+  const [tx, ty] = iso.P(x, y, H), k = iso.TW / 2 * iso.zoom; g.strokeStyle = shade(trunk, -0.1); g.lineCap = 'round';
+  for (const d of [-1, 1]) { g.lineWidth = Math.max(1, 0.07 * s * k); g.beginPath(); g.moveTo(tx, ty + 0.1 * s * k); g.quadraticCurveTo(tx + d * 0.2 * s * k, ty - 0.1 * s * k, tx + d * 0.42 * s * k, ty - 0.32 * s * k); g.stroke(); }
+  g.lineCap = 'butt';
+  // the canopy: clumps on a rough ellipsoid, drawn back to front and bottom to top
+  const cz = H + 0.62 * s, clumps = [];
+  for (let i = 0; i < 18; i++) { const a = R() * Math.PI * 2, rr = Math.sqrt(R()), dx = Math.cos(a) * rr * 0.62 * s, dy = Math.sin(a) * rr * 0.62 * s, dz = (R() - 0.35) * 0.62 * s; clumps.push([dx, dy, dz, (0.3 + R() * 0.16) * s]); }
+  clumps.push([0, 0, 0.28 * s, 0.4 * s]);
+  clumps.sort((p, q) => (p[0] + p[1]) - (q[0] + q[1]) || p[2] - q[2]);
+  for (const [dx, dy, dz, r] of clumps) {
+    // lighter toward the sun (upper left on screen = -x+y and up), darker underneath and on the far side
+    const lit = clamp(((dy - dx) * 0.55 + dz * 0.9) / s, -0.6, 0.7);
+    iso.ball(x + dx, y + dy, cz + dz, r, shade(leaf, lit * 0.32), { hi: 0.22 });
+  }
+  // leaf texture: little highlights on the sunny side and dark gaps in the shade
+  const [cx, cy] = iso.P(x, y, cz), RR = 0.7 * s * k;
+  for (let i = 0; i < 46; i++) { const a = R() * Math.PI * 2, rr = Math.sqrt(R()) * RR, px = cx + Math.cos(a) * rr, py = cy + Math.sin(a) * rr * 0.8, sunny = Math.cos(a) * -0.8 + Math.sin(a) * -0.6 > 0.1;
+    g.fillStyle = sunny ? rgba(shade(leaf, 0.45), 0.55) : rgba(shade(leaf, -0.5), 0.4); g.beginPath(); g.ellipse(px, py, (1.2 + R() * 1.6) * iso.zoom, (0.9 + R()) * iso.zoom, R() * 3, 0, 7); g.fill(); }
+}
+// a conifer: tiers of needles with ragged edges, lighter on the sunny side, getting smaller toward the top
+function treePine(iso, x, y, s, trunk, leaf) {
+  const R = rng(Math.round(x * 13 + y * 29)), g = iso.g, k = iso.TW / 2 * iso.zoom, tiers = 5, H = (2.2 + R() * 0.5) * s;
+  treeShadow(iso, x, y, 0.75 * s);
+  trunkShape(iso, x, y, 0, 0.55 * s, 0.09 * s, 0.07 * s, trunk);
+  for (let t = 0; t < tiers; t++) {
+    const f = t / (tiers - 1), zb = (0.35 + f * 1.25) * s, zt = zb + (0.85 - f * 0.25) * s + (t === tiers - 1 ? 0.35 * s : 0), r = (0.72 - f * 0.45) * s;
+    const [ax, ay] = iso.P(x, y, zt), [bx, by] = iso.P(x, y, zb), rx = r * k * 1.41, ry = rx * 0.5, pts = [];
+    for (let i = 0; i <= 16; i++) { const a = Math.PI * (i / 16), jag = i % 2 ? 0.8 : 1 + R() * 0.08; pts.push([bx - Math.cos(a) * rx * jag, by + Math.sin(a) * ry * jag + (i % 2 ? -3 : 2) * iso.zoom * s]); }
+    g.beginPath(); g.moveTo(ax, ay); for (const [px, py] of pts) g.lineTo(px, py); g.closePath();
+    const col = shade(leaf, -0.05 - (1 - f) * 0.12), gr = g.createLinearGradient(bx - rx, 0, bx + rx, 0); gr.addColorStop(0, shade(col, 0.25)); gr.addColorStop(0.5, col); gr.addColorStop(1, shade(col, -0.35)); g.fillStyle = gr; g.fill();
+    // needle strokes
+    g.strokeStyle = rgba(shade(leaf, 0.35), 0.35); g.lineWidth = Math.max(0.6, 0.8 * iso.zoom);
+    for (let i = 0; i < 7; i++) { const u = R(), px = bx - rx * 0.7 + u * rx * 1.4; g.beginPath(); g.moveTo(ax + (px - ax) * 0.35, ay + (by - ay) * 0.35); g.lineTo(px, by + ry * 0.6 * Math.sin(Math.PI * u)); g.stroke(); }
+  }
+}
+// a coconut palm: a curving ringed trunk, a crown of drooping fronds made of many leaflets, coconuts, and a dead frond or two
 function palm(iso, x, y, s, R = rng(Math.round(x * 53 + y * 11))) {
-  const lean = (R() - 0.5) * 0.9, segs = 7; let px = x, py = y;
-  for (let i = 0; i < segs; i++) { const z = i * 0.42 * s, nx = x + lean * (i / segs) ** 2, ny = y - lean * 0.4 * (i / segs) ** 2; iso.cyl(nx, ny, z, (0.12 - i * 0.008) * s, 0.44 * s, i % 2 ? '#9C7246' : '#8A6239'); px = nx; py = ny; }
-  const top = segs * 0.42 * s, [cx, cy] = iso.P(px, py, top), g = iso.g, L = 1.3 * s * iso.TW / 2 * iso.zoom;
-  for (let i = 0; i < 7; i++) { const t = i / 7 * Math.PI * 2 + R(), ex = cx + Math.cos(t) * L * 1.3, ey = cy + Math.sin(t) * L * 0.55 + L * 0.35; g.beginPath(); g.moveTo(cx, cy); g.quadraticCurveTo((cx + ex) / 2, Math.min(cy, ey) - L * 0.45, ex, ey); g.quadraticCurveTo((cx + ex) / 2 + 4 * iso.zoom, Math.min(cy, ey) - L * 0.25, cx, cy + 2 * iso.zoom); g.fillStyle = shade('#3E9B4A', (R() - 0.5) * 0.3); g.fill(); }
-  for (let i = 0; i < 3; i++) iso.ball(px + (i - 1) * 0.1 * s, py, top - 0.1, 0.09 * s, '#6B4A2A');
+  const g = iso.g, k = iso.TW / 2 * iso.zoom, lean = (R() - 0.5) * 1.1, segs = 10, segH = 0.32 * s;
+  treeShadow(iso, x + lean * 0.6, y - lean * 0.2, 0.9 * s);
+  let px = x, py = y;
+  for (let i = 0; i < segs; i++) { const z = i * segH, f = (i / segs) ** 1.8, nx = x + lean * f, ny = y - lean * 0.4 * f, w = (0.13 - i * 0.005) * s;
+    iso.cyl(nx, ny, z, w, segH * 0.96, i % 2 ? '#A07A4C' : '#8C6A3E', { top: '#6E5030' }); px = nx; py = ny; }
+  const top = segs * segH, [cx, cy] = iso.P(px, py, top), L = 1.85 * s * k;
+  // fronds: back ones first and darker, front ones lighter
+  const fronds = []; const n = 10; for (let i = 0; i < n; i++) fronds.push(i / n * Math.PI * 2 + R() * 0.4);
+  fronds.sort((a, b) => Math.sin(a) - Math.sin(b));
+  const frond = (a, len, col, droop, dead) => {
+    const ex = cx + Math.cos(a) * len, ey = cy + Math.sin(a) * len * 0.5 + len * droop, qx = cx + Math.cos(a) * len * 0.55, qy = cy + Math.sin(a) * len * 0.28 - len * (dead ? -0.1 : 0.45);
+    const at = t => [(1 - t) * (1 - t) * cx + 2 * (1 - t) * t * qx + t * t * ex, (1 - t) * (1 - t) * cy + 2 * (1 - t) * t * qy + t * t * ey];
+    g.strokeStyle = shade(col, -0.25); g.lineWidth = Math.max(1, 1.6 * iso.zoom * s); g.beginPath(); g.moveTo(cx, cy); g.quadraticCurveTo(qx, qy, ex, ey); g.stroke();
+    g.strokeStyle = col; g.lineWidth = Math.max(0.7, 1.15 * iso.zoom * s); g.lineCap = 'round';
+    for (let j = 2; j <= 15; j++) { const t = j / 15, [mx, my] = at(t), [nx2, ny2] = at(Math.min(1, t + 0.02)), tx = nx2 - mx, ty = ny2 - my, tl = Math.hypot(tx, ty) || 1, ux = tx / tl, uy = ty / tl, ll = len * 0.19 * (1 - t * 0.55);
+      for (const side of [-1, 1]) { g.beginPath(); g.moveTo(mx, my); g.lineTo(mx - uy * side * ll * 0.8 + ux * ll * 0.45, my + ux * side * ll * 0.8 + uy * ll * 0.45 + ll * 0.75); g.stroke(); } }
+    g.lineCap = 'butt';
+  };
+  for (let i = 0; i < 2; i++) frond(R() * Math.PI * 2, L * 0.7, '#9C7A42', 0.9, true); // dead fronds hanging under the crown
+  for (const a of fronds) { const back = Math.sin(a) < 0, col = shade(back ? '#2F7F3A' : '#3E9B4A', (Math.cos(a) < 0 ? 0.12 : -0.08) + (R() - 0.5) * 0.08); frond(a, L * (0.85 + R() * 0.3), col, 0.6 + R() * 0.3, false); }
+  for (let i = 0; i < 4; i++) iso.ball(px + (i % 2 - 0.5) * 0.12 * s, py + (i < 2 ? -0.05 : 0.07) * s, top - 0.12 * s, 0.085 * s, '#6B4A2A', { hi: 0.25 });
 }
 function rock(iso, x, y, s, col) { const R = rng(Math.round(x * 71 + y * 17)); for (let i = 0; i < 3; i++) iso.ball(x + (R() - 0.5) * 0.4 * s, y + (R() - 0.5) * 0.4 * s, 0.1 * s, (0.22 + R() * 0.16) * s, shade(col, (R() - 0.5) * 0.25), { hi: 0.2 }); }
 // floors drawn in floor space (1 unit = 1/100 tile)
