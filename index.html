@@ -1229,7 +1229,7 @@ button.tile:active { transform: scale(.98); }
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '2.13.3';
+const BUILD = '__BUILD__', APP_VERSION = '2.13.4';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -5059,14 +5059,9 @@ HQT.office = {
     const e = hqEnv(st);
     skyGrad(g, w, h, e.night ? [[0, '#070B1C'], [0.6, '#121A38'], [1, '#1D2650']] : e.dusk ? [[0, '#2B2A5C'], [0.55, '#B8607A'], [1, '#F4A65E']] : e.mood < -0.8 ? [[0, '#5A6478'], [1, '#B9B0A8']] : [[0, '#5FA4E6'], [1, '#D9ECF8']]);
     if (e.night) stars(g, st, w, h * 0.6, 50, 0.05, t, 11, { a: 0.6 });
-    // skyline behind the tower: two layers sized with the zoom, so it stays in scale with the building
-    const k = clamp(iso.zoom, 0.18, 2.6), base = iso.P(HQ_L.W / 2, -6, -this.depth)[1] + 40 * k;
-    for (const [layer, par, col, win] of [[0, 0.35, e.night ? '#0E1530' : e.dusk ? '#4A3A62' : '#8FA9C4', 0.25], [1, 0.6, e.night ? '#141D40' : e.dusk ? '#3A2D52' : '#6E8BAA', 0.5]]) {
-      const R = rng(40 + layer), step = 120 * k, x0 = iso.w / 2 + iso.ox * par - step * 40;
-      for (let i = 0; i < 80; i++) { const bw = (0.45 + R() * 0.5) * step, bh = (1.2 + R() * 3.4) * step * (layer ? 1 : 0.8), x = x0 + i * step + R() * step * 0.3, by = base - layer * 26 * k + iso.oy * par * 0.15; if (x > iso.w + step || x + bw < -step) continue;
-        g.fillStyle = col; g.fillRect(x, by - bh, bw, bh + h); if (e.night || e.dusk) { const R2 = rng(i * 7 + layer), sx = Math.max(4, 8 * k), sy = Math.max(5, 9 * k); g.fillStyle = 'rgba(255,214,130,' + win + ')'; for (let yy = by - bh + sy; yy < by + 20; yy += sy) for (let xx = x + 4; xx < x + bw - 4; xx += sx) if (R2() < 0.35) g.fillRect(xx, yy, Math.max(1.5, 3 * k), Math.max(2, 4 * k)); }
-        if (i % 4 === 0) { g.fillStyle = Math.sin(t * 3 + i) > 0 ? '#FF5C77' : 'rgba(255,92,119,.2)'; g.fillRect(x + bw / 2 - 1, by - bh - 5 * k, 2, 2); } }
-    }
+    // the city behind the tower: three layers of buildings, hazier and smaller the farther away, each moving less
+    // as you pan (parallax). Real proportions, setbacks on the tall ones, roof details, and window grids.
+    skyline(g, iso, e, t, w, h, this.depth);
     officeTower(g, iso, e, w, h);
     if (!e.night) drawClouds(g, iso, st, t, w, h, { id: 'office', phase: e.dusk ? 'd' : e.mood < -0.8 ? 'g' : 'a', seed: 31, n: 9, wind: 9, top0: 0.14, band: 0.26, alpha: e.dusk ? 0.85 : 0.92, top: e.dusk ? '#FFE1CC' : e.mood < -0.8 ? '#E3E6EB' : '#FFFFFF', bot: e.dusk ? '#B9789A' : e.mood < -0.8 ? '#9AA3B0' : '#C9D6E6' });
   },
@@ -5171,6 +5166,46 @@ HQT.office = {
 // The tower the office sits on: a glass curtain wall that follows the building's faces. Each window is a pane
 // set between mullions and floor bands; in the day the glass reflects the sky (with a sheen that slides across
 // as you pan), at dusk and night some offices have their lights on. Only panes on screen are drawn.
+function skyline(g, iso, e, t, w, h, depth) {
+  const k = clamp(iso.zoom, 0.18, 2.6), horizon = iso.P(HQ_L.W / 2, -6, -depth)[1] + 40 * k;
+  const night = e.night, dusk = e.dusk, grey = e.mood < -0.8;
+  // farthest first: [parallax, scale, body colour, window light alpha, haze]
+  const layers = [
+    [0.22, 0.55, night ? '#121A36' : dusk ? '#5A4A72' : grey ? '#A3ABB8' : '#A9BFD6', 0.35, 0.5],
+    [0.38, 0.78, night ? '#151E3E' : dusk ? '#463A60' : grey ? '#8B94A3' : '#8BA6C2', 0.5, 0.3],
+    [0.58, 1.0, night ? '#19234A' : dusk ? '#382E50' : grey ? '#727C8C' : '#6F8CAB', 0.62, 0.12],
+  ];
+  layers.forEach(([par, sc, col, wa, haze], L) => {
+    const R = rng(91 + L * 17), unit = 90 * k * sc, base = horizon - L * 18 * k + iso.oy * par * 0.12, x0 = iso.w / 2 + iso.ox * par - unit * 60;
+    let x = x0;
+    for (let i = 0; i < 140 && x < iso.w + unit * 2; i++) {
+      // a real building: width 1–2.2 units, height 1–3.6 units (tall ones are rarer), gaps between some
+      const bw = unit * (0.9 + R() * 1.3), tall = R(), bh = unit * (tall > 0.9 ? 3 + R() * 1.4 : tall > 0.6 ? 1.8 + R() * 1.2 : 0.8 + R() * 1.1), gap = R() < 0.25 ? unit * 0.15 : 0;
+      const kind = R(), bx = x, by = base - bh; x += bw + gap;
+      if (bx > iso.w + 10 || bx + bw < -10) continue;
+      const body = shade(col, (R() - 0.5) * 0.1), sideW = bw * 0.18;
+      g.fillStyle = body; g.fillRect(bx, by, bw, bh + h);
+      g.fillStyle = shade(body, -0.18); g.fillRect(bx + bw - sideW, by, sideW, bh + h); // the shaded side
+      // setbacks and roof details
+      if (kind < 0.3 && bh > unit * 1.6) { const sw = bw * 0.62, sh = unit * (0.4 + R() * 0.5); g.fillStyle = body; g.fillRect(bx + (bw - sw) / 2, by - sh, sw, sh); g.fillStyle = shade(body, -0.18); g.fillRect(bx + (bw + sw) / 2 - sw * 0.18, by - sh, sw * 0.18, sh);
+        if (R() < 0.6) { g.fillStyle = shade(body, -0.1); g.fillRect(bx + bw / 2 - 1 * k, by - sh - unit * 0.5, 2 * k, unit * 0.5); if (Math.sin(t * 2.5 + i) > 0) { g.fillStyle = '#FF5C77'; g.beginPath(); g.arc(bx + bw / 2, by - sh - unit * 0.5, 2 * k, 0, 7); g.fill(); } } }
+      else if (kind < 0.45) { g.fillStyle = shade(body, -0.25); g.fillRect(bx + bw * 0.6, by - unit * 0.22, bw * 0.2, unit * 0.22); g.fillRect(bx + bw * 0.62, by - unit * 0.3, bw * 0.16, unit * 0.08); } // water tower
+      else if (kind < 0.6) { g.fillStyle = shade(body, -0.12); g.fillRect(bx + bw * 0.15, by - unit * 0.12, bw * 0.3, unit * 0.12); g.fillRect(bx + bw * 0.55, by - unit * 0.08, bw * 0.2, unit * 0.08); } // rooftop machinery
+      g.fillStyle = shade(body, 0.1); g.fillRect(bx, by, bw, Math.max(1, 2 * k)); // roof edge catching the light
+      // windows: a grid of floors and bays, only where it's on screen and big enough to see
+      const fy = unit * 0.12, wx = unit * 0.1, ww = wx * 0.5, wh = fy * 0.58;
+      if (ww >= 1.2) {
+        const R2 = rng(i * 131 + L * 7), y0 = Math.max(by + fy * 0.6, -fy), y1 = Math.min(base + unit * 2, h + fy);
+        for (let yy = by + fy * 0.6; yy < y1; yy += fy) { if (yy < y0) { for (let xx = bx + wx * 0.6; xx < bx + bw - sideW - wx * 0.4; xx += wx) R2(); continue; }
+          for (let xx = bx + wx * 0.6; xx < bx + bw - sideW - wx * 0.4; xx += wx) { const r = R2();
+            if (night || dusk) { if (r < (night ? 0.3 : 0.16)) { g.fillStyle = r < 0.03 ? `rgba(200,225,255,${wa})` : `rgba(255,212,140,${wa})`; g.fillRect(xx, yy, ww, wh); } }
+            else if (r < 0.85) { g.fillStyle = r < 0.12 ? 'rgba(255,255,255,.22)' : 'rgba(20,40,70,.16)'; g.fillRect(xx, yy, ww, wh); } } }
+      }
+    }
+    // atmospheric haze over the farther layers
+    if (haze > 0) { const hz = night ? `rgba(20,28,60,${haze * 0.6})` : dusk ? `rgba(230,150,140,${haze * 0.5})` : `rgba(215,232,248,${haze})`; const top = base - unit * 5, gr = g.createLinearGradient(0, top, 0, base - unit * 1.5); gr.addColorStop(0, hz.replace(/[\d.]+\)$/, '0)')); gr.addColorStop(1, hz); g.fillStyle = gr; g.fillRect(0, top, iso.w, h - top + 10); }
+  });
+}
 function officeTower(g, iso, e, w, h) {
   const m = HQT.office.margin, dep = HQT.office.depth, W = HQ_L.W, D = HQ_L.D, A = iso.P(-m, D + m, -dep), B = iso.P(W + m, D + m, -dep), C = iso.P(W + m, -m, -dep), drop = h + 400;
   const fh = 1.25 * iso.ZH * iso.zoom, grey = e.mood < -0.8;
@@ -6892,9 +6927,16 @@ function analystCard() {
     ${rowToggle('aiGuard', 'Risk Officer', 'Sees only position size, swings and drawdowns')}
     ${rowToggle('aiChart', 'Chartist', 'Sees only the price chart and volume')}
     ${rowToggle('aiSize', 'Let them shrink risky buys', 'The Analyst has the final say. They can cut a buy down, never make one bigger')}
+    <div class="cell"><div class="main"><div class="title">Test the AI</div><div class="sub" id="ai-test-r">Makes one call to check the key works. Costs about a hundredth of a cent.</div></div><button class="btn btn-quiet btn-sm" data-act="aiTest">Test</button></div>
     <div class="cell"><div class="main"><div class="title">Most AI calls a day</div><div class="sub">Shared by all AI members. Specialists sit out first so the Analyst always gets a vote. Each call costs about a hundredth of a cent.</div></div>${seg('aiMax', [['40', '40'], ['120', '120'], ['300', '300']], String(SET().aiDailyMax ?? 120))}</div>` : ''}</div>`;
 }
 document.addEventListener('seg', e => { if (e.target.dataset?.seg === 'aiMax') saveSetting({ aiDailyMax: +e.detail }); });
+ACT.aiTest = async el => {
+  const r = $('#ai-test-r'); busy(el, true); if (r) r.textContent = 'Asking Claude…';
+  try { const x = await post('analyst/test'); if (r) { r.textContent = x.ok ? `Working: ${x.model} answered in ${(x.ms / 1000).toFixed(1)} s ("${x.reply}")` : `Not working: ${x.msg}`; r.className = 'sub ' + (x.ok ? 'up' : 'dn'); } }
+  catch (e) { if (r) { r.textContent = 'Not working: ' + e.message; r.className = 'sub dn'; } }
+  busy(el, false);
+};
 
 // ===================================================================
 // Settings

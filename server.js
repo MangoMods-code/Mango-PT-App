@@ -5312,6 +5312,12 @@ async function owlVote(sym, b, d, bz, up, ctx, watch) {
 }
 // kept for older callers: the Analyst alone
 async function analystVote(sym, b, d, bz, up, ctx = {}) { const r = await aiRound(sym, b, d, bz, up, ctx, []); return r[r.length - 1] || null; }
+// one tiny call to check the key works (costs about a hundredth of a cent and counts toward today's calls)
+POST('/api/analyst/test', auth, async () => {
+  if (!AI_KEY) return { ok: false, msg: 'No ANTHROPIC_API_KEY on the server.' };
+  const t0 = Date.now(), v = await aiCall('test', 'You are checking that an API key works. Reply with ONLY this JSON: {"vote":"pass","confidence":0,"size":1,"reason":"Key works."}', 'Ping.', 'buy');
+  return v.c === 'ai' ? { ok: true, ms: Date.now() - t0, model: AI_MODEL, reply: v.line } : { ok: false, msg: (await aiUse()).lastError?.msg || v.line, model: AI_MODEL };
+});
 GET('/api/analyst', auth, async () => { const u = await aiUse(); return { key: !!AI_KEY, on: S.aiOn !== false, sizing: S.aiSize !== false, debate: S.aiDebate !== false, bench: AI_BENCH.map(m => ({ k: m.k, name: m.name, role: m.role, on: S[m.set] !== false })), model: AI_MODEL, dailyMax: S.aiDailyMax ?? 120, today: { calls: u.calls, cost: aiCost(u.inT, u.outT), errors: u.errors, by: u.by || {} }, month: { calls: u.mCalls, cost: aiCost(u.mIn, u.mOut) }, lastError: u.lastError || null }; });
 
 // =====================================================================
@@ -5504,7 +5510,7 @@ const ICONS = {};
 const icon = (name, fn) => ICONS[name] || (ICONS[name] = fn());
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD646"/><stop offset=".5" stop-color="#FFA028"/><stop offset="1" stop-color="#FA5256"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="#1E1430"/><ellipse cx="31" cy="36" rx="18" ry="22" transform="rotate(30 31 36)" fill="url(#g)"/><path d="M20 41l6.5-6 5 3.5 9.5-10" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37 28.5h4.5V33" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="45" cy="11.5" rx="9" ry="4.6" transform="rotate(-24 45 11.5)" fill="#3BD68A"/></svg>`;
 let BUILD = 'dev', INDEX = null, INDEX_GZ = null;
-const APP_VERSION = '2.13.3'; // stamped by build.sh from package.json
+const APP_VERSION = '2.13.4'; // stamped by build.sh from package.json
 function loadIndex() {
   const file = path.join(__dirname, 'index.html');
   let html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<!doctype html><title>Mango</title><p>index.html is missing next to server.js.</p>';
