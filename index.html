@@ -1110,6 +1110,7 @@ button.tile:active { transform: scale(.98); }
 .hb-w { display: block; font-size: 10px; color: #B9B2CC; font-weight: 700; } .hb-w.hi { color: #FFD646; }
 .hb-card { display: flex; gap: 8px; margin: 10px 0 4px; } .hb-card span { flex: 1; padding: 8px 10px; border-radius: 12px; background: rgba(255,255,255,.06); font-size: 11.5px; color: #B9B2CC; } .hb-card b { display: block; font-size: 20px; color: #fff; font-variant-numeric: tabular-nums; }
 .hq-night { pointer-events: auto; display: flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 12px; background: rgba(40, 30, 80, .82); color: #E3DBFF; font-size: 12.5px; font-weight: 700; box-shadow: inset 0 0 0 1px rgba(199, 146, 234, .35); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); } .hq-night svg { width: 14px; height: 14px; color: #C792EA; } .hq-night.hidden { display: none; }
+.hq-tag { transition: opacity .25s ease; } .hq-tag.hid { opacity: 0 !important; pointer-events: none; }
 
 /* ---------- motion ---------- */
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -1229,7 +1230,7 @@ button.tile:active { transform: scale(.98); }
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '2.14.0';
+const BUILD = '__BUILD__', APP_VERSION = '2.14.1';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -6693,14 +6694,20 @@ PAGES.hq = {
       L.el.style.transform = `translate(${x}px, ${y}px) scale(${lsc})`; placed.push([x, y, x + L.ow * lsc, y + L.oh * lsc]);
     }
     // name tags: shrink as you zoom out, hidden when the whole building is tiny (except the one you picked)
-    for (const a of [...st.agents.values()].sort((p, q) => (q.headScreen?.[1] || 0) - (p.headScreen?.[1] || 0))) {
+    // Each tag sits right above its bot's head and never moves away from it. Where tags would overlap, the one with
+    // lower priority (picked bot first, then whoever is talking, then a fixed order) fades out until there's room again;
+    // a hidden tag needs a little extra space before it comes back, so tags don't blink on and off.
+    const talking = new Set(st.bubbles.map(b => b.a));
+    const order = [...st.agents.values()].sort((p, q) => (q.selected - p.selected) || (talking.has(q) - talking.has(p)) || (p.id - q.id));
+    for (const a of order) {
       let el = st.tags.get(a.id); if (!el) { el = document.createElement('div'); el.className = 'hq-tag'; ov.appendChild(el); st.tags.set(a.id, el); }
       if (el._n !== a.name) { el.textContent = a.name; el._n = a.name; el._w = 0; }
-      const show = a.selected || z >= 0.3; el.style.opacity = show ? 1 : 0; if (!show) continue;
       if (!el._w) { el._w = el.offsetWidth || 60; el._h = el.offsetHeight || 16; }
-      const w = el._w * tsc, hh = el._h * tsc; let [x, y] = a.headScreen || [0, 0]; y -= 3;
-      for (let k = 0; k < 5; k++) { const q = hits([x - w / 2, y - hh, x + w / 2, y]); if (!q) break; y = q[1] - 1; }
-      placed.push([x - w / 2, y - hh, x + w / 2, y]);
+      const w = el._w * tsc, hh = el._h * tsc, [x, y0] = a.headScreen || [0, 0], y = y0 - 3, pad = el._hid ? 6 : 0;
+      let show = a.selected || z >= 0.3;
+      if (show && !a.selected && hits([x - w / 2 - pad, y - hh - pad, x + w / 2 + pad, y + pad])) show = false;
+      if (show) placed.push([x - w / 2, y - hh, x + w / 2, y]);
+      el._hid = !show; el.classList.toggle('hid', !show);
       el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -100%) scale(${tsc})`; el.classList.toggle('sel', !!a.selected); el.style.setProperty('--c', a.color);
     }
     for (const [id, el] of st.tags) if (!st.agents.has(id)) { el.remove(); st.tags.delete(id); }
