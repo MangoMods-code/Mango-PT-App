@@ -1114,6 +1114,24 @@ button.tile:active { transform: scale(.98); }
 .lb-name.wrap { white-space: normal; }
 .lb-pod .lb-step { background: color-mix(in srgb, var(--hue) 22%, var(--card2)); }
 
+/* ---------- market rules ---------- */
+#halt-bar { position: fixed; z-index: 71; left: 50%; transform: translateX(-50%); bottom: calc(var(--nav-h, 64px) + env(safe-area-inset-bottom, 0px) + 10px); display: flex; align-items: center; gap: 8px; max-width: calc(100% - 24px); padding: 7px 14px; border-radius: 99px; font-size: 13px; background: #4A0F1C; color: #FFD2DA; box-shadow: 0 6px 18px rgba(0,0,0,.4); white-space: nowrap; }
+#halt-bar i { width: 8px; height: 8px; border-radius: 50%; background: var(--dn); flex: none; animation: haltPulse 1.2s ease-in-out infinite; }
+#halt-bar span { opacity: .8; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; }
+@keyframes haltPulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { #halt-bar i { animation: none; } }
+.mstate.halted { color: var(--dn); font-weight: 650; }
+.dot-halt { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--dn); margin-right: 6px; vertical-align: 1px; }
+.band-row { display: flex; align-items: baseline; gap: 8px; width: 100%; margin-top: 8px; padding: 0 2px; font-size: 13px; color: var(--mu); text-align: left; }
+.band-row b { color: var(--tx2); font-weight: 600; }
+.band-row em { font-style: normal; margin-left: auto; font-size: 12px; }
+.cal-now { padding: 14px; } .cal-st { font-weight: 700; font-size: 18px; margin: 2px 0 4px; }
+.lead.cal-closed { color: var(--dn); } .lead.cal-early { color: var(--ac); }
+.cal-past { opacity: .6; }
+.cal-note { width: 100%; text-align: left; }
+.dialog-msg { white-space: pre-line; }
+html[data-standby] #halt-bar { bottom: calc(var(--nav-h, 64px) + env(safe-area-inset-bottom, 0px) + 46px); }
+
 /* ---------- Paper / Alpaca sides ---------- */
 .space-sw { display: inline-flex; gap: 4px; padding: 4px; border-radius: 14px; background: var(--card); box-shadow: var(--hi); margin: 2px 0 10px; }
 .space-sw button { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: 10px; font-size: 14px; font-weight: 650; color: var(--mu); transition: background .2s, color .2s; }
@@ -1452,7 +1470,7 @@ button.tile:active { transform: scale(.98); }
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '3.6.0';
+const BUILD = '__BUILD__', APP_VERSION = '3.7.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1724,6 +1742,7 @@ function onEvent(d) {
   } else if (d.e === 'fill' || d.e === 'pred' || d.e === 'settings') reload();
   else if (d.e === 'bot') emit('bot', d);
   else if (d.e === 'hq') emit('hq', d.ev);
+  else if (d.e === 'mstate' && App.S) { App.S.mstate = d.ev; emit('mstate'); const mc = $('#pf-mstate'); if (mc) mc.innerHTML = marketChip(); }
   else if (d.e === 'market' && App.S) { App.S.market = d.market; emit('market'); reload(); }
 }
 function netStatus() {
@@ -2325,7 +2344,8 @@ const W = () => App.S?.wallet || { name: 'Wallet', emoji: '🥭', color: 'mango'
 const walletPill = () => `<button class="wallet-pill" data-act="${isRealSpace() ? 'go' : 'wallets'}" data-to="real" aria-label="Switch wallet"><span class="we" data-wc="${h(W().color)}" style="background:linear-gradient(140deg,var(--w1),var(--w2))">${h(W().emoji)}</span><span class="ellip">${h(W().name)}</span>${W().broker && W().brokerEnv === 'live' ? '<span class="real-badge">REAL</span>' : ''}${icon('down')}</button>`;
 function marketChip() {
   const m = App.S?.market; if (!m) return '';
-  const now = Date.now();
+  const now = Date.now(), cb = App.S?.mstate?.mwcb;
+  if (cb && cb.until > now) return `<span class="mstate halted"><span class="dot-halt"></span>Level ${cb.level} halt${cb.level === 3 ? ' · closed for the day' : ` · ${countdown(cb.until - now)}`}</span>`;
   if (m.state === 'open') return `<span class="mstate open"><span class="dot-live"></span>Market open · closes in ${countdown(m.closesAt - now)}</span>`;
   const ses = App.S?.rules?.session;
   const label = ses === 'overnight' ? '24 Hour Market' : (ses === 'pre' || m.state === 'pre') ? 'Pre-market' : (ses === 'post' || m.state === 'post') ? 'After hours' : (m.holiday ? m.holiday : 'Market closed');
@@ -2367,7 +2387,7 @@ VIEWS.portfolio = {
         <button data-act="cash">${icon('dollar')}Add cash</button>
         <button data-act="go" data-to="orders">${icon('target')}Orders</button>
         <button data-act="go" data-to="performance">${icon('chart')}Stats</button></div>
-      <div class="strip mt16" id="pf-strip"></div>
+      <div class="strip mt16" id="pf-strip"></div><div id="pf-calnote"></div>
       <div id="pf-body"></div>
       </div><div class="side" id="pf-side"></div></div></div>`;
     onSeg(el, 'pfr', r => { this.range = r; store.set('range', r); this.loadEq(); });
@@ -2383,6 +2403,7 @@ VIEWS.portfolio = {
     const u = $('#pf-unread'); u.textContent = App.S.unread > 99 ? '99+' : App.S.unread; u.classList.toggle('hidden', !App.S.unread);
     $('#pf-mstate').innerHTML = marketChip();
     this.renderStrip(); this.renderBody(); this.tick();
+    const cn = $('#pf-calnote', el); if (cn) cn.innerHTML = typeof calNoteHtml === 'function' ? calNoteHtml() : '';
     if (this.eqWallet !== App.W) this.loadEq();
   },
   renderStrip() {
@@ -3008,7 +3029,10 @@ function tradeSheet(sym, side = 'buy', preset = {}) {
     if (ot === 'stoplimit') prices_ = priceField('price', buy ? 'Stop price: wakes up when it rises here' : 'Stop price: wakes up when it falls here', st.price, buy ? upL : dn) + priceField('lpx', buy ? 'Then a limit price: pay no more than' : 'Then a limit price: take no less than', st.lpx, buy ? [1, 2, 3, 5] : [-1, -2, -3, -5]);
     if (ot === 'trail') prices_ = `<label class="field"><span>Trail by</span><div class="money-in has-post"><input id="tk-trail" inputmode="decimal" value="${h(st.trail)}" placeholder="5"><span class="post">% below the high</span></div></label><div class="chips mt8" style="margin:8px 0 0;padding:0">${[2, 5, 8, 10, 15].map(x => `<button class="chip" data-tr="${x}">${x}%</button>`).join('')}</div>`;
     const sessOpts = [['regular', 'Regular hours'], ['extended', 'Extended hours']].concat(App.S.rules?.overnight ? [['24h', '24 hours']] : []);
-    const opts = waits && ot !== 'trail' ? `<div class="field"><span>Good for</span>${seg('tkt', [['day', crypto ? '24 hours' : 'Today only'], ['gtc', `Until cancelled${real && App.S.rules?.gtcDays ? ` (${App.S.rules.gtcDays} days)` : ''}`]], st.tif)}</div>${!crypto && ot === 'limit' && real ? `<div class="field"><span>Trading session</span>${seg('tks2', sessOpts, st.sess)}</div>` : ''}` : '';
+    // fractional-share rules: dollar amounts and fractions trade as day orders in regular hours
+    const fracOnly = !crypto && real && !broker && SET().fracRules !== false && ot === 'limit' && (st.unit === 'usd' || !Number.isInteger(num(st.amount) || 1));
+    if (fracOnly) { st.tif = 'day'; st.sess = 'regular'; }
+    const opts = waits && ot !== 'trail' ? `<div class="field"><span>Good for</span>${seg('tkt', fracOnly ? [['day', 'Today only']] : [['day', crypto ? '24 hours' : 'Today only'], ['gtc', `Until cancelled${real && App.S.rules?.gtcDays ? ` (${App.S.rules.gtcDays} days)` : ''}`]], st.tif)}</div>${!crypto && ot === 'limit' && real && !fracOnly ? `<div class="field"><span>Trading session</span>${seg('tks2', sessOpts, st.sess)}</div>` : ''}${fracOnly ? '<p class="t-foot" style="margin:6px 2px 8px">Orders in dollars or fractions of a share last for today only and trade in regular hours. Use whole shares for good-till-canceled or extended hours.</p>' : ''}` : '';
     sh.html(`
       ${liveMoney() ? `<div class="money-banner">${icon('lock')}<div><b>Real money</b> · Your live Alpaca account. Orders are final once they fill.</div></div>` : broker ? `<div class="callout mt8">${icon('link')}<div>Goes to your Alpaca paper account, Alpaca's real trading engine with fake money.</div></div>` : ''}
       ${p ? `<div class="side-toggle ${st.side}"><i class="thumb"></i><button class="b" data-side="buy">Buy</button><button class="s" data-side="sell">Sell</button></div>` : ''}
@@ -3067,16 +3091,16 @@ function tradeSheet(sym, side = 'buy', preset = {}) {
           <div class="kv total"><span class="k">${buy ? 'Estimated total' : "You'll receive about"}</span><span class="v">${money(pv.total)}</span></div>
           ${pv.pnl != null ? `<div class="kv"><span class="k">Profit / loss on this sale</span><span class="v ${cls(pv.pnl)}">${money(pv.pnl, { sign: true })}</span></div>` : ''}
           ${pv.tax && (pv.tax.short || pv.tax.long) ? `<div class="kv"><span class="k">Taxable gain</span><span class="v">${pv.tax.short ? `<span class="${cls(pv.tax.short)}">${money(pv.tax.short, { sign: true })}</span> short term` : ''}${pv.tax.short && pv.tax.long ? ' · ' : ''}${pv.tax.long ? `<span class="${cls(pv.tax.long)}">${money(pv.tax.long, { sign: true })}</span> long term` : ''}</span></div>` : ''}
-          ${pv.settle ? `<div class="kv"><span class="k">Cash settles</span><span class="v">${fmtDay(pv.settle)}${App.S.wallet.acct === 'cash' ? '' : ' · usable now'}</span></div>` : ''}
+          ${pv.frac ? '' : ''}${pv.settle ? `<div class="kv"><span class="k">Cash settles</span><span class="v">${fmtDay(pv.settle)}${App.S.wallet.acct === 'cash' ? '' : ' · usable now'}</span></div>` : ''}
           ${pv.borrow > 0 ? `<div class="kv"><span class="k">Borrowed on margin</span><span class="v dn">${money(pv.borrow)}</span></div>` : ''}
           ${pv.cashAfter != null ? `<div class="kv"><span class="k">Cash after</span><span class="v priv ${pv.cashAfter < 0 ? 'dn' : ''}">${money(pv.cashAfter)}</span></div>` : ''}`;
       }
     }
-    const warns = [...(pv?.warn || [])]; if (pv?.tax?.washRisk) warns.push('Selling at a loss and buying again within 30 days is a wash sale: the loss is pushed into the new shares.');
+    const warns = [...(pv?.warn || [])]; if (pv?.halt) warns.unshift(`${pv.halt.why}${st.otype === 'market' ? ' This order waits and fills when trading resumes.' : ''}`); if (pv?.tax?.washRisk) warns.push('Selling at a loss and buying again within 30 days is a wash sale: the loss is pushed into the new shares.');
     $('#tk-warn', sh.body).innerHTML = warns.map((w, i) => `<div class="callout ${/real-money/.test(w) ? 'warn' : ''} mt12">${icon(i === 0 && pv?.queued ? 'clock' : 'info')}<div>${h(w)}</div></div>`).join('');
     const br = $('#tk-br', sh.body);
     if (br) { const sl = num(st.slType === 'trail' ? st.trail : st.sl), tp = num(st.tp), px = pv?.px || live(sym); br.textContent = [sl ? (st.slType === 'trail' ? `Trailing stop ${sl}% below the highest price` : `Stop loss at about ${price(px * (1 - sl / 100))}`) : '', tp ? `take profit at about ${price(px * (1 + tp / 100))}` : ''].filter(Boolean).join(', ') || 'Leave empty for none.'; }
-    let err = pv?.err || '';
+    let err = pv?.err || pv?.frac || '';
     if (a > 0 && st.otype !== 'market' && st.otype !== 'trail' && !(num(st.price) > 0)) err = 'Enter the ' + (st.otype === 'limit' ? 'limit' : 'stop') + ' price';
     if (a > 0 && st.otype === 'stoplimit' && !(num(st.lpx) > 0)) err = err || 'Enter the limit price';
     if (a > 0 && st.otype === 'trail' && !(num(st.trail) > 0)) err = 'Enter how far to trail';
@@ -3121,10 +3145,15 @@ function tradeSheet(sym, side = 'buy', preset = {}) {
     if (st.side === 'buy' && (st.otype === 'market' || st.otype === 'limit')) { b.sl = st.slType === 'trail' ? 0 : num(st.sl); b.tp = num(st.tp); if (st.otype === 'market') b.trail = st.slType === 'trail' ? num(st.trail) : 0; }
     if (liveMoney()) b.live = true;
     try {
-      const r = await post('trade', b);
+      let r = await post('trade', b);
+      if (r.confirm) { // the order looks like it might be a mistake: say why, then send it again if they're sure
+        busy(go, false);
+        const yes = await confirmBox({ title: 'Double-check this order', msg: r.checks.map(c => c.text).join('\n\n'), ok: 'Place it anyway' });
+        if (!yes) return; busy(go, true); r = await post('trade', { ...b, confirm: true });
+      }
       busy(go, false);
       if (r.fill) success(r.fill, r.bracket || []);
-      else if (r.queued) placed({ queued: true, opensAt: r.opensAt });
+      else if (r.queued) placed({ queued: true, opensAt: r.opensAt, halt: r.halt });
       else if (r.broker) placed({ broker: true, status: r.status, env: r.env });
       else placed({ order: r.order });
       loadState().catch(() => {});
@@ -3134,7 +3163,8 @@ function tradeSheet(sym, side = 'buy', preset = {}) {
     buzz(20); st.done = true; clearTimeout(pvTimer);
     const pv = st.pv;
     const what = `${st.side === 'buy' ? 'Buy' : 'Sell'} ${qtyStr(sym, pv?.qty || 0)} ${h(unitShort(sym))}${st.otype === 'limit' ? ` at ${price(num(st.price))} or better` : st.otype === 'stop' ? ` if it reaches ${price(num(st.price))}` : st.otype === 'stoplimit' ? ` at ${price(num(st.lpx))} once it reaches ${price(num(st.price))}` : st.otype === 'trail' ? `, trailing ${num(st.trail)}% below the high` : ''}`;
-    if (o.queued) { sh.title('Order queued'); sh.html(`<div class="success"><div class="check">${icon('clock')}</div><h3>Queued for the open</h3><p>${what} when the stock market opens${o.opensAt ? ' ' + new Date(o.opensAt).toLocaleString('en-US', { timeZone: ET_TZ, weekday: 'short', hour: 'numeric', minute: '2-digit' }) + ' ET' : ''}. Market orders fill at whatever the price is then, which can gap from tonight's price. You'll get a notification.</p></div>`); }
+    if (o.queued && o.halt) { sh.title('Order waiting'); sh.html(`<div class="success"><div class="check">${icon('pause')}</div><h3>Waiting for trading to resume</h3><p>${what} when ${o.halt.kind === 'mwcb' ? 'the market-wide halt ends' : `${h(sym)}'s pause ends`}${o.halt.until ? ' at ' + new Date(o.halt.until).toLocaleTimeString('en-US', { timeZone: ET_TZ, hour: 'numeric', minute: '2-digit' }) + ' ET' : ''}. ${h(o.halt.why)} Prices often jump when trading reopens. You'll get a notification.</p></div>`); }
+    else if (o.queued) { sh.title('Order queued'); sh.html(`<div class="success"><div class="check">${icon('clock')}</div><h3>Queued for the open</h3><p>${what} when the stock market opens${o.opensAt ? ' ' + new Date(o.opensAt).toLocaleString('en-US', { timeZone: ET_TZ, weekday: 'short', hour: 'numeric', minute: '2-digit' }) + ' ET' : ''}. Market orders fill at whatever the price is then, which can gap from tonight's price. You'll get a notification.</p></div>`); }
     else if (o.broker) { sh.title('Sent to Alpaca'); sh.html(`<div class="success"><div class="check">${icon('check')}</div><h3>${o.status === 'filled' ? 'Filled' : 'Order sent'}</h3><p>${what}. Alpaca ${o.status === 'accepted' || o.status === 'new' ? 'accepted it' : 'says: ' + h(o.status)}. You'll get a notification when it fills${o.env === 'live' ? '. This is real money.' : ' on your paper account.'}</p></div>`); }
     else { sh.title('Order placed'); sh.html(`<div class="success"><div class="check">${icon('target')}</div><h3>${OT_LABEL[st.otype]} order placed</h3><p>${what}. ${st.tif === 'day' ? (crypto ? 'It lasts 24 hours.' : 'It ends with today\'s session if it doesn\'t fill.') : `It stays open until it fills or you cancel it${App.S.rules?.gtcDays && isRealW() ? `, up to ${App.S.rules.gtcDays} days` : ''}.`}${st.side === 'buy' && isRealW() && st.otype !== 'trail' ? ' The money is held for it so it can always fill.' : ''}</p></div>`); }
     sh.foot(`<div class="btns"><button class="btn btn-quiet btn-lg" data-act="go" data-to="orders">${icon('list')}Orders</button><button class="btn btn-primary btn-lg" data-act="back">Done</button></div>`);
@@ -3148,7 +3178,7 @@ function tradeSheet(sym, side = 'buy', preset = {}) {
       <h3>${buy ? 'Bought' : 'Sold'} ${qtyStr(sym, f.qty)} ${h(unitShort(sym))}</h3>
       <p>at ${price(f.price)} for ${money(f.qty * f.price)}${f.fee ? ` plus ${money(f.fee)} in fees` : ''}.</p>
       ${f.pnl != null ? `<p style="font-weight:700;font-size:18px;margin-top:10px"><span class="${cls(f.pnl)}">${f.pnl >= 0 ? 'Profit' : 'Loss'}: ${money(f.pnl, { sign: true })} (${pct(f.pnlPct)})</span></p>` : ''}</div>
-      <div class="est">${f.bid ? `<div class="kv"><span class="k">Bid / ask when it filled</span><span class="v">${price(f.bid)} / ${price(f.ask)}</span></div>` : ''}${feeRows(f.fees)}${f.settle ? `<div class="kv"><span class="k">Cash settles</span><span class="v">${fmtDay(f.settle)}</span></div>` : ''}${f.borrow > 0 ? `<div class="kv"><span class="k">Borrowed on margin</span><span class="v dn">${money(f.borrow)}</span></div>` : ''}${tax}<div class="kv"><span class="k">Cash now</span><span class="v priv">${money(f.cash)}</span></div></div>
+      <div class="est">${f.bid ? `<div class="kv"><span class="k">Bid / ask when it filled</span><span class="v">${price(f.bid)} / ${price(f.ask)}</span></div>` : ''}${f.improve > 0 ? `<div class="kv"><span class="k">Price improvement</span><span class="v up">${(f.improve * 100).toFixed(2)}¢ a share better · ${money(f.imp)}</span></div>` : ''}${feeRows(f.fees)}${f.settle ? `<div class="kv"><span class="k">Cash settles</span><span class="v">${fmtDay(f.settle)}</span></div>` : ''}${f.borrow > 0 ? `<div class="kv"><span class="k">Borrowed on margin</span><span class="v dn">${money(f.borrow)}</span></div>` : ''}${tax}<div class="kv"><span class="k">Cash now</span><span class="v priv">${money(f.cash)}</span></div></div>
       ${bracket.length ? `<p class="t-foot center" style="margin-top:12px">${bracket.length === 2 ? 'Stop loss and take profit are set.' : 'Your automatic order is set.'}</p>` : ''}
       ${f.stale ? `<p class="t-foot center">This used the last known price because live prices weren't coming in.</p>` : ''}`);
     sh.foot(`<div class="btns">${buy && !bracket.length ? `<button class="btn btn-quiet btn-lg" id="sc-protect">${icon('shield')}Add stop loss</button>` : ''}<button class="btn btn-primary btn-lg" data-act="back">Done</button></div>`);
@@ -7568,6 +7598,7 @@ function drawWeather(p, dt) {
 function eventOf(st) {
   const d = st.data; if (!d || !LIFE.get().events) return null;
   const spy = d.market?.spy, val = (st.bots || []).reduce((t, b) => t + (b.value || 0), 0), dayPct = val ? d.vault.day / val * 100 : 0;
+  const cb = App.S?.mstate?.mwcb; if (cb && cb.until > Date.now()) return { k: 'crash', text: `🚨 Level ${cb.level} circuit breaker: ${cb.level === 3 ? 'stocks are closed for the day' : 'all stock trading is halted for 15 minutes'}` };
   if ((spy != null && spy <= -2) || dayPct <= -3) return { k: 'crash', text: `🚨 Crash alarm: ${spy != null && spy <= -2 ? `the S&P 500 is down ${Math.abs(spy).toFixed(1)}%` : `your bots are down ${Math.abs(dayPct).toFixed(1)}% today`}` };
   if ((spy != null && spy >= 1.5) || dayPct >= 1.5) return { k: 'party', text: `🎉 Win party: ${dayPct >= 1.5 ? `your bots are up ${dayPct.toFixed(1)}% today` : `the S&P 500 is up ${spy.toFixed(1)}%`}` };
   if (d.earnToday?.length) return { k: 'earn', text: `📣 Earnings day: ${d.earnToday.slice(0, 4).join(', ')}`, syms: d.earnToday };
@@ -8336,6 +8367,31 @@ PAGES.costs = {
 // Newest first. Each release: version, date, a one-line headline and grouped notes.
 // ===================================================================
 const CHANGELOG = [
+  { v: '3.7.0', d: '2026-10-26', title: 'Market rules engine', groups: [
+    ['Circuit breakers', [
+      'Market-wide circuit breakers, as the exchanges run them: if the S&P 500 falls 7% (Level 1) or 13% (Level 2) from yesterday\'s close before 3:25 pm, all stock trading halts for 15 minutes. After 3:25 pm those levels don\'t halt. A 20% fall (Level 3) closes stocks for the rest of the day. Each level fires once a day at most.',
+      'While stocks are halted: a red banner with a countdown, stock orders you place wait and fill when trading resumes, stops and limits don\'t trigger, bots hold their stocks as they are, and Mango HQ sounds the alarm. Crypto keeps trading.',
+    ]],
+    ['Single-stock price bands (Limit Up-Limit Down)', [
+      'Each stock trades inside a band around its average price of the last 5 minutes: 5% for big companies and big ETFs, 10% for others, 20% from $0.75 to $3, wider below that, doubled in the last 25 minutes.',
+      'A stock outside its band for 15 seconds pauses for 5 minutes. Its page shows the pause, and its band the rest of the time. You get a notification if you hold it or have an order on it.',
+    ]],
+    ['Fractional shares', [
+      'Orders in dollars or fractions of a share now follow the usual broker rules: market orders, or limit orders for today only in regular hours. Stop orders and good-till-canceled need whole shares.',
+      'The order screen switches to "Today only" by itself and says why.',
+    ]],
+    ['Price improvement', [
+      'Market orders fill a little inside the bid and ask, in fractions of a cent, as they do at brokers that route orders to market makers. The receipt shows how much you saved, and Statements add it up for the year.',
+    ]],
+    ['Order checks', [
+      'Before a manual order that looks like a mistake, Mango asks first: a limit price more than 10% from the market, an order over 25% of the wallet, a market order in the first 5 minutes, buying the day before or of earnings, or a market order in a thinly traded stock.',
+      'Each check can be switched off in Settings → Market rules.',
+    ]],
+    ['Market calendar', [
+      'A new Market calendar page: holidays and 1 pm early closes for this year and next, the market\'s state right now, and how the safety rules work.',
+      'The home screen gives you a heads-up the day before a holiday or an early close.',
+    ]],
+  ] },
   { v: '3.6.0', d: '2026-10-26', title: 'Leaderboard 2', groups: [
     ['Fair returns', [
       'Adding money to a bot\'s wallet (or the weekly add) was counted as a gain, and taking money out as a loss. Now each stretch between deposits is judged only on what the money already there did (a time-weighted return), so a bot that got $1,000 extra no longer looks like it doubled.',
@@ -8639,6 +8695,74 @@ ACT.lbHow = () => sheet({ title: 'How the score works', tall: true, html: `<p cl
   <p class="dialog-msg">The arrows show how many places a bot moved since yesterday's close. Badges go to one bot each: hottest week, steadiest, most consistent, longest streak, best comeback.</p>` });
 
 // ===================================================================
+// Market rules: circuit-breaker banner, price-band pauses, the exchange calendar, rule switches.
+// ===================================================================
+const MS = () => App.S?.mstate || {};
+const etTime = t => new Date(t).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' });
+const mmss = ms => { const s = Math.max(0, Math.round(ms / 1000)); return s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.floor(s % 3600 / 60)}m` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+function haltBar() {
+  const m = MS().mwcb; let bar = $('#halt-bar');
+  if (!m || (m.until && m.until <= Date.now())) { bar && bar.remove(); clearInterval(haltBar.t); haltBar.t = null; return; }
+  if (!bar) { bar = document.createElement('button'); bar.id = 'halt-bar'; bar.dataset.act = 'go'; bar.dataset.to = 'calendar'; document.body.appendChild(bar); }
+  const draw = () => {
+    const left = m.until - Date.now(); if (left <= 0) { App.S.mstate.mwcb = null; haltBar(); reload(); return; }
+    bar.innerHTML = `<i></i><b>Level ${m.level} circuit breaker</b><span>${m.level === 3 ? 'Stocks closed for the day' : `Stocks halted · ${mmss(left)} left`}</span>`;
+  };
+  draw(); if (!haltBar.t) haltBar.t = setInterval(draw, 1000);
+}
+on('state', haltBar); on('mstate', haltBar);
+const pausedInfo = sym => { const p = MS().paused?.[sym]; return p && p.until > Date.now() ? p : null; };
+// the asset page: a price-band row, and a callout while the stock is paused
+async function assetBand(p) {
+  const el = $('#a-band', p.body); if (!el || isCrypto(p.sym)) return;
+  let b = null; try { b = await api('band/' + encodeURIComponent(p.sym)); } catch (e) { return; }
+  const halt = b.halt, band = b.band;
+  el.innerHTML = halt ? `<div class="callout warn mt12">${icon('pause')}<div><b>${halt.kind === 'mwcb' ? 'Market-wide halt' : 'Trading paused'}</b><br>${h(halt.why)} Orders you place now wait and fill when it reopens.</div></div>`
+    : band ? `<button class="band-row" data-act="go" data-to="calendar"><span>Price band</span><b class="n">${price(band.lo)} to ${price(band.hi)}</b><em>${Math.round(band.pct * 100)}% · Tier ${band.tier}</em></button>` : '';
+}
+{ const m0 = PAGES.asset.mount; PAGES.asset.mount = function (p, args) { const r = m0.call(this, p, args); const q = $('#a-quote', p.body); if (q && !$('#a-band', p.body)) q.insertAdjacentHTML('afterend', '<div id="a-band"></div>'); assetBand(p); clearInterval(p.bandT); p.bandT = setInterval(() => { if (!document.body.contains(p.body)) { clearInterval(p.bandT); return; } assetBand(p); }, 15000); return r; }; }
+on('mstate', () => { const t = Router.top(); if (t?.page?.name === 'asset') assetBand(t.page); });
+// the exchange calendar and how the rules work
+PAGES.calendar = {
+  mount(p) {
+    p.title('Market calendar', true);
+    p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Market calendar</h1><p class="t-sub" style="margin:0 2px">When the stock market is closed or closes early, and the safety rules that can stop trading. Crypto trades every day.</p><div id="cal"><div class="sk sk-block mt16" style="height:300px"></div></div>`;
+    api('calendar').then(r => this.draw(p, r)).catch(e => { $('#cal', p.body).innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; });
+  },
+  draw(p, r) {
+    const today = r.today, ms = r.mstate, now = etDateC();
+    const up = r.days.filter(d => d.date >= now), past = r.days.filter(d => d.date < now && d.date.slice(0, 4) === now.slice(0, 4));
+    const fmt = d => new Date(d + 'T12:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: d.slice(0, 4) !== now.slice(0, 4) ? 'numeric' : undefined });
+    const row = d => `<div class="cell"><div class="lead cal-${d.kind}">${icon(d.kind === 'closed' ? 'lock' : 'clock')}</div><div class="main"><div class="title">${h(d.name)}</div><div class="sub">${fmt(d.date)}</div></div><span class="t-cap">${d.kind === 'closed' ? 'Closed' : 'Closes 1:00 pm'}</span></div>`;
+    const state = ms.mwcb ? `<b class="dn">Level ${ms.mwcb.level} circuit breaker</b>: stocks ${ms.mwcb.level === 3 ? 'closed for the day' : `halted until ${etTime(ms.mwcb.until)}`}` : today.open ? 'Open now' + (today.early ? ', closes 1:00 pm today' : '') : today.holiday ? `Closed today for ${h(today.holiday)}` : 'Closed now';
+    const drop = ms.spyDrop;
+    $('#cal', p.body).innerHTML = `
+      <div class="card mt16 cal-now"><div class="t-foot">The stock market</div><div class="cal-st">${state}</div>${drop != null ? `<div class="t-foot">S&P 500 (SPY) today: <span class="${drop > 0 ? 'dn' : 'up'}">${pct(-drop * 100)}</span>${drop > 0.03 ? ` · Level 1 halts at −7%` : ''}</div>` : ''}${Object.keys(ms.paused || {}).length ? `<div class="t-foot">Paused right now: ${Object.keys(ms.paused).map(h).join(', ')}</div>` : ''}</div>
+      ${r.note ? `<div class="callout mt12">${icon('calendar')}<div>${h(r.note.text)}</div></div>` : ''}
+      <div class="section-h"><h2>Coming up</h2></div><div class="group">${up.map(row).join('') || '<div class="cell"><div class="main t-foot">Nothing listed.</div></div>'}</div>
+      ${past.length ? `<div class="section-h"><h2>Earlier this year</h2></div><div class="group cal-past">${past.map(row).join('')}</div>` : ''}
+      <div class="section-h"><h2>When trading stops</h2></div>
+      <div class="group"><div class="cell"><div class="main"><div class="title">Market-wide circuit breakers</div><div class="sub">If the S&P 500 falls 7% (Level 1) or 13% (Level 2) from yesterday's close before 3:25 pm, all stock trading halts for 15 minutes. After 3:25 pm those don't halt. A 20% fall (Level 3) closes stocks for the rest of the day. Each level fires at most once a day.</div></div></div>
+        <div class="cell"><div class="main"><div class="title">Single-stock price bands</div><div class="sub">Each stock trades inside a band around its average price of the last 5 minutes: 5% for big companies and big ETFs, 10% for others, 20% for stocks from $0.75 to $3, and wider below that. Bands double in the last 25 minutes. Outside the band for 15 seconds, that stock pauses for 5 minutes.</div></div></div>
+        <div class="cell"><div class="main"><div class="title">While trading is stopped</div><div class="sub">Stock orders you place wait and fill when trading resumes. Stops and limits don't trigger. Bots skip the halted stocks. Crypto keeps trading.</div></div></div></div>
+      <p class="note">Rules from the SEC's investor bulletin on market volatility. Change what Mango applies in Settings → Market rules.</p>`;
+  },
+};
+const etDateC = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+function marketRulesCard() {
+  return `<div class="group mt16"><div class="cell"><div class="lead">${icon('flag')}</div><div class="main"><div class="title">Market rules</div><div class="sub">Rules real exchanges and brokers apply to every order</div></div></div>
+    ${rowToggle('f_mwcb', 'Market-wide circuit breakers', 'Halt stocks when the S&P 500 falls 7%, 13% or 20% in a day')}
+    ${rowToggle('f_luld', 'Single-stock price bands', 'Pause a stock for 5 minutes after a sudden jump or drop (Limit Up-Limit Down)')}
+    ${rowToggle('fracRules', 'Fractional-share rules', 'Fractions and dollar amounts trade as market or day limit orders, in regular hours')}
+    ${rowToggle('priceImprove', 'Price improvement', 'Market orders fill a little inside the bid and ask, like at a real broker')}
+    ${rowToggle('sanity', 'Order checks', 'Ask before an order that looks like a mistake')}
+    ${SET().sanity !== false ? `${rowToggle('san_far', '· Limit price far from the market', 'More than 10% away')}${rowToggle('san_big', '· Big orders', 'Over 25% of the wallet')}${rowToggle('san_open', '· Right after the open', 'Market orders in the first 5 minutes')}${rowToggle('san_earn', '· Before earnings', 'Buying the day before or of a report')}${rowToggle('san_thin', '· Thinly traded stocks', 'Market orders in stocks that trade under $1 million a day')}` : ''}
+    ${rowLink('calendar', 'Market calendar', 'Holidays, early closes, and when trading stops', 'calendar')}</div>`;
+}
+// the home screen: a heads-up the day before a holiday or an early close
+function calNoteHtml() { const n = App.S?.calNote; if (!n || isRealSpace() === undefined) return ''; return `<button class="callout cal-note mt12" data-act="go" data-to="calendar">${icon('calendar')}<div>${h(n.text)}</div></button>`; }
+
+// ===================================================================
 // Settings
 // ===================================================================
 function applyLook(s) {
@@ -8688,7 +8812,7 @@ PAGES.settings = {
     const S = App.S;
     return `<div class="set-hero"><svg viewBox="0 0 120 120" class="av"><use href="#mango-mark"/></svg><div><div class="t-title">Mango <span class="set-ver">v${h(APP_VERSION)}</span></div><div class="t-foot">Logged in as ${h(S.user || 'you')} · ${(S.wallets || []).filter(w => !w.archived).length} wallet${(S.wallets || []).length === 1 ? '' : 's'}</div></div></div>
       <div class="group mt16">${rowLink('sparkle', 'What\'s new', `v${APP_VERSION}: ${(CHANGELOG.find(r => r.v === APP_VERSION) || CHANGELOG[0]).title}`, 'whatsnew')}</div>
-      ${standbyCard()}${panicCard()}${guardsCard()}${promoCard()}${briefsCard()}${widgetCard()}${opsCard()}${councilCard()}${nightCard()}${analystCard()}
+      ${standbyCard()}${panicCard()}${marketRulesCard()}${guardsCard()}${promoCard()}${briefsCard()}${widgetCard()}${opsCard()}${councilCard()}${nightCard()}${analystCard()}
       <div class="group mt16">${Object.entries(SECTIONS).map(([k, v]) => rowLink(v.icon, v.title, v.sub, 'settings/' + k)).join('')}</div>
       <div class="group mt16">${rowLink('wallet', 'Wallets', 'Create, rename, reset, move cash', 'wallets')}${rowToggle('hideBalances', 'Hide balances', 'Blur dollar amounts. Press and hold to peek.')}</div>
       <div class="group mt16">${rowLink('lock', 'Face ID and backups', 'Log in with Face ID, protect real money, save your data', 'security')}</div>

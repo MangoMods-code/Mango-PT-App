@@ -289,6 +289,8 @@ const MIGRATIONS = [
       alter table alert add column if not exists ind text;
     `);
   },
+  // 7: price improvement on each fill
+  async c => { await c.query('alter table trd add column if not exists imp numeric'); },
 ];
 
 async function migrate() {
@@ -307,7 +309,8 @@ async function migrate() {
 const DEF = {
   // trading
   feeFlat: 0, feePct: 0, slippage: 0, maxPos: 0, reservePct: 0, wholeShares: false,
-  closedTrading: 'fill', rthOrders: true, autoSL: 0, autoTP: 0, defaultBuy: 0,
+  closedTrading: 'fill', rthOrders: true,
+  f_mwcb: true, f_luld: true, fracRules: true, priceImprove: true, sanity: true, san_far: true, san_big: true, san_open: true, san_earn: true, san_thin: true, autoSL: 0, autoTP: 0, defaultBuy: 0,
   confirmStyle: 'hold', confirmBuy: false, confirmSell: true, cashAPY: 0, startBalance: 10000,
   // notifications
   pushAlerts: true, pushOrders: true, notifySummary: true, notifyMoves: true, moveThreshold: 5,
@@ -1010,6 +1013,160 @@ async function cryptoGlobal() {
     return { btcDom: d.market_cap_percentage?.btc, ethDom: d.market_cap_percentage?.eth, cap: d.total_market_cap?.usd, capChange: d.market_cap_change_percentage_24h_usd };
   });
 }
+// =====================================================================
+// Market-wide circuit breakers and single-stock price bands (Limit Up-Limit Down)
+// As the exchanges run them (investor.gov, "Measures to address market volatility"):
+// - S&P 500 down 7% (Level 1) or 13% (Level 2) from yesterday's close before 3:25 pm → all stocks halt 15 minutes;
+//   at or after 3:25 pm those levels don't halt. Each level halts at most once a day. 20% (Level 3) → closed for the day.
+// - Each stock trades inside a band around its average price of the last 5 minutes: 5% (S&P 500 / Russell 1000
+//   stocks and big ETFs over $3), 10% (other stocks over $3), 20% ($0.75-$3), the lesser of $0.15 or 75% (under $0.75),
+//   doubled in the last 25 minutes for the first group and for anything at $3 or less. Outside the band for 15 seconds
+//   → that stock pauses for 5 minutes. Crypto has none of this.
+// The S&P 500 is followed through SPY, which tracks it.
+// =====================================================================
+const MWCB_LEVELS = [{ level: 3, drop: 0.20 }, { level: 2, drop: 0.13 }, { level: 1, drop: 0.07 }];
+const MSTATE = { mwcb: null, done: { date: null, levels: [] }, luld: new Map(), win: new Map() };
+const mwcbOn = () => S.f_mwcb !== false, luldOn = () => S.f_luld !== false;
+function etMinutes(t = Date.now()) { const p = etParts(t); return p.h * 60 + p.mi; }
+// is a market-wide halt on right now? → { level, until, at, drop } or null
+function mwcbNow() {
+  const h = MSTATE.mwcb; if (!h) return null;
+  if (h.until && Date.now() >= h.until) { MSTATE.mwcb = null; saveMstate(); broadcast({ t: 'evt', e: 'mstate', ev: mstateJson() }); notify('market', 'Trading resumes', `The market-wide halt (Level ${h.level}) is over. Queued stock orders fill now.`, {}).catch(() => {}); return null; }
+  if (h.date && h.date !== etDate()) { MSTATE.mwcb = null; return null; }
+  return h;
+}
+// why a stock can't trade this moment, or null
+function haltOf(sym) {
+  if (!sym || isCrypto(sym)) return null;
+  const m = mwcbOn() ? mwcbNow() : null;
+  if (m) return { kind: 'mwcb', level: m.level, until: m.until, why: m.level === 3 ? 'The S&P 500 fell more than 20% today: a Level 3 circuit breaker closed the stock market for the rest of the day.' : `The S&P 500 fell more than ${m.level === 1 ? 7 : 13}% today: a Level ${m.level} circuit breaker halts all stock trading until ${timeEt(m.until)}.` };
+  const p = luldOn() ? MSTATE.luld.get(sym) : null;
+  if (p?.until && Date.now() < p.until) return { kind: 'luld', until: p.until, why: `${sym} moved outside its price band for 15 seconds, so trading in it pauses until ${timeEt(p.until)} (Limit Up-Limit Down).` };
+  return null;
+}
+const timeEt = t => new Date(t).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' });
+// the band a stock may trade in: Tier 1 = big companies and big ETFs
+function luldTier(sym) { if (FUNDS.has(sym)) return 1; const a = assets.get(sym); if (a?.kind === 'etf' || (a?.cap && a.cap >= 5e9)) return 1; if (STOCK_DEFAULT.includes(sym)) return 1; return 2; }
+function luldBand(sym, ref, t = Date.now()) {
+  const tier = luldTier(sym); let pct;
+  if (ref > 3) pct = tier === 1 ? 0.05 : 0.10;
+  else if (ref >= 0.75) pct = 0.20;
+  else pct = Math.min(0.75, 0.15 / ref);
+  const mk = market(t), close = mk.closesAt ? etMinutes(mk.closesAt) : 960, late = etMinutes(t) >= close - 25;
+  if (late && (tier === 1 || ref <= 3)) pct *= 2;
+  return { tier, pct, lo: ref * (1 - pct), hi: ref * (1 + pct) };
+}
+function luldOf(sym) {
+  const w = MSTATE.win.get(sym); if (!w || w.length < 2 || Date.now() - w[0][0] < 60e3) return null;
+  const ref = w.reduce((s, x) => s + x[1], 0) / w.length, b = luldBand(sym, ref), st = MSTATE.luld.get(sym);
+  return { ref, ...b, paused: st?.until && Date.now() < st.until ? st.until : null };
+}
+// every price tick comes through here
+function mstateTick(sym, p, src) {
+  if (src === 'cache' || !(p > 0) || isCrypto(sym)) return;
+  const mk = market(); if (mk.state !== 'open') { if (MSTATE.win.size) MSTATE.win.clear(); return; }
+  const now = Date.now();
+  if (sym === 'SPY' && mwcbOn()) checkMwcb(p, now);
+  if (!luldOn()) return;
+  const st = MSTATE.luld.get(sym);
+  if (st?.until) { if (now < st.until) return; MSTATE.luld.delete(sym); MSTATE.win.set(sym, [[now, p]]); broadcast({ t: 'evt', e: 'mstate', ev: mstateJson() }); return; }
+  let w = MSTATE.win.get(sym); if (!w) { w = []; MSTATE.win.set(sym, w); }
+  w.push([now, p]); while (w.length && now - w[0][0] > 5 * 60e3) w.shift(); if (w.length > 600) w.splice(0, w.length - 600);
+  if (now - w[0][0] < 60e3) return; // the band needs a minute of prices first
+  const ref = w.reduce((s, x) => s + x[1], 0) / w.length, b = luldBand(sym, ref, now);
+  if (p < b.lo || p > b.hi) {
+    const s = MSTATE.luld.get(sym) || {}; if (!s.out) { s.out = now; MSTATE.luld.set(sym, s); return; }
+    if (now - s.out >= 15e3) {
+      s.until = now + 5 * 60e3; s.out = null; s.dir = p > b.hi ? 'up' : 'down'; s.at = now; MSTATE.luld.set(sym, s);
+      log(`LULD pause: ${sym} ${s.dir} at ${p} (band ${b.lo.toFixed(2)}-${b.hi.toFixed(2)})`);
+      broadcast({ t: 'evt', e: 'mstate', ev: mstateJson() });
+      if (userSyms.pos.has(sym) || userSyms.orders.has(sym)) notify('market', `${sym} paused`, `${sym} moved more than ${Math.round(b.pct * 100)}% ${s.dir} in under 5 minutes, so it pauses for 5 minutes (Limit Up-Limit Down). Orders wait until ${timeEt(s.until)}.`, { sym }).catch(() => {});
+    }
+  } else { const s = MSTATE.luld.get(sym); if (s?.out) { s.out = null; } }
+}
+function checkMwcb(p, now) {
+  const q = prices.get('SPY'), prev = q?.prev; if (!(prev > 0)) return;
+  const today = etDate(now); if (MSTATE.done.date !== today) MSTATE.done = { date: today, levels: [] };
+  const drop = 1 - p / prev;
+  for (const L of MWCB_LEVELS) {
+    if (drop < L.drop || MSTATE.done.levels.includes(L.level)) continue;
+    // a lower level can't fire once a higher one has
+    for (const x of MWCB_LEVELS) if (x.level <= L.level && !MSTATE.done.levels.includes(x.level)) MSTATE.done.levels.push(x.level);
+    const late = ENV.MARKET_OVERRIDE ? false : etMinutes(now) >= 15 * 60 + 25;
+    let until = null;
+    if (L.level === 3) { const c = market(now).closesAt; until = c && c > now ? c : now + 6 * 3600e3; }
+    else if (!late) until = now + 15 * 60e3;
+    if (until) {
+      MSTATE.mwcb = { level: L.level, until, at: now, drop, date: today };
+      log(`Circuit breaker Level ${L.level}: S&P 500 (SPY) down ${(drop * 100).toFixed(1)}%`);
+      notify('market', `🚨 Level ${L.level} circuit breaker`, L.level === 3 ? `The S&P 500 is down ${(drop * 100).toFixed(1)}% today. Stock trading is closed for the rest of the day. Crypto still trades.` : `The S&P 500 is down ${(drop * 100).toFixed(1)}% today. All stock trading halts for 15 minutes, until ${timeEt(until)}. Stock orders you place now wait for the reopen.`, {}).catch(() => {});
+    } else notify('market', `S&P 500 down ${(drop * 100).toFixed(1)}%`, `That's past the Level ${L.level} circuit breaker, but after 3:25 pm the market doesn't halt for Level 1 or 2.`, { push: false }).catch(() => {});
+    saveMstate(); broadcast({ t: 'evt', e: 'mstate', ev: mstateJson() });
+    break;
+  }
+}
+const saveMstate = () => kvSet('mstate', JSON.stringify({ mwcb: MSTATE.mwcb, done: MSTATE.done })).catch(() => {});
+async function loadMstate() { try { const v = JSON.parse(await kvGet('mstate', '{}') || '{}'); if (v.mwcb && v.mwcb.date === etDate()) MSTATE.mwcb = v.mwcb; if (v.done?.date === etDate()) MSTATE.done = v.done; } catch (e) {} }
+function mstateJson() {
+  const m = mwcbOn() ? mwcbNow() : null, paused = {};
+  for (const [s, v] of MSTATE.luld) if (v.until && Date.now() < v.until) paused[s] = { until: v.until, dir: v.dir };
+  const q = prices.get('SPY'), spyDrop = q?.prev && q.p ? 1 - q.p / q.prev : null;
+  return { mwcb: m ? { level: m.level, until: m.until, at: m.at, drop: m.drop } : null, done: MSTATE.done.date === etDate() ? MSTATE.done.levels : [], paused, spyDrop, on: { mwcb: mwcbOn(), luld: luldOn() } };
+}
+// the exchange calendar: holidays and 1 pm early closes, this year and next
+function calendarJson(years) {
+  const out = [];
+  for (const y of years) {
+    for (let m = 1; m <= 12; m++) { const days = new Date(Date.UTC(y, m, 0)).getUTCDate(); for (let d = 1; d <= days; d++) {
+      const iso = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`, hn = holidayName(y, m, d), w = dow(y, m, d);
+      if (hn && w !== 0 && w !== 6) out.push({ date: iso, kind: 'closed', name: hn });
+      else if (earlyClose(y, m, d)) out.push({ date: iso, kind: 'early', name: m === 11 ? 'Day after Thanksgiving' : m === 12 ? 'Christmas Eve' : 'Day before Independence Day', close: '1:00 pm' });
+    } }
+  }
+  return out;
+}
+// the note for the home screen: tomorrow (the next weekday) is a holiday or an early close
+function calendarNote(t = Date.now()) {
+  const p = etParts(t); let [y, m, d] = addDays(p.y, p.m, p.d, 1);
+  while (dow(y, m, d) === 0 || dow(y, m, d) === 6) [y, m, d] = addDays(y, m, d, 1);
+  const hn = holidayName(y, m, d), iso = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`, wd = WD[dow(y, m, d)];
+  if (hn) return { date: iso, kind: 'closed', text: `The stock market is closed ${wd === WD[(p.wd + 1) % 7] ? 'tomorrow' : wd} for ${hn}. Crypto trades as usual.` };
+  if (earlyClose(y, m, d)) return { date: iso, kind: 'early', text: `The stock market closes early at 1:00 pm ${wd === WD[(p.wd + 1) % 7] ? 'tomorrow' : 'on ' + wd}.` };
+  return null;
+}
+// ---------- order sanity checks: the "are you sure?" a careful broker asks before a manual order ----------
+const SANITY = [
+  ['far', 'Limit price far from the market'], ['big', 'Order over 25% of the wallet'], ['open', 'Market order in the first 5 minutes'],
+  ['earn', 'Buying right before earnings'], ['thin', 'Market order in a thinly traded stock'],
+];
+async function sanityChecks(w, { sym, side, otype, price, lpx, notional, equity }) {
+  if (S.sanity === false) return [];
+  const out = [], crypto = isCrypto(sym), p = priceOf(sym), on = k => S['san_' + k] !== false;
+  const lim = otype === 'stoplimit' ? num(lpx) : otype === 'limit' ? num(price) : 0;
+  if (on('far') && lim > 0 && p > 0 && Math.abs(lim / p - 1) > 0.10) out.push({ k: 'far', text: `Your limit price ${pxStr(lim)} is ${Math.round(Math.abs(lim / p - 1) * 100)}% ${lim > p ? 'above' : 'below'} the market price ${pxStr(p)}. Typo?` });
+  if (on('big') && side === 'buy' && equity > 0 && notional > equity * 0.25) out.push({ k: 'big', text: `This puts ${Math.round(notional / equity * 100)}% of the wallet into one order. Most traders keep a single trade under 10 to 25%.` });
+  if (!crypto && otype === 'market') {
+    const mk = market();
+    if (on('open') && mk.state === 'open' && etMinutes() < 9 * 60 + 35 && !ENV.MARKET_OVERRIDE) out.push({ k: 'open', text: 'The first minutes after the open have the widest spreads and the wildest prices. A limit order protects your price.' });
+    const a = assets.get(sym), dollarVol = a?.adv && p ? a.adv * p : null;
+    if (on('thin') && dollarVol != null && dollarVol < 1e6) out.push({ k: 'thin', text: `${sym} trades only about ${money(dollarVol)} a day, so a market order can fill far from the price you see. A limit order is safer.` });
+  }
+  if (on('earn') && side === 'buy' && !crypto && FINNHUB_KEY) {
+    try { const e = await Promise.race([earningsFor(sym), sleep(1500).then(() => null)]); const d = e?.next?.date; if (d) { const days = Math.round((Date.parse(d + 'T12:00:00Z') - Date.parse(etDate() + 'T12:00:00Z')) / 864e5); if (days >= 0 && days <= 1) out.push({ k: 'earn', text: `${sym} reports earnings ${days === 0 ? 'today' : 'tomorrow'}${e.next.hour === 'amc' ? ' after the close' : e.next.hour === 'bmo' ? ' before the open' : ''}. The price can jump 5 to 10% either way.` }); } } catch (x) {}
+  }
+  return out;
+}
+// ---------- fractional-share rules (most brokers): fractions trade as market orders or day limit orders, in regular hours ----------
+function fracProblem(w, { sym, kind, units, amt, tif, sess }) {
+  if (S.fracRules === false || isCrypto(sym) || !isReal(w)) return null;
+  const frac = units === 'usd' || (units === 'qty' && !Number.isInteger(+amt)) || units === 'pct';
+  if (!frac) return null;
+  if (units === 'pct') return null; // a percentage of whole shares is checked when it fills
+  if (kind === 'stop' || kind === 'stoplimit') return 'Stop orders need whole shares. Fractional shares (or orders in dollars) can only be market or limit orders.';
+  if (kind === 'limit' && tif === 'gtc') return 'Fractional limit orders (or orders in dollars) last for the day only. Pick "Today", or enter whole shares for good-till-canceled.';
+  if (kind === 'limit' && sess && sess !== 'regular') return 'Fractional shares (or orders in dollars) only trade in regular hours. Enter whole shares to trade extended hours.';
+  return null;
+}
 
 // =====================================================================
 // Real-market rules: broker profiles, sessions, quotes, fees, settlement, margin
@@ -1018,14 +1175,14 @@ async function cryptoGlobal() {
 // =====================================================================
 const PROFILES = {
   robinhood: {
-    key: 'robinhood', name: 'Robinhood rules', pre: 7 * 60, post: 20 * 60, overnight: true, gtcDays: 90, minUsd: 1,
+    key: 'robinhood', pi: 0.35, name: 'Robinhood rules', pre: 7 * 60, post: 20 * 60, overnight: true, gtcDays: 90, minUsd: 1,
     instant: { std: 1000, gold: 5000 }, achDays: 3, wdDays: 2, goldFee: 5, goldFree: 1000, maintBase: 25,
     marginRates: [[50e3, 5.25], [100e3, 5.05], [1e6, 4.75], [10e6, 4.5], [50e6, 4.45], [Infinity, 4.2]],
     // exchange routing tiers by 30-day crypto volume: [up to, taker %, maker %]
     cryptoTiers: [[10e3, 0.95, 0.5], [50e3, 0.75, 0.35], [250e3, 0.25, 0.125], [500e3, 0.15, 0.075], [1e6, 0.125, 0.06], [5e6, 0.10, 0.04], [10e6, 0.04, 0.02], [25e6, 0.03, 0.01], [Infinity, 0.03, 0]],
   },
   alpaca: {
-    key: 'alpaca', name: 'Alpaca rules', pre: 4 * 60, post: 20 * 60, overnight: false, gtcDays: 90, minUsd: 1,
+    key: 'alpaca', pi: 0.2, name: 'Alpaca rules', pre: 4 * 60, post: 20 * 60, overnight: false, gtcDays: 90, minUsd: 1,
     instant: { std: 0, gold: 0 }, achDays: 3, wdDays: 2, goldFee: 0, goldFree: 0, maintBase: 30,
     marginRates: [[Infinity, 6.5]],
     cryptoTiers: [[100e3, 0.25, 0.15], [500e3, 0.22, 0.12], [1e6, 0.20, 0.10], [10e6, 0.18, 0.08], [25e6, 0.15, 0.05], [50e6, 0.13, 0.02], [100e6, 0.12, 0.02], [Infinity, 0.10, 0]],
@@ -1272,6 +1429,12 @@ async function planOrder(c, w, pos, acct, sym, side, o = {}) {
       if (!crypto) { const est = qty > 0 ? qty : (o.usd || 0) / px; const imp = impactOf(sym, est, px); if (imp) { px = side === 'buy' ? px + imp : Math.max(tickOf(sym, px), px - imp); via = 'quote+impact'; } }
     }
   }
+  // price improvement: market makers usually fill retail market orders a little inside the bid and ask (in fractions of a cent)
+  let improve = 0;
+  if (!crypto && !o.px && !o.noImp && S.priceImprove !== false && quote.ask > quote.bid) {
+    improve = Math.round((quote.ask - quote.bid) / 2 * Math.random() * (prof.pi ?? 0.3) * 1e4) / 1e4;
+    if (improve > 0) px = side === 'buy' ? px - improve : px + improve;
+  }
   if (!(qty > 0) && o.usd > 0) qty = o.usd / px;
   const whole = !crypto && (S.wholeShares || sess === 'overnight');
   if (side === 'buy') qty = whole ? Math.floor(qty + 1e-9) : Math.floor(qty * 10 ** dp + 1e-6) / 10 ** dp;
@@ -1304,7 +1467,7 @@ async function planOrder(c, w, pos, acct, sym, side, o = {}) {
   }
   const pnl = side === 'sell' ? (px - p.avg) * qty - fees.total : null;
   return {
-    sym, side, qty, px, notional, fees, quote, sess, via, deep, pnl, cashAfter, liq: o.liq || 'taker',
+    sym, side, qty, px, notional, fees, quote, sess, via, deep, pnl, cashAfter, liq: o.liq || 'taker', improve, imp: improve * qty,
     settle: !crypto && side === 'sell' ? settleTime(prof) : null, borrow: side === 'buy' && cashAfter < 0 ? -cashAfter : 0,
   };
 }
@@ -1315,6 +1478,7 @@ const fillCbs = []; // functions to run after every trade
 async function execTrade(wid, sym, side, o = {}) {
   sym = cleanSym(sym); if (!sym) fail('Pick something to trade');
   if (side !== 'buy' && side !== 'sell') fail('Choose buy or sell');
+  const halt = haltOf(sym); if (halt && !o.force) fail(halt.why + ' Stock orders wait until trading resumes.');
   const fill = await tx(async c => {
     const w = (await c.query('select * from wallets where id=$1 for update', [wid])).rows[0];
     if (!w) fail('That wallet does not exist', 404);
@@ -1342,10 +1506,10 @@ async function execTrade(wid, sym, side, o = {}) {
       } else await c.query('update pos set qty=$1 where wid=$2 and sym=$3', [left, wid, sym]);
     }
     const feeMap = Object.fromEntries(pl.fees.lines.map(l => [l.k, l.amt]));
-    const t = (await c.query(`insert into trd(wid,sym,side,qty,price,why,pnl,fee,note,fees,bid,ask,otype,tif,sess,settle,liq,via)
-      values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) returning id, ts`,
+    const t = (await c.query(`insert into trd(wid,sym,side,qty,price,why,pnl,fee,note,fees,bid,ask,otype,tif,sess,settle,liq,via,imp)
+      values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) returning id, ts`,
       [wid, sym, side, pl.qty, pl.px, o.why || 'manual', pl.pnl == null ? null : round(pl.pnl, 6), pl.fees.total, o.note ? String(o.note).slice(0, 500) : null,
-        JSON.stringify(feeMap), pl.quote.bid, pl.quote.ask, o.otype || 'market', o.tif || null, pl.sess, pl.settle ? new Date(pl.settle) : null, pl.liq, pl.via])).rows[0];
+        JSON.stringify(feeMap), pl.quote.bid, pl.quote.ask, o.otype || 'market', o.tif || null, pl.sess, pl.settle ? new Date(pl.settle) : null, pl.liq, pl.via, pl.imp ? round(pl.imp, 6) : null])).rows[0];
     let tax = null;
     if (side === 'buy') await addLot(c, wid, sym, pl.qty, (pl.notional + pl.fees.total) / pl.qty, t.id);
     else tax = await consumeLots(c, w, sym, pl.qty, pl.notional - pl.fees.total, t.id);
@@ -1353,7 +1517,7 @@ async function execTrade(wid, sym, side, o = {}) {
     return {
       id: t.id, ts: tsMs(t.ts), wid, sym, side, qty: pl.qty, price: pl.px, fee: pl.fees.total, fees: pl.fees.lines, pnl: pl.pnl, pnlPct: pl.pnl != null && p ? pl.pnl / (p.avg * pl.qty) * 100 : null,
       cash: newCash, closed, bid: pl.quote.bid, ask: pl.quote.ask, quoteSrc: pl.quote.src, sess: pl.sess, settle: pl.settle, via: pl.via, borrow: pl.borrow, tax, profile: prof.key,
-      stale: prices.get(sym)?.src === 'cache',
+      stale: prices.get(sym)?.src === 'cache', improve: pl.improve || 0, imp: pl.imp || 0,
     };
   });
   for (const cb of fillCbs) try { await cb(fill); } catch (e) { warn('after trade', e.message); }
@@ -1483,6 +1647,7 @@ async function addLimit(wid, sym, o) {
     if (lpx) checkTick(sym, lpx, 'Limit prices');
     if (sess !== 'regular' && kind !== 'limit') fail('Only limit orders can trade outside regular hours. Stop orders wait for the regular session.');
     if (sess === '24h' && !prof.overnight) fail('The 24 Hour Market is a Robinhood feature. Pick extended hours instead.');
+    const fp = o.why ? null : fracProblem(w, { sym, kind, units, amt, tif, sess }); if (fp) fail(fp);
     if (kind === 'moo') tif = 'day';
   }
   if (kind === 'stop' || kind === 'stoplimit') {
@@ -1530,12 +1695,14 @@ function canFire(sym, src) { // practice rules
 }
 function condAllowed(o, src) {
   const w = walletMeta.get(o.wid); if (!w || w.archived || w.broker) return false;
+  if (haltOf(o.sym)) return false; // halted or paused: stops wait for the reopen
   if (!isReal(w)) return canFire(o.sym, src);
   if (src === 'cache') return false;
   return isCrypto(o.sym) || sessionAt(profOf(w)) === 'regular';
 }
 function limAllowed(l, src) {
   const w = walletMeta.get(l.wid); if (!w || w.archived || w.broker) return false;
+  if (haltOf(l.sym)) return false;
   if (!isReal(w)) return canFire(l.sym, src) && (l.kind !== 'moo' || isCrypto(l.sym) || market().state === 'open');
   if (src === 'cache') return false;
   if (isCrypto(l.sym)) return true;
@@ -1547,6 +1714,7 @@ function limAllowed(l, src) {
   return false;
 }
 engineHook = (sym, p, src) => {
+  try { mstateTick(sym, p, src); } catch (e) { warn('market state', e.message); }
   for (const o of condOrders.get(sym) || []) if (o.kind === 'trail' && p > (o.peak || 0) && condAllowed(o, src === 'cache' ? 'cache' : 'ws')) { o.peak = p; o.dirty = true; }
   checkCond(sym, p, src); checkLims(sym, p, src);
   if (src !== 'cache') checkAlerts(sym, p);
@@ -2448,6 +2616,7 @@ async function statement(wid, ym) {
     realized: trades.filter(t => t.pnl != null).reduce((s, t) => s + t.pnl, 0), dividends: sum(t => t.side === 'div'),
     interest: sum(t => t.side === 'int' && t.price > 0), marginInterest: -sum(t => t.side === 'int' && t.price < 0), otherFees: sum(t => t.side === 'fee'),
     fees, feeTotal: trades.reduce((s, t) => s + (t.side === 'fee' ? 0 : t.fee || 0), 0), trades, positions: pos, cash: live ? +w.cash : null,
+    improved: trades.reduce((s, t) => s + (t.imp || 0), 0), improvedYear: +(await row('select coalesce(sum(imp),0) s from trd where wid=$1 and ts >= $2 and ts < $3', [wid, new Date(etToUtc(y, 1, 1)), to])).s,
   };
 }
 
@@ -3636,6 +3805,7 @@ async function runBotInner(id, { manual, dry, night }) {
   let tradeBudget = Math.max(0, m.maxTradesDay - tradesToday);
   // ---- data ----
   const syms = bot.syms.filter(s => isCrypto(s) || sess === 'regular' || manual || night);
+  if (!isCrypto(bot.syms[0] || '') && mwcbOn() && mwcbNow()) log.risk.push(haltOf('SPY')?.why || 'The stock market is halted by a circuit breaker.');
   const bench = benchFor(bot.syms);
   const moodSyms = [bot.syms.some(s => !isCrypto(s)) ? 'SPY' : null, bot.syms.some(isCrypto) ? 'BTC' : null].filter(Boolean);
   const { data, missing } = await loadUniverse([...new Set([...bot.syms, bench, ...moodSyms])]);
@@ -3695,6 +3865,7 @@ async function runBotInner(id, { manual, dry, night }) {
     if (S.corrGuard !== false && OV.corr && !parking && !held[s] && wt > 0 && series[s]) { for (const hs of Object.keys(held)) { if (hs === s) continue; const r = corr60(series[s], series[hs]); if (r != null && r >= (S.corrMax ?? 0.9)) { wt = 0; d.why.push(`Skipped buying: over the last 60 days it moved almost exactly like ${hs} (correlation ${r.toFixed(2)}), which it already holds.`); break; } } }
     if (stoppedToday.has(s) && !held[s] && wt > 0) { wt = 0; d.why.push('Not buying back today: its stop loss sold it earlier today.'); }
     if (noBuys && wt * capital > have) { wt = have / capital; d.why.push('No new buys today: the daily loss limit was hit.'); }
+    const hl = haltOf(s); if (hl) { wt = Math.min(wt, have / capital); if (!d.why.includes(hl.why)) d.why.push(`Waiting: ${hl.why}`); d.halted = true; } // halted stocks hold as they are until trading resumes
     d.target = wt; decisions[s] = d;
   }
   // what the mood switch held back waits in the T-bill fund (if the bot has one) instead of sitting in cash
@@ -4769,7 +4940,7 @@ const assetsJson = syms => {
 const pricesJson = () => { const o = {}; for (const [s, q] of prices) if (q.p > 0) o[s] = [round(q.p, 8), q.prev ? round(q.prev, 8) : null, q.t, q.src === 'cache' ? 1 : 0, q.hi || null, q.lo || null]; return o; };
 const jsonOr = (s, d = null) => { if (!s) return d; try { return JSON.parse(s); } catch (e) { return d; } };
 const tradeJson = t => ({ id: t.id, ts: tsMs(t.ts), sym: t.sym, side: t.side, qty: +t.qty, price: +t.price, why: t.why, pnl: t.pnl == null ? null : +t.pnl, fee: +t.fee || 0, note: t.note, tags: t.tags, wid: t.wid,
-  fees: jsonOr(t.fees), bid: t.bid == null ? null : +t.bid, ask: t.ask == null ? null : +t.ask, otype: t.otype || null, tif: t.tif || null, sess: t.sess || null, settle: tsMs(t.settle), liq: t.liq || null, via: t.via || null, broker: !!t.ext_id });
+  fees: jsonOr(t.fees), bid: t.bid == null ? null : +t.bid, ask: t.ask == null ? null : +t.ask, otype: t.otype || null, tif: t.tif || null, sess: t.sess || null, settle: tsMs(t.settle), liq: t.liq || null, via: t.via || null, broker: !!t.ext_id, imp: t.imp == null ? null : +t.imp });
 function rulesJson(w) {
   const prof = profOf(w), sess = sessionAt(prof);
   return { profile: prof.key, name: prof.name, session: sess, sessionLabel: SESSION_LABEL[sess], pre: prof.pre, post: prof.post, overnight: prof.overnight, gtcDays: prof.gtcDays, minUsd: prof.minUsd,
@@ -4803,7 +4974,7 @@ GET('/api/state', auth, async req => {
   for (const s of new Set(mine)) ensureMeta(s).catch(() => {});
   const eq = await equitySeries(wid, '1D').catch(() => null);
   const out = {
-    v: BUILD, appVersion: APP_VERSION, now: Date.now(), market: market(), user: APP_USER,
+    v: BUILD, appVersion: APP_VERSION, now: Date.now(), market: market(), mstate: mstateJson(), calNote: calendarNote(), user: APP_USER,
     wallet: w, wallets, pos, ord, lims, account, xfers, rules: rulesJson(wr), broker: brokerJson(), trd: trd.map(tradeJson), watch: watch.map(x => x.sym), alerts: alerts.map(alertJson),
     preds: preds.map(p => ({ id: p.id, sym: p.sym, dir: p.dir, start: +p.start_px, startTs: tsMs(p.start_ts), end: tsMs(p.end_ts) })),
     assets: assetsJson(syms), prices: pricesJson(), spark: sp, eq1d: eq,
@@ -4816,6 +4987,8 @@ GET('/api/state', auth, async req => {
   if (tokenExpiry(req.token) - Date.now() < (TOKEN_DAYS - 30) * 864e5) out.token = newToken(); // keeps you logged in while you use the app
   return out;
 });
+GET('/api/band/:sym', auth, req => { const sym = cleanSym(req.params.sym); const h = haltOf(sym); return { sym, halt: h ? { kind: h.kind, why: h.why, until: h.until } : null, band: isCrypto(sym) || !luldOn() ? null : luldOf(sym) }; });
+GET('/api/calendar', auth, () => { const y = etParts().y; return { days: calendarJson([y, y + 1]), today: market(), mstate: mstateJson(), note: calendarNote() }; });
 GET('/api/equity', auth, async req => equitySeries(await activeWalletId(req), String(req.query.r || '1D').toUpperCase(), req.query.bench || null));
 
 // =====================================================================
@@ -4888,7 +5061,7 @@ POST('/api/preview', auth, async req => {
   out.held = acct.holdsShares[sym] || 0; out.owned = p ? p.qty : 0;
   if (!(amount > 0)) return out;
   // Orders that wait: price them at their limit or stop, not at the market.
-  const plan = { ...o, auto: false };
+  const plan = { ...o, auto: false, noImp: true };
   if (otype === 'limit') { plan.px = num(b.price) || null; plan.liq = out.quote && (side === 'buy' ? out.quote.ask <= num(b.price) : out.quote.bid >= num(b.price)) ? 'taker' : 'maker'; }
   if (otype === 'stop') plan.px = null;
   if (otype === 'stoplimit') { plan.px = num(b.lpx) || null; plan.liq = 'maker'; }
@@ -4919,6 +5092,9 @@ POST('/api/preview', auth, async req => {
   if (real && !crypto && (otype === 'stop' || otype === 'stoplimit' || otype === 'trail') && sess !== 'regular') out.warn.push('Stop orders only trigger during regular hours (9:30 AM to 4:00 PM ET).');
   if (real && !crypto && out.quote && !out.quote.live) out.warn.push('Bid and ask are estimated from the last trade. Connect Alpaca in Settings for live stock quotes.');
   if (out.deep) out.warn.push('This order is bigger than the visible order book, so the price is an estimate.');
+  const halt = haltOf(sym); if (halt) { out.halt = { kind: halt.kind, why: halt.why, until: halt.until }; if (otype === 'market') { out.queued = true; out.opensAt = halt.until; } }
+  if (real && !crypto) { const fp = fracProblem(w, { sym, kind: otype, units: mode === 'qty' ? 'qty' : mode === 'pct' ? 'pct' : 'usd', amt: amount, tif: b.tif === 'day' ? 'day' : 'gtc', sess: b.sess }); if (fp) out.frac = fp; out.fracOk = !fp; }
+  if (real && !crypto && otype === 'market' && out.improveNote !== false && profOf(w).pi) out.improve = 'Market orders usually fill slightly better than the bid or ask (price improvement). The receipt shows how much.';
   if (w.broker && BROKER?.env === 'live') out.warn.unshift('This is a real-money order on your live Alpaca account.');
   return out;
 });
@@ -4930,6 +5106,13 @@ POST('/api/trade', auth, async req => {
   const { side, otype, mode, amount, o, units } = orderInput(b);
   if (!(amount > 0)) fail('Enter an amount');
   const real = isReal(w);
+  // the "are you sure?" checks, once per order: the app asks, you confirm
+  if (!b.confirm) {
+    const acct0 = await accountInfo(wid, { w }).catch(() => null), px0 = otype === 'limit' ? num(b.price) : otype === 'stoplimit' ? num(b.lpx) : priceOf(sym) || 0;
+    const notional = mode === 'usd' ? amount : mode === 'qty' ? amount * px0 : 0;
+    const checks = await sanityChecks(w, { sym, side, otype, price: b.price, lpx: b.lpx, notional, equity: acct0?.equity || 0 });
+    if (checks.length) return { confirm: true, checks };
+  }
   if (otype === 'trail') {
     if (side !== 'sell') fail('Trailing stops sell shares you already own');
     const p = (await positions(wid)).find(x => x.sym === sym); if (!p) fail(`You don't own any ${sym}`);
@@ -4941,6 +5124,8 @@ POST('/api/trade', auth, async req => {
     const r = await addLimit(wid, sym, { side, kind: otype, price: b.price, lpx: b.lpx, amount, units, sl: b.sl, tp: b.tp, tif: b.tif, sess: b.sess });
     return r.fill ? { fill: r.fill, bracket: r.fill.bracket || [], order: { id: r.id } } : { order: { id: r.id, kind: otype } };
   }
+  const halt = haltOf(sym);
+  if (halt) { const r = await addLimit(wid, sym, { side, kind: 'moo', amount, units, sl: b.sl, tp: b.tp }); return { queued: true, id: r.id, opensAt: halt.until, halt: { kind: halt.kind, why: halt.why, until: halt.until } }; }
   if (!isCrypto(sym)) {
     if (real) {
       if (sessionAt(profOf(w)) !== 'regular') { const r = await addLimit(wid, sym, { side, kind: 'moo', amount, units, sl: b.sl, tp: b.tp }); return { queued: true, id: r.id, opensAt: market().opensAt }; }
@@ -6903,7 +7088,7 @@ const ICONS = {};
 const icon = (name, fn) => ICONS[name] || (ICONS[name] = fn());
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD646"/><stop offset=".5" stop-color="#FFA028"/><stop offset="1" stop-color="#FA5256"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="#1E1430"/><ellipse cx="31" cy="36" rx="18" ry="22" transform="rotate(30 31 36)" fill="url(#g)"/><path d="M20 41l6.5-6 5 3.5 9.5-10" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37 28.5h4.5V33" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="45" cy="11.5" rx="9" ry="4.6" transform="rotate(-24 45 11.5)" fill="#3BD68A"/></svg>`;
 let BUILD = 'dev', INDEX = null, INDEX_GZ = null;
-const APP_VERSION = '3.6.0'; // stamped by build.sh from package.json
+const APP_VERSION = '3.7.0'; // stamped by build.sh from package.json
 function loadIndex() {
   const file = path.join(__dirname, 'index.html');
   let html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<!doctype html><title>Mango</title><p>index.html is missing next to server.js.</p>';
@@ -7012,7 +7197,7 @@ process.on('unhandledRejection', e => warn('unhandled', e && (e.stack || e.messa
   loadIndex();
   await migrate();
   tokenSalt = (await kvGet('token_salt', '')) || '';
-  await loadSettings(); await refreshPasskeysOn(); await loadAssets(); await loadPriceCache(); await loadOrders(); await loadAlerts(); await initPush();
+  await loadSettings(); await refreshPasskeysOn(); await loadAssets(); await loadPriceCache(); await loadOrders(); await loadMstate(); await loadAlerts(); await initPush();
   await refreshUserSyms(); await walletsSummary();
   server.listen(PORT, () => log(`🥭 Mango is running on port ${PORT} · v${APP_VERSION} (build ${BUILD}) · ${FINNHUB_KEY ? 'stocks on' : 'stocks off (no FINNHUB_KEY)'}${BROKER ? ` · Alpaca ${BROKER.env}` : ''}`));
   cbConnect(); fhConnect(); if (BROKER) adConnect(); startJobs();
