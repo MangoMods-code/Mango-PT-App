@@ -45,6 +45,15 @@ Trade stocks, ETFs and crypto with practice money. You can also put strategies t
 - **Lessons from losing trades**: after a bot sells at a loss, a short post-mortem lands in its journal (what went wrong, which Council members called it).
 - **Explain the news** on any stock or coin page: what the headlines say and whether they explain the move.
 
+**Practice tools**
+- **Chart-signal alerts**: RSI levels, crossing the 50- or 200-day average, golden and death crosses, new 52-week highs and lows, and volume spikes. Checked every 5 minutes with the live price.
+- **Monthly review** of your trades and journal: return against the S&P 500, win rate, average hold, best and worst trades, results by tag and weekday, and coach's notes (AI, or a plain summary). A notification on the 1st of each month.
+- **What if?**: what a past buy would be worth today (adjusted for splits and dividends) against the S&P 500, with the worst drop along the way, plus what your own sells would be worth if you'd held.
+- **Options practice**: buy calls and puts on any stock or ETF with a separate $10,000 practice account. Prices are Black-Scholes estimates from recent volatility (clearly labeled, not real quotes). Positions settle at expiry.
+- **Dividend calendar**: upcoming ex-dividend dates for what you hold and watch, estimated from each company's pattern, with the expected payment.
+- **Home Screen widget** via the Shortcuts app: a secret read-only link (text or JSON) with your balance, today's change and top movers. You can make a new link at any time.
+- New weekly challenges for these tools in Games.
+
 **Alpaca (real brokerage)**
 - A separate side of the app for an Alpaca account, paper or live.
 - Safeguards on that side: a kill switch, a daily loss limit, a per-order cap, a real-money cap per bot, and Face ID confirmation for real-money actions.

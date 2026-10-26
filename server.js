@@ -284,6 +284,8 @@ const MIGRATIONS = [
       create table if not exists council(id serial primary key, ts timestamptz not null default now(), bot_id int not null, sym text not null, action text not null, price numeric, votes text not null,
         yes int not null default 0, no int not null default 0, chair text, settle_at timestamptz not null, settled boolean not null default false, result numeric, right_ text);
       create index if not exists council_b on council(bot_id, id desc);
+      create table if not exists opt_pos(id serial primary key, sym text not null, kind text not null, strike numeric not null, exp text not null, qty int not null, prem numeric not null, iv numeric, opened timestamptz not null default now(), closed timestamptz, close_px numeric, how text);
+      alter table alert add column if not exists ind text;
     `);
   },
 ];
@@ -1654,6 +1656,7 @@ function checkAlerts(sym, p) {
       }
       continue;
     }
+    if (a.kind !== 'price') continue; // chart-signal alerts are checked by their own job
     const crossed = a.dir === 'above' ? p >= a.price : p <= a.price;
     if (!a.armed) { // repeating alerts wait until the price moves back first
       const back = a.dir === 'above' ? p < a.price * 0.997 : p > a.price * 1.003;
@@ -2601,6 +2604,9 @@ const WEEKLY = [
   ['w_crypto', 'Trade a crypto', c => c.wCrypto, 1], ['w_new', 'Buy something you have never owned', c => c.wNew, 1],
   ['w_protect', 'Add a stop loss to a position', c => c.wStops, 1], ['w_notes', 'Write notes on 2 trades', c => c.wNotes, 2],
   ['w_green', 'End a day in profit', c => c.wGreenDays, 1], ['w_alerts', 'Set 2 price alerts', c => c.wAlerts, 2],
+  ['w_ask', 'Ask the Council about 3 stocks', c => c.wAsk, 3], ['w_whatif', 'Try the what-if machine twice', c => c.wWhatif, 2],
+  ['w_opts', 'Make an options practice trade', c => c.wOpts, 1], ['w_signal', 'Set a chart-signal alert', c => c.wSignal, 1],
+  ['w_review', 'Read your monthly review', c => c.wReview, 1], ['w_bot', 'Start a new bot', c => c.wBot, 1],
 ];
 async function challenges(wid, a) {
   const ws = weekStart(), weekNo = Math.floor(ws / (7 * 86400e3));
@@ -2614,6 +2620,10 @@ async function challenges(wid, a) {
     wPreds: +(await row("select count(*) n from preds where result='win' and end_ts >= $1", [new Date(ws)])).n,
     wStops: +(await row("select count(*) n from ord where wid=$1 and kind in ('stop','trail') and created >= $2", [wid, new Date(ws)])).n,
     wAlerts: +(await row('select count(*) n from alert where ts >= $1', [new Date(ws)])).n,
+    wAsk: await chalCount('ask'), wWhatif: await chalCount('whatif'), wReview: await chalCount('review'),
+    wOpts: +(await row('select count(*) n from opt_pos where opened >= $1', [new Date(ws)]).catch(() => ({ n: 0 }))).n,
+    wSignal: +(await row("select count(*) n from alert where kind='ind' and ts >= $1", [new Date(ws)])).n,
+    wBot: +(await row('select count(*) n from bots where created >= $1', [new Date(ws)])).n,
     wGreenDays: (a.daily || []).filter(d => tsMs(d.d + 'T12:00:00Z') >= ws && d.ch > 0).length,
   };
   const weekly = pick.map(([key, name, f, goal]) => ({ key, name, value: Math.min(goal, f(c)), goal, done: f(c) >= goal }));
@@ -4158,6 +4168,230 @@ STRATEGIES.earnings = {
     return out;
   },
 };
+// ===================================================================
+// Practice tools: smart chart alerts, the monthly review of the trade journal, weekly challenges,
+// the what-if machine, options practice (Black-Scholes estimates), the dividend calendar and the
+// read-only feed for an iPhone Shortcuts widget.
+// ===================================================================
+const paperWallets = async () => (await rows('select * from wallets where broker is null and not archived order by id')).map(w => w.id);
+const botWallets = async () => new Set((await rows('select wid from bots')).map(r => r.wid));
+const fmtPct = x => x == null || !Number.isFinite(x) ? 'n/a' : `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1)}%`;
+// daily closes with today's live price as the last bar (so indicators move during the day)
+function liveCloses(b, sym) {
+  const c = b.c.slice(), v = (b.v || []).slice(), p = priceOf(sym), today = etDate();
+  if (p > 0) { if (b.d[b.d.length - 1] === today) c[c.length - 1] = p; else { c.push(p); v.push(null); } }
+  return { c, v, i: c.length - 1 };
+}
+
+// ---------- smart chart alerts ----------
+const IND_ALERTS = {
+  rsiBelow: { title: v => `RSI falls below ${v}`, test: (c, i, v) => IND.rsi(c, 14, i) < v, def: 30 },
+  rsiAbove: { title: v => `RSI rises above ${v}`, test: (c, i, v) => IND.rsi(c, 14, i) > v, def: 70 },
+  above50: { title: () => 'Crosses above its 50-day average', test: (c, i) => c[i] > IND.sma(c, 50, i) },
+  below50: { title: () => 'Crosses below its 50-day average', test: (c, i) => c[i] < IND.sma(c, 50, i) },
+  above200: { title: () => 'Crosses above its 200-day average', test: (c, i) => i >= 200 && c[i] > IND.sma(c, 200, i) },
+  below200: { title: () => 'Crosses below its 200-day average', test: (c, i) => i >= 200 && c[i] < IND.sma(c, 200, i) },
+  golden: { title: () => 'Golden cross (50-day over 200-day)', test: (c, i) => i >= 200 && IND.sma(c, 50, i) > IND.sma(c, 200, i) },
+  death: { title: () => 'Death cross (50-day under 200-day)', test: (c, i) => i >= 200 && IND.sma(c, 50, i) < IND.sma(c, 200, i) },
+  high52: { title: () => 'Hits a new 52-week high', test: (c, i) => i >= 252 && c[i] >= Math.max(...c.slice(i - 251, i)) },
+  low52: { title: () => 'Hits a new 52-week low', test: (c, i) => i >= 252 && c[i] <= Math.min(...c.slice(i - 251, i)) },
+  volSpike: { title: v => `Volume over ${v}× normal`, test: (c, i, v, vol) => { const k = vol.length - 1; if (!(vol[k] > 0) || k < 21) return false; let s = 0; for (let j = k - 20; j < k; j++) s += vol[j] || 0; return vol[k] > v * s / 20; }, def: 2 },
+};
+const indTitle = ind => IND_ALERTS[ind?.t]?.title(ind.v) || 'Chart signal';
+let indBusy = false;
+async function indAlertJob() {
+  if (indBusy) return; indBusy = true; try { await indAlertRun(); } finally { indBusy = false; }
+}
+async function indAlertRun() {
+  const list = await rows("select * from alert where kind='ind' and not fired").catch(() => []); if (!list.length) return;
+  const bySym = {}; for (const a of list) (bySym[a.sym] ||= []).push(a);
+  for (const [sym, as] of Object.entries(bySym)) {
+    if (!isCrypto(sym) && market().state === 'closed' && etParts().h > 9) continue; // stocks: only while something trades
+    const b = await dailyBars(sym).catch(() => null); if (!b) continue;
+    const { c, v, i } = liveCloses(b, sym);
+    for (const a of as) {
+      const ind = jsonOr(a.ind, {}), def = IND_ALERTS[ind.t]; if (!def) continue;
+      let on = false; try { on = !!def.test(c, i, num(ind.v, def.def), v); } catch (e) {}
+      if (!on) { if (!a.armed) await Q('update alert set armed=true where id=$1', [a.id]); continue; }
+      if (!a.armed || etDate(tsMs(a.last_fired) || 0) === etDate()) continue; // fire when it becomes true, at most once a day
+      const rsi = IND.rsi(c, 14, i);
+      const won = await row(a.rep ? 'update alert set armed=false, last_fired=now() where id=$1 and armed returning id' : 'update alert set fired=true, armed=false, last_fired=now() where id=$1 and armed and not fired returning id', [a.id]);
+      if (!won) continue; // another check already fired it
+      await notify('alert', `${sym}: ${indTitle(ind)}`, `${sym} is at ${pxStr(c[i])}. RSI ${rsi != null ? rsi.toFixed(0) : 'n/a'}, 50-day ${pxStr(IND.sma(c, 50, i) || 0)}.${a.label ? ' ' + a.label : ''}`, { sym, data: { kind: 'alert' } });
+    }
+  }
+}
+
+// ---------- monthly review ----------
+async function monthReview(wid, m) {
+  if (!/^\d{4}-\d{2}$/.test(m)) fail('Pick a month');
+  const [y, mo] = m.split('-').map(Number), from = new Date(Date.UTC(y, mo - 1, 1, 4)), to = new Date(Date.UTC(mo === 12 ? y + 1 : y, mo === 12 ? 0 : mo, 1, 4));
+  const tr = await rows("select * from trd where wid=$1 and ts >= $2 and ts < $3 and side in ('buy','sell') order by id", [wid, from, to]);
+  const sells = tr.filter(t => t.side === 'sell' && t.pnl != null), wins = sells.filter(t => +t.pnl > 0), losses = sells.filter(t => +t.pnl <= 0);
+  const sum = a => a.reduce((t, x) => t + +x.pnl, 0);
+  const holds = await rows('select r.acquired, t.ts from realized r join trd t on t.id=r.trd_id where t.wid=$1 and t.ts >= $2 and t.ts < $3', [wid, from, to]).catch(() => []);
+  const avgHold = holds.length ? holds.reduce((t, r) => t + (tsMs(r.ts) - tsMs(r.acquired)), 0) / holds.length / 864e5 : null;
+  const byTag = {}; for (const t of sells) for (const g of String(t.tags || '').split(',').filter(Boolean)) { const x = byTag[g] ||= { n: 0, pnl: 0, wins: 0 }; x.n++; x.pnl += +t.pnl; if (+t.pnl > 0) x.wins++; }
+  const byDay = {}; for (const t of sells) { const d = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(etDate(tsMs(t.ts)) + 'T12:00').getDay()]; const x = byDay[d] ||= { n: 0, pnl: 0 }; x.n++; x.pnl += +t.pnl; }
+  const bySym = {}; for (const t of sells) { const x = bySym[t.sym] ||= { n: 0, pnl: 0 }; x.n++; x.pnl += +t.pnl; }
+  const e0 = await row('select eq from snap where wid=$1 and ts < $2 order by ts desc limit 1', [wid, from]), e1 = await row('select eq from snap where wid=$1 and ts < $2 order by ts desc limit 1', [wid, to]);
+  let spy = null; try { const b = await dailyBars('SPY'), i0 = lastIndexOnOrBefore(b.d, etDate(from.getTime() - 864e5)), i1 = lastIndexOnOrBefore(b.d, etDate(to.getTime() - 864e5)); if (i0 >= 0 && i1 > i0) spy = b.c[i1] / b.c[i0] - 1; } catch (e) {}
+  const best = sells.slice().sort((a, b) => +b.pnl - +a.pnl)[0], worst = sells.slice().sort((a, b) => +a.pnl - +b.pnl)[0];
+  const noted = tr.filter(t => t.note).length;
+  const tj = t => t && { id: t.id, sym: t.sym, pnl: +t.pnl, ts: tsMs(t.ts), note: t.note, tags: t.tags };
+  const saved = jsonOr(await kvGet(`review:${wid}:${m}`).catch(() => null), null);
+  return { month: m, trades: tr.length, buys: tr.length - sells.length, sells: sells.length, wins: wins.length, losses: losses.length, winRate: sells.length ? wins.length / sells.length : null,
+    realized: sum(sells), avgWin: wins.length ? sum(wins) / wins.length : null, avgLoss: losses.length ? sum(losses) / losses.length : null, avgHold, best: tj(best), worst: tj(worst),
+    ret: e0 && e1 ? +e1.eq / +e0.eq - 1 : null, spy, noted, tags: Object.entries(byTag).map(([k, x]) => ({ tag: k, ...x })).sort((a, b) => b.n - a.n), days: byDay, syms: Object.entries(bySym).map(([k, x]) => ({ sym: k, ...x })).sort((a, b) => b.pnl - a.pnl),
+    notes: tr.filter(t => t.note).slice(-12).map(t => ({ sym: t.sym, side: t.side, pnl: t.pnl == null ? null : +t.pnl, note: String(t.note).slice(0, 200), tags: t.tags })), coach: saved };
+}
+async function reviewCoach(wid, m) {
+  const r = await monthReview(wid, m);
+  const facts = `Month ${m}. ${r.trades} trades (${r.buys} buys, ${r.sells} sells). Closed: ${r.wins} wins, ${r.losses} losses${r.winRate != null ? `, win rate ${Math.round(r.winRate * 100)}%` : ''}. Realized ${usdS(r.realized)}. Average win ${usdS(r.avgWin)}, average loss ${usdS(r.avgLoss)}. Average hold ${r.avgHold != null ? r.avgHold.toFixed(1) + ' days' : 'n/a'}.
+Wallet return ${fmtPct(r.ret)} vs S&P 500 ${fmtPct(r.spy)}.
+Best trade: ${r.best ? `${r.best.sym} ${usdS(r.best.pnl)}` : 'none'}. Worst: ${r.worst ? `${r.worst.sym} ${usdS(r.worst.pnl)}` : 'none'}.
+By tag: ${r.tags.map(t => `${t.tag} ${t.n} trades ${usdS(t.pnl)}`).join('; ') || 'no tags'}.
+By weekday: ${Object.entries(r.days).map(([d, x]) => `${d} ${x.n} ${usdS(x.pnl)}`).join('; ') || 'n/a'}.
+Journal notes (${r.noted} of ${r.trades} trades have one):
+${r.notes.map(n => `- ${n.side} ${n.sym}${n.pnl != null ? ` (${usdS(n.pnl)})` : ''}: ${n.note}${n.tags ? ` [${n.tags}]` : ''}`).join('\n') || '- none'}`;
+  let text;
+  if (analystReady()) { const a = await aiText('review', 'You are a friendly trading coach reviewing one month of paper trades for someone learning to trade. Using only the facts, write 4 short paragraphs: how the month went (with numbers, against the S&P 500), the strongest habit to keep, the pattern that cost the most money (look at tags, weekdays, hold times and the notes), and one specific thing to try next month. Be honest and kind. No advice about real money.', facts, { max: 450 }); text = a.ok ? a.text : null; }
+  if (!text) text = [r.trades ? `${r.trades} trades, ${r.wins} wins and ${r.losses} losses, ${usdS(r.realized)} realized.` : 'No trades this month.', r.ret != null ? `The wallet did ${fmtPct(r.ret)} against ${fmtPct(r.spy)} for the S&P 500.` : '', r.avgWin != null && r.avgLoss != null ? `Average win ${usdS(r.avgWin)} vs average loss ${usdS(r.avgLoss)}: ${Math.abs(r.avgWin) > Math.abs(r.avgLoss) ? 'your wins are bigger than your losses, keep that.' : 'your losses are bigger than your wins; try cutting losers sooner.'}` : '', r.noted < r.trades / 2 && r.trades ? `Only ${r.noted} of ${r.trades} trades have a journal note. Writing why you trade makes these reviews much more useful.` : ''].filter(Boolean).join('\n\n');
+  const out = { ts: Date.now(), text, ai: analystReady() };
+  await kvSet(`review:${wid}:${m}`, JSON.stringify(out)); return out;
+}
+const usdS = x => x == null || !Number.isFinite(+x) ? 'n/a' : `${+x < 0 ? '−' : ''}$${Math.abs(+x).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+const prevMonth = () => { const d = etDate(), [y, m] = d.split('-').map(Number); return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`; };
+GET('/api/review', auth, async req => { chalBump('review'); return monthReview(await activeWalletId(req), String(req.query.m || etDate().slice(0, 7))); });
+POST('/api/review/coach', auth, async req => reviewCoach(await activeWalletId(req), String(req.body?.m || etDate().slice(0, 7))));
+GET('/api/review/months', auth, async req => (await rows("select distinct to_char(ts at time zone 'America/New_York','YYYY-MM') m from trd where wid=$1 and side in ('buy','sell') order by m desc limit 36", [await activeWalletId(req)])).map(r => r.m));
+async function reviewJob() {
+  const d = etDate(); if (+d.slice(8) > 3 || etParts().h < 9) return; const m = prevMonth();
+  if ((await kvGet('review_sent').catch(() => null)) === m) return; await kvSet('review_sent', m);
+  const wid = S.defaultWallet || 1, r = await monthReview(wid, m).catch(() => null); if (!r?.trades) return;
+  await reviewCoach(wid, m).catch(() => {});
+  await notify('summary', `📓 Your ${new Date(m + '-15').toLocaleString('en-US', { month: 'long' })} review`, `${r.trades} trades, ${r.wins} wins, ${usdS(r.realized)} realized. Tap for your coach's notes.`, { url: '/#/review/' + m });
+}
+
+// ---------- weekly challenges ----------
+const chalWeek = (t = Date.now()) => { const d = new Date(etDate(t) + 'T12:00Z'), wd = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - wd); return d.toISOString().slice(0, 10); };
+const chalCount = async (k, wk = chalWeek()) => +(await kvGet(`chal:${wk}:${k}`).catch(() => 0) || 0);
+async function chalBump(k) { const wk = chalWeek(); await kvSet(`chal:${wk}:${k}`, String((await chalCount(k, wk)) + 1)).catch(() => {}); }
+
+
+// ---------- the what-if machine ----------
+POST('/api/whatif', auth, async req => {
+  const sym = cleanSym(req.body?.sym); if (!sym) fail('Pick a stock or coin');
+  const usd = clamp(num(req.body?.usd, 1000), 1, 1e9), date = String(req.body?.date || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date >= etDate()) fail('Pick a date in the past');
+  const b = await dailyBars(sym), i0 = b.d.findIndex(d => d >= date); if (i0 < 0) fail(`No prices for ${sym} after ${date}`);
+  const now = priceOf(sym) || b.c[b.c.length - 1], sh = usd / b.c[i0], value = sh * now;
+  let spy = null; try { const s = await dailyBars('SPY'), j = s.d.findIndex(d => d >= b.d[i0]); if (j >= 0) spy = usd * (priceOf('SPY') || s.c[s.c.length - 1]) / s.c[j]; } catch (e) {}
+  const step = Math.max(1, Math.floor((b.c.length - i0) / 120)), points = []; for (let k = i0; k < b.c.length; k += step) points.push([Date.parse(b.d[k] + 'T21:00Z'), sh * b.c[k]]); points.push([Date.now(), value]);
+  let peak = 0, dd = 0; for (let k = i0; k < b.c.length; k++) { const v = sh * b.c[k]; peak = Math.max(peak, v); dd = Math.min(dd, v / peak - 1); }
+  chalBump('whatif');
+  return { sym, usd, from: b.d[i0], fromPx: b.c[i0], now, shares: sh, value, ret: value / usd - 1, spy, spyRet: spy ? spy / usd - 1 : null, maxDD: dd, years: (Date.now() - Date.parse(b.d[i0])) / 31557600000, points, first: b.d[0], adjusted: true };
+});
+// your own sells: what they'd be worth if you'd held on
+GET('/api/whatif/sells', auth, async req => {
+  const wid = await activeWalletId(req), list = await rows("select * from trd where wid=$1 and side='sell' order by id desc limit 25", [wid]);
+  return list.map(t => { const now = priceOf(t.sym); return { id: t.id, sym: t.sym, ts: tsMs(t.ts), qty: +t.qty, sold: +t.price, now, diff: now ? (now - +t.price) * +t.qty : null, pct: now ? now / +t.price - 1 : null }; }).filter(x => x.now);
+});
+
+// ---------- options practice: long calls and puts, priced with Black-Scholes from recent volatility ----------
+const OPT_START = 10000, OPT_FEE = 0.65, RATE = 0.04;
+const ncdf = x => { const t = 1 / (1 + 0.2316419 * Math.abs(x)), d = 0.3989423 * Math.exp(-x * x / 2), p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274)))); return x > 0 ? 1 - p : p; };
+function bs(kind, S0, K, T, iv) {
+  if (T <= 0 || !(iv > 0)) return { px: Math.max(0, kind === 'call' ? S0 - K : K - S0), delta: kind === 'call' ? (S0 > K ? 1 : 0) : (S0 < K ? -1 : 0) };
+  const sq = iv * Math.sqrt(T), d1 = (Math.log(S0 / K) + (RATE + iv * iv / 2) * T) / sq, d2 = d1 - sq;
+  const px = kind === 'call' ? S0 * ncdf(d1) - K * Math.exp(-RATE * T) * ncdf(d2) : K * Math.exp(-RATE * T) * ncdf(-d2) - S0 * ncdf(-d1);
+  const theta = (-(S0 * Math.exp(-d1 * d1 / 2) / Math.sqrt(2 * Math.PI) * iv) / (2 * Math.sqrt(T)) - (kind === 'call' ? 1 : -1) * RATE * K * Math.exp(-RATE * T) * ncdf(kind === 'call' ? d2 : -d2)) / 365;
+  return { px: Math.max(0.01, px), delta: kind === 'call' ? ncdf(d1) : ncdf(d1) - 1, theta };
+}
+const yearsTo = exp => Math.max(0, (etToUtc(...exp.split('-').map(Number), 16, 0) - Date.now()) / 31557600000);
+async function baseVol(sym) {
+  return cached('iv:' + sym, 3600e3, async () => { const b = await dailyBars(sym), i = b.c.length - 1; const v20 = IND.vol(b.c, 20, i), v60 = IND.vol(b.c, 60, i); return clamp(((v20 || 0.015) * 0.5 + (v60 || v20 || 0.015) * 0.5) * Math.sqrt(252) * 1.1, 0.08, 2.5); });
+}
+const ivAt = (iv, S0, K) => { const m = Math.log(K / S0); return iv * (1 + 1.2 * m * m - (m < 0 ? 0.15 * m : 0)); }; // a gentle smile, puts a little richer
+function expiries() {
+  const out = [], p = etParts(); let d = etDate();
+  for (let k = 0; k < 120 && out.length < 8; k++, d = addIso(d, 1)) { const wd = new Date(d + 'T12:00Z').getUTCDay(), [y, m, dd] = d.split('-').map(Number); if (wd !== 5 || !isTradingDay(y, m, dd) || (d === etDate() && p.h >= 16)) continue; const third = dd >= 15 && dd <= 21; if (out.length < 5 || third) out.push(d); }
+  return out;
+}
+const strikeStep = px => px < 25 ? 1 : px < 100 ? 2.5 : px < 250 ? 5 : px < 1000 ? 10 : 25;
+async function optQuote(o) { const S0 = priceOf(o.sym); if (!S0) return null; const iv = ivAt(await baseVol(o.sym), S0, +o.strike); return { ...bs(o.kind, S0, +o.strike, yearsTo(o.exp), iv), iv, spot: S0 }; }
+const optCash = async () => num(await kvGet('opt_cash').catch(() => null), OPT_START);
+GET('/api/options/chain/:sym', auth, async req => {
+  const sym = cleanSym(req.params.sym); if (!sym || isCrypto(sym)) fail('Options practice is for stocks and ETFs');
+  if (!assets.has(sym)) await trackAsset(sym);
+  const S0 = priceOf(sym); if (!S0) fail('No live price yet for ' + sym);
+  const exps = expiries(), exp = exps.includes(req.query.exp) ? req.query.exp : exps[2] || exps[0], iv = await baseVol(sym), st = strikeStep(S0), mid = Math.round(S0 / st) * st, T = yearsTo(exp);
+  const strikes = []; for (let k = -8; k <= 8; k++) { const K = round(mid + k * st, 2); if (K <= 0) continue; const c = bs('call', S0, K, T, ivAt(iv, S0, K)), p = bs('put', S0, K, T, ivAt(iv, S0, K)); strikes.push({ K, call: round(c.px, 2), callD: round(c.delta, 2), put: round(p.px, 2), putD: round(p.delta, 2) }); }
+  return { sym, spot: S0, iv: round(iv, 3), exp, exps, days: Math.round(T * 365.25), strikes, cash: await optCash() };
+});
+GET('/api/options', auth, async () => {
+  const open = await rows('select * from opt_pos where closed is null order by id desc'), done = await rows('select * from opt_pos where closed is not null order by closed desc limit 30');
+  const pos = await Promise.all(open.map(async o => { const q = await optQuote(o).catch(() => null), val = q ? q.px * 100 * o.qty : null; return { id: o.id, sym: o.sym, kind: o.kind, strike: +o.strike, exp: o.exp, qty: o.qty, paid: +o.prem, now: q ? round(q.px, 2) : null, delta: q ? round(q.delta, 2) : null, theta: q?.theta != null ? round(q.theta * 100 * o.qty, 2) : null, spot: q?.spot || null, value: val, pl: val != null ? val - +o.prem * 100 * o.qty : null, days: Math.ceil(yearsTo(o.exp) * 365.25), opened: tsMs(o.opened) }; }));
+  const cash = await optCash(), value = cash + pos.reduce((t, p) => t + (p.value || 0), 0);
+  return { cash, value, start: OPT_START, ret: value / OPT_START - 1, open: pos, closed: done.map(o => ({ id: o.id, sym: o.sym, kind: o.kind, strike: +o.strike, exp: o.exp, qty: o.qty, paid: +o.prem, close: +o.close_px, pl: (+o.close_px - +o.prem) * 100 * o.qty, how: o.how, closed: tsMs(o.closed) })) };
+});
+POST('/api/options/buy', auth, async req => {
+  const b = req.body || {}, sym = cleanSym(b.sym), kind = b.kind === 'put' ? 'put' : 'call', K = num(b.strike), exp = String(b.exp || ''), qty = clamp(Math.round(num(b.qty, 1)), 1, 100);
+  if (!sym || isCrypto(sym)) fail('Options practice is for stocks and ETFs'); if (!expiries().includes(exp)) fail('Pick an expiry from the list'); if (!(K > 0)) fail('Pick a strike');
+  const q = await optQuote({ sym, kind, strike: K, exp }); if (!q) fail('No live price yet');
+  const cost = q.px * 100 * qty + OPT_FEE * qty, cash = await optCash(); if (cost > cash) fail(`That costs $${cost.toFixed(2)} and the practice account has $${cash.toFixed(2)}.`);
+  await kvSet('opt_cash', String(round(cash - cost, 2)));
+  const r = await row('insert into opt_pos(sym,kind,strike,exp,qty,prem,iv) values($1,$2,$3,$4,$5,$6,$7) returning id', [sym, kind, K, exp, qty, round(q.px, 4), q.iv]);
+  return { id: r.id, price: q.px, cost };
+});
+async function closeOpt(o, px, how) { await Q('update opt_pos set closed=now(), close_px=$1, how=$2 where id=$3', [round(px, 4), how, o.id]); await kvSet('opt_cash', String(round(await optCash() + px * 100 * o.qty - (how === 'sold' ? OPT_FEE * o.qty : 0), 2))); }
+POST('/api/options/:id/sell', auth, async req => {
+  const o = await row('select * from opt_pos where id=$1 and closed is null', [+req.params.id]); if (!o) fail('That position is closed', 404);
+  const q = await optQuote(o); if (!q) fail('No live price yet'); await closeOpt(o, q.px, 'sold'); return { ok: true, price: q.px };
+});
+POST('/api/options/reset', auth, async () => { await Q('delete from opt_pos'); await kvSet('opt_cash', String(OPT_START)); return { ok: true }; });
+async function optionsExpiryJob() {
+  for (const o of await rows('select * from opt_pos where closed is null and exp <= $1', [etDate()]).catch(() => [])) {
+    if (o.exp === etDate() && etParts().h < 16) continue;
+    let S1 = null; try { const b = await dailyBars(o.sym), i = lastIndexOnOrBefore(b.d, o.exp); S1 = i >= 0 ? b.c[i] : null; } catch (e) {} S1 ||= priceOf(o.sym); if (!S1) continue;
+    const pay = Math.max(0, o.kind === 'call' ? S1 - +o.strike : +o.strike - S1); await closeOpt(o, pay, pay > 0 ? 'exercised' : 'expired');
+    await notify('order', `${o.sym} $${+o.strike} ${o.kind} ${pay > 0 ? 'expired in the money' : 'expired worthless'}`, pay > 0 ? `Closed at $${pay.toFixed(2)} a share ($${(pay * 100 * o.qty).toFixed(0)}). Practice account.` : `It closed at $0. You paid $${(+o.prem * 100 * o.qty).toFixed(0)}. Practice account.`, { url: '/#/options' });
+  }
+}
+
+// ---------- dividend calendar ----------
+const weekdayOf = t => { const wd = new Date(t).getUTCDay(); return t - (wd === 6 ? 1 : wd === 0 ? 2 : 0) * 864e5; }; // estimated dates land on a weekday
+GET('/api/dividends/calendar', auth, async req => {
+  const wid = await activeWalletId(req), pos = await positions(wid), watch = (await rows('select sym from watch')).map(r => r.sym);
+  const syms = [...new Set([...pos.map(p => p.sym), ...watch])].filter(s => !isCrypto(s)).slice(0, 40), out = [], horizon = Date.now() + 120 * 864e5;
+  for (const s of syms) {
+    const ins = await assetInsights(s).catch(() => ({})), divs = (ins.dividends || []).slice().sort((a, b) => a.date - b.date); if (!divs.length) continue;
+    const yr = divs.filter(d => d.date > Date.now() - 400 * 864e5); if (!yr.length) continue; // stopped paying
+    const gaps = []; for (let k = 1; k < yr.length; k++) gaps.push(yr[k].date - yr[k - 1].date);
+    const gap = gaps.length ? gaps.reduce((t, x) => t + x, 0) / gaps.length : 365 * 864e5, last = yr[yr.length - 1], held = pos.find(p => p.sym === s);
+    for (let t = last.date + gap, k = 0; t < horizon && k < 6; t += gap, k++) if (t > Date.now() - 2 * 864e5) out.push({ sym: s, date: weekdayOf(Math.round(t)), amount: last.amount, qty: held?.qty || 0, est: held ? last.amount * held.qty : 0, held: !!held, perYear: Math.round(365 * 864e5 / gap), estimated: true });
+    if (last.date > Date.now() - 2 * 864e5) out.push({ sym: s, date: last.date, amount: last.amount, qty: held?.qty || 0, est: held ? last.amount * held.qty : 0, held: !!held, estimated: false });
+  }
+  out.sort((a, b) => a.date - b.date);
+  return { events: out, next30: out.filter(e => e.held && e.date < Date.now() + 30 * 864e5).reduce((t, e) => t + e.est, 0), next90: out.filter(e => e.held && e.date < Date.now() + 90 * 864e5).reduce((t, e) => t + e.est, 0) };
+});
+
+// ---------- Shortcuts widget feed (read-only, secret link) ----------
+async function widgetToken(renew = false) { let t = await kvGet('widget_token').catch(() => null); if (!t || renew) { t = crypto.randomBytes(18).toString('hex'); await kvSet('widget_token', t); } return t; }
+GET('/api/widget-link', auth, async () => ({ token: await widgetToken() }));
+POST('/api/widget-link', auth, async () => ({ token: await widgetToken(true) }));
+GET('/api/widget/:token', async (req, res) => {
+  const t = await kvGet('widget_token').catch(() => null);
+  if (!t || String(req.params.token).length !== t.length || !crypto.timingSafeEqual(Buffer.from(String(req.params.token)), Buffer.from(t))) fail('Not found', 404);
+  const ws = (await walletsSummary()).filter(w => !w.archived && !w.broker), main = ws.find(w => w.id === (S.defaultWallet || 1)) || ws[0];
+  const pos = main ? await positions(main.id) : [], movers = pos.map(p => { const q = prices.get(p.sym); return q?.p && q.prev ? { sym: p.sym, pct: round((q.p / q.prev - 1) * 100, 2) } : null; }).filter(Boolean).sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct)).slice(0, 3);
+  const bots = await rows("select b.name, b.wid from bots b join wallets w on w.id=b.wid where b.status='running' and w.broker is null");
+  const brief = jsonOr(await kvGet('brief').catch(() => null), null);
+  const dayAbs = main?.day?.change ?? null, dayPct = main?.day?.pct ?? null;
+  const out = { wallet: main?.name || 'Main', value: round(main?.value || 0, 2), day: dayAbs != null ? round(dayAbs, 2) : null, dayPct: dayPct != null ? round(dayPct, 2) : null, total: round(ws.reduce((t, w) => t + w.value, 0), 2), market: market().state, movers, bots: bots.length, brief: brief?.day === etDate() ? brief.text.split('\n')[0] : null, ts: new Date().toISOString() };
+  if (req.query.f === 'text') { res.setHeader('content-type', 'text/plain; charset=utf-8'); res.end(`🥭 ${out.wallet} $${out.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${out.dayPct != null ? ` (${out.dayPct >= 0 ? '+' : ''}${out.dayPct.toFixed(2)}% today)` : ''}\n${movers.map(m => `${m.sym} ${m.pct >= 0 ? '+' : ''}${m.pct.toFixed(1)}%`).join('  ')}\n${out.bots} bot${out.bots === 1 ? '' : 's'} running · market ${out.market}`); return; }
+  return out;
+});
 
 // =====================================================================
 // Login
@@ -4233,7 +4467,7 @@ function rulesJson(w) {
     instant: w.acct === 'cash' ? 0 : prof.instant[w.gold ? 'gold' : 'std'], achDays: prof.achDays, settleNext: settleTime(prof), real: isReal(w) };
 }
 const brokerJson = () => BROKER ? { on: true, env: BROKER.env, feed: BROKER.feed, ok: BROKER.ok, err: BROKER.err, dataOk: BROKER.dataOk, wid: BROKER.wid, lastSync: BROKER.lastSync } : { on: false };
-const alertJson = a => ({ id: a.id, sym: a.sym, kind: a.kind || 'price', dir: a.dir, price: +a.price, pct: a.pct == null ? null : +a.pct, rep: a.rep, fired: a.fired, armed: a.armed, label: a.label, ts: tsMs(a.ts), last: tsMs(a.last_fired) });
+const alertJson = a => ({ ind: a.ind ? { ...jsonOr(a.ind, {}), title: indTitle(jsonOr(a.ind, {})) } : null, id: a.id, sym: a.sym, kind: a.kind || 'price', dir: a.dir, price: +a.price, pct: a.pct == null ? null : +a.pct, rep: a.rep, fired: a.fired, armed: a.armed, label: a.label, ts: tsMs(a.ts), last: tsMs(a.last_fired) });
 async function walletsSummary() {
   const ws = await rows('select * from wallets order by archived, sort, id');
   walletCount = ws.filter(w => !w.archived).length;
@@ -4453,6 +4687,12 @@ GET('/api/orders', auth, async req => {
 POST('/api/alert', auth, async req => {
   const b = req.body, sym = cleanSym(b.sym); if (!sym) fail('Pick something');
   if (!assets.has(sym)) await trackAsset(sym, b.kind_asset);
+  if (b.kind === 'ind') {
+    const t = String(b.ind?.t || ''), def = IND_ALERTS[t]; if (!def) fail('Pick a chart signal');
+    const v = def.def != null ? clamp(num(b.ind?.v, def.def), t === 'volSpike' ? 1.2 : 5, t === 'volSpike' ? 10 : 95) : null;
+    await Q('insert into alert(sym,kind,dir,price,rep,label,ind) values($1,$2,$3,$4,$5,$6,$7)', [sym, 'ind', 'both', priceOf(sym) || 0, !!b.rep, String(b.label || '').slice(0, 80) || null, JSON.stringify({ t, v })]);
+    await loadAlerts(); await refreshUserSyms(); indAlertJob().catch(() => {}); return { ok: true };
+  }
   const p = priceOf(sym), kind = b.kind === 'daymove' ? 'daymove' : 'price';
   if (kind === 'daymove') { const v = num(b.pct); if (!(v >= 0.5 && v <= 50)) fail('Pick a move between 0.5% and 50%'); await Q('insert into alert(sym,kind,dir,price,pct,rep,label) values($1,$2,$3,$4,$5,true,$6)', [sym, kind, 'both', p || 0, v, String(b.label || '').slice(0, 80) || null]); }
   else {
@@ -5702,6 +5942,7 @@ const askCache = new Map();
 POST('/api/council/ask', auth, async req => {
   const sym = cleanSym(req.body?.sym); if (!sym) fail('Which symbol?');
   const side = req.body?.side === 'sell' ? 'sell' : 'buy', key = `${sym}|${side}|${etDate()}`;
+  chalBump('ask');
   if (askCache.has(key) && Date.now() - askCache.get(key).ts < 30 * 60e3) return { ...askCache.get(key), cached: true };
   const b = await dailyBars(sym).catch(() => null); if (!b || b.c.length < 30) fail(`Not enough price history for ${sym}.`);
   const spy = await dailyBars('SPY').catch(() => null), bench = spy ? IND.ret(spy.c, 63, spy.c.length - 1) : null;
@@ -5934,6 +6175,10 @@ function startJobs() {
   every(fast ? 5e3 : 60e3, () => { if (!standbyPaused()) return briefJob(); }, 'brief');
   every(fast ? 5e3 : 5 * 60e3, () => { if (!standbyPaused()) return letterJob(); }, 'letter');
   every(fast ? 10e3 : 10 * 60e3, () => { if (!standbyPaused()) return postmortemJob(); }, 'post-mortems');
+  // practice tools: chart-signal alerts, options expiry, the monthly review
+  every(fast ? 5e3 : 5 * 60e3, () => indAlertJob(), 'chart alerts');
+  every(fast ? 10e3 : 30 * 60e3, () => optionsExpiryJob(), 'options expiry');
+  every(fast ? 10e3 : 30 * 60e3, () => reviewJob(), 'monthly review');
   every(3600e3, () => Q("delete from bot_log where ts < now() - interval '2 years'"), 'bot log cleanup');
   every(3600e3, () => Q("delete from settle where settles < now() - interval '7 days'"), 'settlement cleanup');
   if (BROKER && STANDBY) warn('Standby copy has Alpaca keys: orders are blocked while standby is off, but keep real-money keys on one server only.');
@@ -6023,7 +6268,7 @@ const ICONS = {};
 const icon = (name, fn) => ICONS[name] || (ICONS[name] = fn());
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD646"/><stop offset=".5" stop-color="#FFA028"/><stop offset="1" stop-color="#FA5256"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="#1E1430"/><ellipse cx="31" cy="36" rx="18" ry="22" transform="rotate(30 31 36)" fill="url(#g)"/><path d="M20 41l6.5-6 5 3.5 9.5-10" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37 28.5h4.5V33" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="45" cy="11.5" rx="9" ry="4.6" transform="rotate(-24 45 11.5)" fill="#3BD68A"/></svg>`;
 let BUILD = 'dev', INDEX = null, INDEX_GZ = null;
-const APP_VERSION = '2.16.0'; // stamped by build.sh from package.json
+const APP_VERSION = '2.17.0'; // stamped by build.sh from package.json
 function loadIndex() {
   const file = path.join(__dirname, 'index.html');
   let html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<!doctype html><title>Mango</title><p>index.html is missing next to server.js.</p>';
