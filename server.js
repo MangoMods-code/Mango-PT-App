@@ -3218,7 +3218,7 @@ STRATEGIES.tom = {
       if (i === b.d.length - 1) { let [y, m, dd] = d.split('-').map(Number), n = 0; left = 0; while (n++ < 10) { [y, m, dd] = nextTradingDay(y, m, dd); if (`${y}-${String(m).padStart(2, '0')}` !== d.slice(0, 7)) break; left++; } if (left >= p.before) next = left - p.before + 1; }
       const trendOk = !p.trendLen || b.c[i] > IND.sma(b.c, p.trendLen, i);
       const inWindow = left < p.before || into < p.after; // sold at the close of day 'after'
-      out.notes[s] = left < p.before ? `${left === 0 ? 'Last trading day' : `${left + 1} trading days left`} of the month: the window is open.` : into <= p.after ? `Day ${into} of the month: still in the window.` : `Day ${into} of the month: outside the window.`;
+      out.notes[s] = left < p.before ? `${left === 0 ? 'Last trading day' : `${left + 1} trading days left`} of the month: the window is open.` : into <= p.after ? `Trading day ${into} of the month: still in the window.` : `Trading day ${into} of the month: outside the window.`;
       if (inWindow && !trendOk) out.notes[s] += ` Below its ${p.trendLen}-day average, so it sits this one out.`;
       if (inWindow && trendOk) picks.push(s);
     }
@@ -3783,6 +3783,7 @@ async function runBotInner(id, { manual, dry, night }) {
     } catch (e) { log.skips.push(`${s}: ${e.message}`); await botLog(id, 'error', `Couldn't ${side} ${s}`, e.message, null, s); return null; }
   };
   // the T-bill spot is sold down outside rebalance days only to pay for a brand-new position (daily strategies: whenever their targets say so)
+  const parkNeed = Object.values(decisions).some(x => x.sym !== parkSym && !held[x.sym] && x.target > 0);
   const parkFree = !!parkSym && (st.rebalance === 'none' || Object.values(decisions).some(x => x.sym !== parkSym && !held[x.sym] && x.target > 0));
   for (const d of Object.values(decisions)) {
     const px = priceOf(d.sym); if (!px || !held[d.sym]) continue;
@@ -3790,7 +3791,7 @@ async function runBotInner(id, { manual, dry, night }) {
     const targetV = d.target * capital, diff = targetV - d.have;
     if (d.target <= 0) { d.action = 'sell'; await placeOrder(d.sym, 'sell', { pct: 100 }, `${st.short}: ${d.why.find(w => /^Selling/.test(w)) || d.why[0] || d.note}`); delete state[d.sym]; }
     else if (d.aiTrim) { d.action = 'trim'; await placeOrder(d.sym, 'sell', { qty: held[d.sym].qty / 2 }, `${st.short}: ${d.why.find(w => /^Trimming/.test(w))}`); if (d.takeProfit) state[d.sym] = { ...(state[d.sym] || {}), tookProfit: today }; }
-    else if (((rebalanceDue && st.rebalance !== 'none' && !dec.noTrim) || (d.sym === parkSym && parkFree)) && -diff > Math.max(m.minTrade, capital * band)) { d.action = 'trim'; await placeOrder(d.sym, 'sell', { qty: Math.min(held[d.sym].qty, -diff / px) }, `${st.short}: rebalance down to ${pct0n(d.target)} of the wallet`); }
+    else if (((rebalanceDue && st.rebalance !== 'none' && !dec.noTrim) || (d.sym === parkSym && parkFree)) && -diff > Math.max(m.minTrade, capital * (d.sym === parkSym && !parkNeed ? 0.03 : band))) { d.action = 'trim'; await placeOrder(d.sym, 'sell', { qty: Math.min(held[d.sym].qty, -diff / px) }, `${st.short}: rebalance down to ${pct0n(d.target)} of the wallet`); }
   }
   const exposure = S.sharedRisk === false ? null : await botExposure(brk).catch(() => null);
   // topping up between rebalances: all the spare cash goes to the single most underweight holding (one small trade, not several)
@@ -3801,7 +3802,9 @@ async function runBotInner(id, { manual, dry, night }) {
     const px = priceOf(d.sym), targetV = d.target * capital, diff = targetV - d.have;
     const isNew = !held[d.sym];
     if (!isNew && !(rebalanceDue && st.rebalance !== 'none') && bot.params?.flow !== 'flow' && d.sym !== parkSym) continue; // 'top up' bots put spare cash to work any day
-    if (diff <= Math.max(m.minTrade, capital * (isNew ? 0.01 : band))) continue;
+    // small daily wobbles in the T-bill spot and in top-ups of daily strategies aren't worth a trade
+    const minGap = d.sym === parkSym ? 0.03 : isNew ? 0.01 : st.rebalance === 'none' ? Math.max(band, 0.025) : band;
+    if (diff <= Math.max(m.minTrade, capital * minGap)) continue;
     const a2 = dry ? acct : await accountInfo(bot.wid);
     const bp = isCrypto(d.sym) || !marginable(d.sym, px) ? a2.bpCrypto : a2.bp;
     const room = sharedRoom(exposure, d.sym), usd = Math.floor(Math.min(diff, bp * 0.995, room) * 100) / 100;
@@ -6501,6 +6504,101 @@ GET('/api/costs', auth, async () => {
     host, standby: STANDBY, offsite: ghStatus.on, uptime: process.uptime(), estimated: true,
   };
 });
+// ===================================================================
+// Insights: "Why isn't it trading?" for one bot, and "Compare every strategy" for the lab.
+// ===================================================================
+// what held a buy back, matched against the bot's own decision notes
+const WHY_CATS = [
+  { k: 'earnings', re: /Skipped buying: earnings/, label: 'Earnings were coming up', fix: 'Change → Limits and news → set "Skip if earnings are within" to 0' },
+  { k: 'severe', re: /serious news/, label: 'Serious news about it', fix: 'Change → Limits and news → turn off "Skip stocks with serious news"' },
+  { k: 'newsMood', re: /the mood is negative/, label: 'The news mood was negative', fix: 'Change → Limits and news → lower "Skip if the mood is below"' },
+  { k: 'tilt', re: /because of the news mood/, label: 'Sized down for the news mood', fix: 'Change → Limits and news → turn off "Size by the mood"' },
+  { k: 'aiVeto', re: /vetoed it/, label: 'The Analyst vetoed it', fix: 'Settings → AI Council members → turn off AI veto' },
+  { k: 'council', re: /the council voted/, label: 'The council voted no', fix: 'Settings → Weighted Council votes → turn off "Council veto for every bot"' },
+  { k: 'aiSize', re: /cut this buy to/, label: 'The AI made the buy smaller', fix: 'Settings → AI Council members → turn off "Let them shrink risky buys"' },
+  { k: 'corr', re: /correlation/, label: 'It moved like something it already holds', fix: 'Settings → Portfolio guards → turn off the correlation guard' },
+  { k: 'mood', re: /New buys at|choppy market|falling market/, label: 'The market mood switch made the buy smaller', fix: 'Settings → Portfolio guards → turn off the market mood switch' },
+  { k: 'stopped', re: /stop loss sold it/, label: 'Its stop had sold it earlier that day', fix: null },
+  { k: 'dailyLoss', re: /daily loss limit/, label: 'The daily loss limit was hit', fix: 'Change → raise "Stop buying after a daily loss of"' },
+  { k: 'cash', re: /Not enough buying power/, label: 'Not enough cash in the wallet', fix: 'Add money to the wallet, or use "Add every week"' },
+  { k: 'shared', re: /all bots together/, label: 'All bots together already had the most allowed in it', fix: 'Settings → Portfolio guards → raise the shared limits' },
+];
+// what each strategy is waiting for, for the "no signal yet" case
+const WAIT_HINT = {
+  trend: 'It needs something above its slow average, with the fast average above the slow one and up over 6 months.',
+  momentum: 'It only trades on the first trading day of each month, unless new money comes in.',
+  rsi2: 'It needs a sharp 1 to 3 day drop in something that is still above its 200-day average. In a calm rising market that can take a few weeks.',
+  breakout: 'It needs a close above the highest high of the last 55 days, in an uptrend, on strong volume.',
+  hold: 'It buys everything on its first run and then only adds new money and rebalances monthly.',
+  dual: 'It only trades on the first trading day of each month.',
+  lowvol: 'It only trades on the first trading day of each month.',
+  drift: 'It needs a stock to jump at least 1.5 ATRs on heavy volume and hold the move. That is rare, so a long list of stocks helps.',
+  tom: 'It only buys on the last trading day of the month and sells a few days into the next one.',
+  snapback: 'It needs something in an uptrend to fall well below its 20-day Bollinger band.',
+  earnings: 'It needs a company to beat earnings estimates and the price to jump and hold. Most of these come in earnings season.',
+};
+async function botWhy(id, n = 30) {
+  const b = await row('select * from bots where id=$1', [id]); if (!b) fail('That bot is gone', 404);
+  const bot = botJson(b), st = STRATEGIES[bot.strategy] || {}, park = bot.params?.safe && bot.params.safe !== 'cash' ? bot.params.safe : null;
+  const logs = (await rows("select ts, data from bot_log where bot_id=$1 and kind='decision' order by id desc limit $2", [id, n])).map(r => ({ ts: tsMs(r.ts), d: jsonOr(r.data, {}) }));
+  const cats = {}, wantedSyms = {}, closed = { n: 0 };
+  let runs = 0, wanted = 0, bought = 0, sold = 0, blocked = 0, parked = 0;
+  for (const { d } of logs) {
+    runs++; const cap = d.capital || d.equity || 1;
+    for (const r of d.rows || []) {
+      if (r.sym === park) { if (r.action === 'buy' || r.action === 'add') parked++; continue; }
+      if (r.action === 'buy' || r.action === 'add') bought++;
+      if (r.action === 'sell' || r.action === 'trim') sold++;
+      const wants = r.want * cap > (r.have || 0) + 5;
+      if (!wants) { if (/market is closed/.test(r.note || '')) closed.n++; continue; }
+      wanted++; wantedSyms[r.sym] = (wantedSyms[r.sym] || 0) + 1;
+      if (r.action === 'buy' || r.action === 'add') continue;
+      const text = (r.why || []).join(' ');
+      const hit = WHY_CATS.filter(c => c.re.test(text));
+      if (hit.length) { blocked++; for (const c of hit) cats[c.k] = (cats[c.k] || 0) + 1; }
+      else if (r.target * cap > (r.have || 0) + 5) { blocked++; cats.small = (cats.small || 0) + 1; }
+    }
+  }
+  const reasons = Object.entries(cats).sort((a, b) => b[1] - a[1]).map(([k, c]) => { const w = WHY_CATS.find(x => x.k === k); return { k, n: c, label: w ? w.label : `The buy was too small to place (under $${bot.mandate.minTrade})`, fix: w ? w.fix : 'Add money to the wallet, or use "Add every week"' }; });
+  let tone = 'ok', head, detail;
+  if (!runs) { tone = 'wait'; head = 'No decisions yet'; detail = 'It makes its first decision at its next run time. Tap Run now to see one right away.'; }
+  else if (!wanted) { tone = 'wait'; head = `Its rules haven't found a buy in ${runs} run${runs === 1 ? '' : 's'}`; detail = `Nothing is blocking it: ${st.name || 'the strategy'} is waiting for its setup. ${WAIT_HINT[bot.strategy] || ''}${parked ? ` Meanwhile the money earns interest in ${park}.` : ''}`; }
+  else if (blocked && blocked >= wanted * 0.5) { tone = 'warn'; head = `${blocked} of ${wanted} buys it wanted were held back`; detail = `Mostly: ${reasons[0].label.toLowerCase()}. ${reasons[0].fix ? 'To allow more of them: ' + reasons[0].fix + '.' : ''}`; }
+  else { head = bought ? `Trading normally: ${bought} buy${bought === 1 ? '' : 's'} and ${sold} sell${sold === 1 ? '' : 's'} in ${runs} runs` : `It wanted ${wanted} buy${wanted === 1 ? '' : 's'}`; detail = blocked ? `${blocked} buy${blocked === 1 ? ' was' : 's were'} held back by the safety checks; that's normal.` : 'Nothing was held back.'; }
+  const lastRows = logs[0]?.d?.rows || [];
+  const now = lastRows.filter(r => r.sym !== park).slice(0, 6).map(r => ({ sym: r.sym, note: r.note }));
+  return { runs, wanted, bought, sold, blocked, parked, park, reasons, tone, head, detail, wantedSyms, now, since: logs.length ? logs[logs.length - 1].ts : null, strategy: st.name };
+}
+GET('/api/bots/:id/why', auth, req => botWhy(+req.params.id));
+
+// every strategy tested side by side on its suggested list, with your money and deposits
+const SUGGEST = {
+  trend: ['SPY', 'QQQ', 'IWM', 'EFA', 'EEM', 'GLD', 'TLT', 'XLK', 'XLE', 'XLV'], momentum: ['SPY', 'QQQ', 'IWM', 'EFA', 'EEM', 'TLT', 'IEF', 'GLD', 'DBC', 'VNQ'],
+  rsi2: DIP_ETFS, breakout: ['SPY', 'QQQ', 'IWM', 'GLD', 'TLT', 'XLK', 'XLE', 'XLF'], hold: ['SPY', 'QQQ', 'GLD', 'TLT'], dual: ['SPY', 'QQQ', 'EFA', 'EEM', 'IEF', 'TLT'],
+  lowvol: ['KO', 'PG', 'JNJ', 'PEP', 'WMT', 'MCD', 'COST', 'MSFT'], drift: DRIFT_SYMS, tom: ['SPY', 'QQQ', 'IWM'], snapback: DIP_ETFS, earnings: DRIFT_SYMS.slice(0, 16),
+};
+POST('/api/backtest/compare', auth, async req => {
+  botsOn();
+  const b = req.body || {}, years = clamp(num(b.years, 5), 1, 8), capital = clamp(num(b.capital, 10000), 25, 1e8), addWeekly = clamp(num(b.addWeekly, 0), 0, 1e6), crypto = !!b.crypto;
+  const key = JSON.stringify(['cmp', years, capital, addWeekly, crypto]), hit = btCache.get(key); if (hit && Date.now() - hit.t < 30 * 60e3) return hit.v;
+  const out = [];
+  for (const [k, st] of Object.entries(STRATEGIES)) {
+    if (st.auto || !SUGGEST[k]) continue;
+    const syms = crypto && st.markets === 'both' ? ['BTC', 'ETH', 'SOL', ...SUGGEST[k].slice(0, 5)] : SUGGEST[k];
+    try {
+      const r = await backtest({ strategy: k, syms, params: {}, years, capital, addWeekly, maxPosPct: 25 });
+      const bc = r.bcurve || [], bret = bc.length ? bc[bc.length - 1][1] / bc[0][1] - 1 : null;
+      out.push({ key: k, name: st.name, icon: st.icon, syms: r.syms, ret: r.stats.ret, cagr: r.stats.cagr, maxDD: r.stats.maxDD, sharpe: r.stats.sharpe, trades: r.trades, bench: r.benchSym || r.bench, benchRet: bret, exposure: r.exposure, end: r.dca ? r.dca.end : r.stats.end, invested: r.dca ? r.dca.invested : capital, years: r.stats.years, short: !!r.shortHistory?.length });
+    } catch (e) { out.push({ key: k, name: st.name, icon: st.icon, error: e.message }); }
+    await sleep(5);
+  }
+  // a simple overall score: growth, with drops and roughness counted against it
+  for (const x of out) if (x.cagr != null) x.score = x.cagr - Math.abs(x.maxDD) * 0.35 + Math.min(x.sharpe, 3) * 0.02;
+  out.sort((a, b) => (b.score ?? -9) - (a.score ?? -9));
+  const v = { years, capital, addWeekly, list: out, t: Date.now() };
+  btCache.set(key, { t: Date.now(), v });
+  return v;
+});
 
 // =====================================================================
 // Background jobs
@@ -6708,7 +6806,7 @@ const ICONS = {};
 const icon = (name, fn) => ICONS[name] || (ICONS[name] = fn());
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD646"/><stop offset=".5" stop-color="#FFA028"/><stop offset="1" stop-color="#FA5256"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="#1E1430"/><ellipse cx="31" cy="36" rx="18" ry="22" transform="rotate(30 31 36)" fill="url(#g)"/><path d="M20 41l6.5-6 5 3.5 9.5-10" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37 28.5h4.5V33" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="45" cy="11.5" rx="9" ry="4.6" transform="rotate(-24 45 11.5)" fill="#3BD68A"/></svg>`;
 let BUILD = 'dev', INDEX = null, INDEX_GZ = null;
-const APP_VERSION = '3.4.0'; // stamped by build.sh from package.json
+const APP_VERSION = '3.5.0'; // stamped by build.sh from package.json
 function loadIndex() {
   const file = path.join(__dirname, 'index.html');
   let html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<!doctype html><title>Mango</title><p>index.html is missing next to server.js.</p>';
