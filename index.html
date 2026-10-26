@@ -985,6 +985,7 @@ button.tile:active { transform: scale(.98); }
 .panic-card .panic-ic { color: #fff; background: var(--dn); border-radius: 12px; }
 .panic-card .cell:first-child .title { color: var(--dn); font-weight: 750; }
 .cost-row { grid-template-columns: 120px 1fr 50px; }
+.dca-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 6px; } .dca-row > div { display: flex; flex-direction: column; gap: 2px; } .dca-row span { font-size: 12px; color: var(--mu); } .dca-row b { font-size: 18px; }
 
 /* ---------- Paper / Alpaca sides ---------- */
 .space-sw { display: inline-flex; gap: 4px; padding: 4px; border-radius: 14px; background: var(--card); box-shadow: var(--hi); margin: 2px 0 10px; }
@@ -1324,7 +1325,7 @@ button.tile:active { transform: scale(.98); }
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '3.0.0';
+const BUILD = '__BUILD__', APP_VERSION = '3.1.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -3903,8 +3904,20 @@ const FLAG_INFO = { earnings_soon: ['Earnings soon', 'ac'], severe_news: ['Serio
 const flagChips = (flags = []) => flags.length ? `<div class="flag-row">${flags.map(f => FLAG_INFO[f] ? `<span class="tag ${FLAG_INFO[f][1]}">${FLAG_INFO[f][0]}</span>` : '').join('')}</div>` : '';
 let STRATS = null;
 const STRAT_HUE = { trend: '#3DDC97', momentum: '#FFB224', rsi2: '#5AB8FF', breakout: '#FF7A45', hold: '#9C8FBF', dual: '#B48CFF', lowvol: '#2EC4B6', drift: '#FF6F96', tom: '#F5C542', snapback: '#7C83FF', autopilot: '#FFB224' };
+// presets for accounts with a few hundred dollars and small weekly deposits, strategy by strategy
+const SMALL_PRESET = {
+  momentum: { why: 'holds 1 or 2 ETFs (each at least $25), keeps a winner instead of swapping it, puts weekly deposits into what it already holds without selling, and parks idle money in T-bills (SGOV).',
+    params: { top: 2, minPos: 25, buffer: 1, flow: 'flow', safe: 'SGOV', lookback: 126, skip: 21, sizing: 'equal' }, mandate: { maxPosPct: 100, minTrade: 5, maxTradesDay: 4, addWeekly: 25, stops: false, takeProfitPct: 0, timeStopDays: 0 },
+    syms: ['SPY', 'QQQ', 'IWM', 'EFA', 'EEM', 'TLT', 'GLD', 'VNQ', 'SGOV'], start: 150 },
+};
+ACT.nbSmall = () => {
+  const p = Router.pages().reverse().find(x => x.name === 'newbot'); if (!p) return; PAGES.newbot.save(p);
+  const P = SMALL_PRESET[p.m.strategy]; if (!P) return;
+  Object.assign(p.m, { params: { ...p.m.params, ...P.params }, mandate: { ...p.m.mandate, ...P.mandate }, syms: P.syms.slice(), uni: 'custom', smallSeen: true }); if (!p.m.wallet && p.m.start >= 2000) p.m.start = P.start;
+  PAGES.newbot.draw(p); toast('Small account preset', { sub: 'Check the settings and money, then test it on past prices.' });
+};
 const hueOf = k => STRAT_HUE[k] || '#9C8FBF';
-const STRAT_SYMS = { rsi2: ['SPY', 'QQQ', 'IWM', 'DIA'], tom: ['SPY', 'QQQ', 'IWM'], snapback: ['SPY', 'QQQ', 'IWM', 'DIA', 'XLK', 'XLF'], dual: ['SPY', 'QQQ', 'EFA', 'EEM', 'IEF', 'TLT'], lowvol: ['KO', 'PG', 'JNJ', 'PEP', 'WMT', 'MCD', 'COST', 'MSFT'], momentum: ['SPY', 'QQQ', 'IWM', 'EFA', 'EEM', 'TLT', 'IEF', 'GLD', 'DBC', 'VNQ'] };
+const STRAT_SYMS = { rsi2: ['SPY', 'QQQ', 'IWM', 'DIA'], tom: ['SPY', 'QQQ', 'IWM'], snapback: ['SPY', 'QQQ', 'IWM', 'DIA', 'XLK', 'XLF'], dual: ['SPY', 'QQQ', 'EFA', 'EEM', 'IEF', 'TLT'], lowvol: ['KO', 'PG', 'JNJ', 'PEP', 'WMT', 'MCD', 'COST', 'MSFT'], momentum: ['SPY', 'QQQ', 'IWM', 'EFA', 'EEM', 'TLT', 'IEF', 'GLD', 'DBC', 'VNQ', 'SGOV'] };
 const strats = async () => STRATS || (STRATS = await api('strategies'));
 const pctF = (v, dp = 1) => v == null || !Number.isFinite(v) ? '–' : pct(v * 100, dp);
 const pctA = (v, dp = 1) => v == null || !Number.isFinite(v) ? '–' : pct0(Math.abs(v) * 100, dp);
@@ -4187,11 +4200,11 @@ function mandateFields(m, pre) {
     <div class="pf-grid">${n('earningsDays', 'Skip if earnings are within (trading days)')}${n('minSentiment', 'Skip if the mood is below (−1 to 0)', '', 0.05)}</div>
     <div class="field"><span>Decides at (New York time)</span>${seg(pre + '-m-runAt', RUN_TIMES, m.runAt)}</div>
     <div class="field"><span>Notify me</span>${seg(pre + '-m-notify', [['trades', 'When it trades'], ['all', 'Every day'], ['off', 'Never']], m.notify)}</div>
-    <label class="field"><span>Money it can use ($, 0 = the whole wallet)</span><input type="number" inputmode="decimal" id="${pre}-m-budget" value="${m.budget}"></label>`;
+    <div class="pf-grid"><label class="field"><span>Money it can use ($, 0 = the whole wallet)</span><input type="number" inputmode="decimal" id="${pre}-m-budget" value="${m.budget}"></label>${n('addWeekly', 'Add every week ($)', 'Paper: deposited for you each week. Alpaca: raises its budget; you deposit at Alpaca')}</div>`;
 }
 function readMandate(root, pre) {
   const o = {};
-  for (const k of ['maxPosPct', 'maxTradesDay', 'dailyLossPct', 'maxDDPct', 'earningsDays', 'minSentiment', 'budget', 'takeProfitPct', 'timeStopDays']) { const el = $(`#${pre}-m-${k}`, root); if (el) o[k] = num(el.value); }
+  for (const k of ['maxPosPct', 'maxTradesDay', 'dailyLossPct', 'maxDDPct', 'earningsDays', 'minSentiment', 'budget', 'takeProfitPct', 'timeStopDays', 'addWeekly']) { const el = $(`#${pre}-m-${k}`, root); if (el) o[k] = num(el.value); }
   root.querySelectorAll('[data-mk]').forEach(el => { o[el.dataset.mk] = el.classList.contains('on'); });
   for (const k of ['runAt', 'notify']) { const on = $(`[data-seg="${pre}-m-${k}"] button.on`, root); if (on) o[k] = on.dataset.v; }
   return o;
@@ -4202,6 +4215,11 @@ function bindFields(root) {
 }
 
 // ---------- backtest results (strategy lab and new bot) ----------
+function dcaCard(r) {
+  const D = r.dca; if (!D) return '';
+  const B = r.benchSym || 'the benchmark';
+  return `<div class="card dca-card mt12"><div class="t-cap">With ${money(D.addWeekly)} added every week</div><div class="dca-row"><div><span>You put in</span><b class="n">${money(D.invested)}</b></div><div><span>It grew to</span><b class="n ${cls(D.profit)}">${money(D.end)}</b></div><div><span>Profit</span><b class="n ${cls(D.profit)}">${money(D.profit, { sign: true })}</b></div></div>${D.bench != null ? `<p class="t-foot" style="margin:8px 0 0">The same deposits into ${h(B)} would be ${money(D.bench)} (${money(D.benchProfit, { sign: true })}). The returns below are time-weighted, so the deposits don't inflate them.</p>` : ''}</div>`;
+}
 function btResults(r) {
   const B = r.benchSym || 'the benchmark', s = r.stats || {}, b = r.bench || {}, beat = s.ret != null && b.ret != null ? s.ret - b.ret : null;
   const tile = (k, v, sub = '', c = '') => `<div class="tile"><div class="k">${k}</div><div class="v ${c}">${v}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div>`;
@@ -4209,7 +4227,7 @@ function btResults(r) {
   const years = {}; for (const [m, v] of Object.entries(r.monthly || {})) { const [y, mm] = m.split('-'); (years[y] = years[y] || {})[+mm] = v; }
   const yearRet = y => Object.values(years[y]).reduce((t, v) => t * (1 + v), 1) - 1;
   const heat = v => v == null ? 'var(--card2)' : `color-mix(in srgb, var(--${v >= 0 ? 'up' : 'dn'}) ${Math.round(14 + 70 * Math.min(1, Math.abs(v) / 0.1))}%, var(--card2))`;
-  return `<div class="bt-head"><div><div class="t-cap">${h(r.name)} · ${fmtDate(r.start + 'T12:00')} to ${fmtDate(r.end + 'T12:00')}</div><div class="bt-big ${cls(s.ret)}">${pctF(s.ret)}</div><div class="t-foot">${money(r.capital)} became <b class="priv">${money(s.end || 0)}</b>. Holding ${h(B)} did ${pctF(b.ret)}${beat != null ? `, so it ${beat >= 0 ? 'beat it by' : 'trailed it by'} ${pctA(beat)}` : ''}.</div></div></div>
+  return `<div class="bt-head"><div><div class="t-cap">${h(r.name)} · ${fmtDate(r.start + 'T12:00')} to ${fmtDate(r.end + 'T12:00')}</div><div class="bt-big ${cls(s.ret)}">${pctF(s.ret)}</div><div class="t-foot">${r.dca ? 'Return on the money, ignoring when the deposits came in.' : `${money(r.capital)} became <b class="priv">${money(s.end || 0)}</b>.`} Holding ${h(B)} did ${pctF(b.ret)}${beat != null ? `, so it ${beat >= 0 ? 'beat it by' : 'trailed it by'} ${pctA(beat)}` : ''}.</div></div></div>
     <div class="chart-wrap" id="bt-chart"></div><div class="bt-legend"><span><i class="ln"></i>Strategy</span><span><i class="ln dash"></i>Holding ${h(B)}</span></div>
     <div class="tiles mt12">${tile('Per year', pctF(s.cagr), `${h(B)}: ${pctF(b.cagr)}`, cls(s.cagr))}${tile('Biggest drop', pctA(s.maxDD), `${h(B)}: ${pctA(b.maxDD)}`, 'dn')}${tile('Sharpe ratio', s.sharpe == null ? '–' : s.sharpe.toFixed(2), `${h(B)}: ${b.sharpe == null ? '–' : b.sharpe.toFixed(2)}`)}${tile('Win rate', r.win == null ? '–' : pct0(r.win * 100, 0), `${r.round} round trips`)}${tile('Average win', pctF(r.avgWin), `Average loss ${pctF(r.avgLoss)}`, 'up')}${tile('Invested', pct0((r.exposure || 0) * 100, 0), 'Of the days')}${tile('Fees', money(r.fees), `Spread and slippage ${money(r.spreadCost)}`)}${tile('Trades', String(r.trades), r.avgDays != null ? `Held ${Math.round(r.avgDays)} days on average` : '')}</div>
     ${rb ? `<div class="section-h"><h2>Is it real or luck?</h2><span class="tag ${rb.pass ? 'up' : 'dn'}">${rb.pass ? 'Held up' : 'Weak'}</span></div><div class="card"><p class="t-sub" style="margin:0 0 10px">${h(rb.verdict)}</p>
@@ -4250,7 +4268,7 @@ PAGES.lab = {
       <div class="section-h"><h2>What it trades</h2></div>${uniPick(s, LAB.uni, LAB.syms, 'lab')}
       ${st.params.length ? `<div class="section-h"><h2>Settings</h2><button class="more" data-act="labReset">Defaults</button></div>${paramFields(st.params, LAB.params, 'lab')}` : ''}
       <div class="section-h"><h2>Test</h2></div><div class="field"><span>Years of history</span>${seg('lab-years', [[1, '1'], [3, '3'], [5, '5'], [8, '8']], LAB.years)}</div>
-      <label class="field"><span>Starting money</span><input type="number" inputmode="decimal" id="lab-cap" value="${LAB.capital}"></label>
+      <div class="pf-grid"><label class="field"><span>Starting money</span><input type="number" inputmode="decimal" id="lab-cap" value="${LAB.capital}"></label><label class="field"><span>Add every week ($)</span><input type="number" inputmode="decimal" id="lab-add" value="${LAB.addWeekly || 0}"></label></div>
       <button class="btn btn-primary btn-block btn-lg mt16" id="lab-run">${icon('play')}Run the test</button>
       <div id="lab-out"></div>`;
     bindFields(p.body); bindPickers(p.body, 'lab', s, () => this.draw(p), LAB); raf(() => showPicked(p.body));
@@ -4259,12 +4277,12 @@ PAGES.lab = {
   },
   async run(p, btn) {
     const st = p.s.strategies[LAB.strategy];
-    LAB.params = readParams(st.params, p.body, 'lab'); LAB.capital = num($('#lab-cap', p.body).value, 10000); LAB.syms = symList($('#lab-syms', p.body).value);
+    LAB.params = readParams(st.params, p.body, 'lab'); LAB.capital = num($('#lab-cap', p.body).value, 10000); LAB.addWeekly = num($('#lab-add', p.body).value, 0); LAB.syms = symList($('#lab-syms', p.body).value);
     const out = $('#lab-out', p.body); busy(btn, true);
     out.innerHTML = `<div class="sk sk-block mt16" style="height:260px"></div><p class="t-foot" style="text-align:center">Loading up to 10 years of prices and testing ${Object.keys(p.s.strategies[LAB.strategy].params).length ? 'several settings' : 'it'}…</p>`;
     try {
-      const r = await post('backtest', { strategy: LAB.strategy, syms: LAB.syms, params: LAB.params, years: LAB.years, capital: LAB.capital });
-      out.innerHTML = `<div class="section-h"><h2>Results</h2></div>${btResults(r)}<button class="btn btn-primary btn-block btn-lg mt16" data-act="labToBot">${icon('bot')}Make this a bot</button>`;
+      const r = await post('backtest', { strategy: LAB.strategy, syms: LAB.syms, params: LAB.params, years: LAB.years, capital: LAB.capital, addWeekly: LAB.addWeekly || 0 });
+      out.innerHTML = `<div class="section-h"><h2>Results</h2></div>${dcaCard(r)}${btResults(r)}<button class="btn btn-primary btn-block btn-lg mt16" data-act="labToBot">${icon('bot')}Make this a bot</button>`;
       if (p.chart) p.chart.destroy(); p.chart = mountBt(out, r);
       out.scrollIntoView({ behavior: reduced() ? 'auto' : 'smooth', block: 'start' });
     } catch (e) { out.innerHTML = `<div class="callout warn mt16">${icon('info')}<div>${h(e.message)}</div></div>`; }
@@ -4318,7 +4336,7 @@ PAGES.newbot = {
       <div class="section-h"><h2>Its money</h2></div>
       ${isRealSpace() ? '' : seg('nb-w', [['new', 'A new wallet'], ['old', 'One of my wallets']], m.wallet ? 'old' : 'new')}
       <div id="nb-wbox">${m.wallet ? `<label class="field"><span>Wallet</span><select id="nb-wid">${wallets.map(w => `<option value="${w.id}" ${w.id === m.wallet ? 'selected' : ''}>${h(w.emoji)} ${h(w.name)} · ${money(w.value)}</option>`).join('')}</select></label><p class="note">Give each bot its own symbols. Set "Money it can use" below to keep part of the wallet for yourself.${wallets.find(w => w.id === m.wallet)?.broker ? ` <b>This is your Alpaca account${wallets.find(w => w.id === m.wallet).brokerEnv === 'live' ? ', with real money' : ' (paper)'}.</b> Orders go to Alpaca. "Money it can use" is required.` : ''}</p>${wallets.find(w => w.id === m.wallet)?.brokerEnv === 'live' ? `<label class="field"><span>Real money: the most it can ever have invested ($)</span><input type="number" inputmode="decimal" id="nb-livecap" value="${m.liveCap || 500}"></label>` : ''}` : `<label class="field"><span>Starting money</span><input type="number" inputmode="decimal" id="nb-start" value="${m.start}"></label><div class="field"><span>Trading rules</span>${seg('nb-prof', [['robinhood', 'Robinhood'], ['alpaca', 'Alpaca'], ['practice', 'Practice']], m.profile)}</div>`}</div>
-      ${st.params.length ? `<div class="section-h"><h2>Strategy settings</h2></div>${paramFields(st.params, m.params, 'nb')}` : ''}
+      ${st.params.length ? `<div class="section-h"><h2>Strategy settings</h2>${SMALL_PRESET[m.strategy] ? '<button class="more" data-act="nbSmall">Small account preset</button>' : ''}</div>${SMALL_PRESET[m.strategy] && (m.start || 0) < 2000 && !m.smallSeen ? `<div class="callout mt8">${icon('info')}<div>Small account? Tap <b>Small account preset</b>: ${h(SMALL_PRESET[m.strategy].why)}</div></div>` : ''}${paramFields(st.params, m.params, 'nb')}` : ''}
       <div class="section-h"><h2>Limits and news</h2></div>${mandateFields(m.mandate, 'nb')}
       <div class="section-h"><h2>Test it first</h2></div>
       <div class="field"><span>Years of history</span>${seg('nb-years', [[1, '1'], [3, '3'], [5, '5'], [8, '8']], m.years)}</div>
@@ -4342,8 +4360,8 @@ PAGES.newbot = {
     this.save(p); const m = p.m, out = $('#nb-out', p.body); busy(btn, true);
     out.innerHTML = `<div class="sk sk-block mt16" style="height:260px"></div>`;
     try {
-      const r = await post('backtest', { strategy: m.strategy, syms: m.syms, params: m.params, years: m.years, capital: m.wallet ? (App.S.wallets.find(w => w.id === m.wallet)?.value || 10000) : m.start, profile: m.wallet ? undefined : (m.profile === 'practice' ? 'robinhood' : m.profile), maxPosPct: m.mandate.maxPosPct });
-      out.innerHTML = btResults(r); if (p.chart) p.chart.destroy(); p.chart = mountBt(out, r);
+      const r = await post('backtest', { addWeekly: m.mandate.addWeekly || 0, strategy: m.strategy, syms: m.syms, params: m.params, years: m.years, capital: m.wallet ? (App.S.wallets.find(w => w.id === m.wallet)?.value || 10000) : m.start, profile: m.wallet ? undefined : (m.profile === 'practice' ? 'robinhood' : m.profile), maxPosPct: m.mandate.maxPosPct });
+      out.innerHTML = dcaCard(r) + btResults(r); if (p.chart) p.chart.destroy(); p.chart = mountBt(out, r);
     } catch (e) { out.innerHTML = `<div class="callout warn mt12">${icon('info')}<div>${h(e.message)}</div></div>`; }
     busy(btn, false);
   },

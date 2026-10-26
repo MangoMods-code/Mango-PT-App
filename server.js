@@ -2943,22 +2943,34 @@ const STRATEGIES = {
   },
   momentum: {
     name: 'Momentum rotation', short: 'Momentum', icon: 'zap', rebalance: 'monthly', markets: 'both',
-    desc: 'Once a month, ranks everything by its return over the past 6 months (skipping the latest month) and holds the top few that are still rising. Goes to cash when the benchmark is below its 200-day average. A well-studied effect across stocks, ETFs and crypto.',
-    params: [{ k: 'lookback', label: 'Look back (days)', def: 126, min: 21, max: 252 }, { k: 'skip', label: 'Skip latest (days)', def: 21, min: 0, max: 42 }, { k: 'top', label: 'Hold the top', def: 3, min: 1, max: 10 }, { k: 'filterLen', label: 'Market filter (days)', def: 200, min: 0, max: 300 }, { k: 'sizing', label: 'Sizing', def: 'equal', choices: [['equal', 'Equal'], ['invvol', 'By volatility']] }],
+    desc: 'Once a month, ranks everything by its return over the past 6 months (skipping the latest month) and holds the top few that are still rising. When the market is below its 200-day average it parks the money in cash or T-bills. Built for small accounts too: it holds fewer positions when there is less money, keeps a winner until it really falls behind, and puts new deposits to work without selling.',
+    params: [{ k: 'lookback', label: 'Look back (days)', def: 126, min: 21, max: 252 }, { k: 'skip', label: 'Skip latest (days)', def: 21, min: 0, max: 42 }, { k: 'top', label: 'Hold the top', def: 3, min: 1, max: 10 }, { k: 'filterLen', label: 'Market filter (days)', def: 200, min: 0, max: 300 }, { k: 'sizing', label: 'Sizing', def: 'equal', choices: [['equal', 'Equal'], ['invvol', 'By volatility']] },
+      { k: 'minPos', label: 'Smallest position ($)', def: 25, min: 1, max: 5000 }, { k: 'buffer', label: 'Keep a holding until it drops below rank (top +)', def: 1, min: 0, max: 10 },
+      { k: 'flow', label: 'New money', def: 'flow', choices: [['flow', 'Top up, sell less'], ['rebal', 'Full monthly rebalance']] }, { k: 'safe', label: 'When the market is weak', def: 'SGOV', choices: [['cash', 'Hold cash'], ['SGOV', 'SGOV (T-bills)'], ['BIL', 'BIL (T-bills)']] }],
     grid: { lookback: [63, 126, 252], top: [2, 3, 5] },
     need: p => Math.max(p.lookback, p.filterLen || 0) + 5,
     decide(ctx) {
-      const p = ctx.params, out = { weights: {}, stops: {}, notes: {} };
+      const p = ctx.params, out = { weights: {}, stops: {}, notes: {}, noTrim: p.flow === 'flow' };
       const bench = ctx.bench && ctx.data[ctx.bench], bi = ctx.idx[ctx.bench];
+      const safe = p.safe && p.safe !== 'cash' && ctx.syms.includes(p.safe) ? p.safe : null; // the T-bill fund is only used if it's in the bot's list
       let riskOn = true;
       if (p.filterLen > 0 && bench && bi != null && bi >= p.filterLen) { const bs = IND.sma(bench.c, p.filterLen, bi); riskOn = bench.c[bi] > bs; ctx.regime = `${ctx.bench} ${riskOn ? 'above' : 'below'} its ${p.filterLen}-day average (${px2(bench.c[bi])} vs ${px2(bs)})`; }
+      // how many positions the money can carry: each one at least the smallest position size
+      // older bots and Autopilot tryouts don't have the small-account settings: they behave exactly as before
+      const minPos = num(p.minPos, 1), buffer = num(p.buffer, 0);
+      const slots = Math.max(1, Math.min(p.top, ctx.capital > 0 ? Math.floor(ctx.capital / Math.max(1, minPos)) : p.top));
       const ranked = [];
-      for (const s of ctx.syms) { const b = ctx.data[s], i = ctx.idx[s]; if (i == null || i < p.lookback) continue; const r = IND.ret(b.c, p.lookback, i, p.skip); if (r == null) continue; ranked.push({ s, r }); }
+      for (const s of ctx.syms) { if (s === safe) continue; const b = ctx.data[s], i = ctx.idx[s]; if (i == null || i < p.lookback) continue; const r = IND.ret(b.c, p.lookback, i, p.skip); if (r == null) continue; ranked.push({ s, r }); }
       ranked.sort((a, b) => b.r - a.r);
-      ranked.forEach((x, k) => { out.notes[x.s] = `${p.lookback}-day return ${pf(x.r, 1)} (rank ${k + 1} of ${ranked.length})${!riskOn ? '. Market filter says stay in cash' : x.r <= 0 ? '. Not rising, so no' : k < p.top ? '. In the top ' + p.top : ''}.`; });
-      if (!riskOn) return out;
-      const picks = ranked.filter(x => x.r > 0).slice(0, p.top).map(x => x.s);
-      Object.assign(out.weights, sizeWeights(picks, { ...ctx, params: { ...p, maxPositions: p.top } }, ctx.maxW));
+      const keepTo = slots + buffer;
+      // holdings stay while they're still rising and inside the wider band; open slots go to the best of the rest
+      const keep = ranked.filter((x, k) => ctx.held[x.s] && x.r > 0 && k < keepTo).slice(0, slots).map(x => x.s);
+      const picks = [...keep, ...ranked.filter(x => x.r > 0 && !keep.includes(x.s)).map(x => x.s)].slice(0, slots);
+      ranked.forEach((x, k) => { const inP = picks.includes(x.s), kept = inP && k >= slots; out.notes[x.s] = `${p.lookback}-day return ${pf(x.r, 1)} (rank ${k + 1} of ${ranked.length})${!riskOn ? `. Market filter says stay ${safe ? 'in ' + safe : 'in cash'}` : x.r <= 0 ? '. Not rising, so no' : kept ? `. Kept: still inside the top ${keepTo}, so no need to sell` : inP ? `. In the top ${slots}` : ctx.held[x.s] && k >= keepTo ? `. Fell below rank ${keepTo}: sell` : ''}.`; });
+      if (slots < p.top) ctx.regime = `${ctx.regime ? ctx.regime + '. ' : ''}With ${'$' + Math.round(ctx.capital)} it holds ${slots} position${slots === 1 ? '' : 's'} instead of ${p.top}, so each is at least $${minPos}`;
+      if (!riskOn) { if (safe) { out.weights[safe] = 1; out.notes[safe] = `Market is weak: parking the money in ${safe} (T-bills) until it recovers.`; } return out; }
+      Object.assign(out.weights, sizeWeights(picks, { ...ctx, params: { ...p, maxPositions: slots } }, ctx.maxW));
+      if (safe) { const used = Object.values(out.weights).reduce((t, x) => t + x, 0); if (used < 0.98) { out.weights[safe] = Math.min(1, 1 - used); out.notes[safe] = `Money the picks don't use waits in ${safe} (T-bills) instead of cash.`; } }
       return out;
     },
   },
@@ -3191,14 +3203,15 @@ async function loadUniverse(syms) {
   return { data, missing };
 }
 const benchFor = syms => syms.some(s => !isCrypto(s)) ? 'SPY' : 'BTC';
-function runBacktest({ key, params, syms, data, start, end, capital = 10000, profile = 'robinhood', route = 'mm', maxPosPct = 100, slipBps = 2, bench }) {
+function runBacktest({ key, params, syms, data, start, end, capital = 10000, profile = 'robinhood', route = 'mm', maxPosPct = 100, slipBps = 2, bench, addWeekly = 0 }) {
   const st = STRATEGIES[key], p = params, prof = PROFILES[profile] || PROFILES.robinhood, w = { crypto_route: route };
   const series = {}; for (const s of [...new Set([...syms, bench].filter(Boolean))]) if (data[s]) series[s] = { ...data[s], memo: {}, at: new Map(data[s].d.map((d, i) => [d, i])) };
   const live = syms.filter(s => series[s]);
   const allDates = [...new Set(live.flatMap(s => series[s].d))].sort().filter(d => (!start || d >= start) && (!end || d <= end));
   const need = st.need(p), ptr = {}; for (const s of Object.keys(series)) ptr[s] = -1;
   let cash = capital, peak = capital, maxDD = 0, fees = 0, spreadCost = 0, vol30 = [], exposureDays = 0;
-  const pos = {}, curve = [], trades = [], closed = [], daily = [];
+  const pos = {}, curve = [], trades = [], closed = [], daily = [], money = [];
+  let units = capital, invested = capital, lastWeek = null; // weekly deposits buy 'units' at the day's value, so returns stay time-weighted
   const halfSpread = (s, px) => px * modelSpreadBps(s, 'regular') / 2e4 + px * slipBps / 1e4;
   const fee = (s, side, qty, notional, d) => {
     if (isCrypto(s)) { const v = vol30.filter(x => x.d > addIso(d, -30)).reduce((t, x) => t + x.v, 0); return cryptoFees(prof, w, notional, 'taker', v).total; }
@@ -3228,6 +3241,7 @@ function runBacktest({ key, params, syms, data, start, end, capital = 10000, pro
     for (const s of Object.keys(series)) { const j = series[s].at.get(d); if (j != null) ptr[s] = j; }
     const ready = live.filter(s => ptr[s] >= need);
     if (!started) { if (!ready.length) continue; started = true; }
+    if (addWeekly > 0) { const t = new Date(d + 'T12:00:00Z'), wd = (t.getUTCDay() + 6) % 7; t.setUTCDate(t.getUTCDate() - wd); const wk = t.toISOString().slice(0, 10); if (lastWeek && wk !== lastWeek) { const nav = value() / units; cash += addWeekly; invested += addWeekly; units += addWeekly / nav; } lastWeek = wk; }
     // 1) stops during the day: a gap below the stop fills at the open. No buying back the same day.
     const stoppedToday = new Set();
     for (const [s, h] of Object.entries(pos)) {
@@ -3242,8 +3256,9 @@ function runBacktest({ key, params, syms, data, start, end, capital = 10000, pro
     const month = d.slice(0, 7), rebalanceDay = st.rebalance === 'monthly' ? month !== lastMonth : st.rebalance === 'weekly' ? new Date(d + 'T12:00:00Z').getUTCDay() === 1 : false;
     const eq0 = value();
     const acts = st.rebalance === 'none' || rebalanceDay;
+    const flow = p.flow === 'flow';
     if (tradable.length && acts) {
-      const ctx = { syms: tradable, data: series, idx, params: p, held, bench, maxW: maxPosPct / 100 };
+      const ctx = { syms: tradable, data: series, idx, params: p, held, bench, maxW: maxPosPct / 100, capital: eq0 };
       const dec = st.decide(ctx);
       // exits first
       for (const s of Object.keys(pos)) if (tradable.includes(s) && !(dec.weights[s] > 0)) trade(s, 'sell', pos[s].qty, series[s].c[ptr[s]], d, 'signal');
@@ -3254,17 +3269,22 @@ function runBacktest({ key, params, syms, data, start, end, capital = 10000, pro
           const diff = want - have;
           if (Math.abs(diff) > Math.max(eq0 * 0.01, 5)) {
             if (diff > 0) { const room = cash - 0.5; const usd = Math.min(diff, room); if (usd > 1) trade(s, 'buy', usd / (px + halfSpread(s, px)) * 0.999, px, d, pos[s] ? 'rebalance' : 'signal'); }
-            else trade(s, 'sell', Math.min(pos[s].qty, -diff / px), px, d, 'rebalance');
+            else if (!dec.noTrim) trade(s, 'sell', Math.min(pos[s].qty, -diff / px), px, d, 'rebalance');
           }
         }
         if (pos[s]) { pos[s].weight = wgt; const sp = dec.stops[s]; pos[s].stop = sp ? (sp.trail ? Math.max(pos[s].stop || 0, sp.price) : sp.price) : null; }
       }
     }
+    // topping up: spare cash (new deposits) goes into the current holdings on any day, without selling anything
+    if (flow && tradable.length && !(acts) && cash > Math.max(5, eq0 * 0.01)) {
+      const cand = Object.entries(pos).filter(([s, h]) => tradable.includes(s) && h.weight > 0).map(([s, h]) => ({ s, gap: h.weight * eq0 - h.qty * series[s].c[ptr[s]] })).sort((x, y) => y.gap - x.gap)[0];
+      if (cand) { const s = cand.s, px = series[s].c[ptr[s]], usd = Math.min(cand.gap, cash - 0.5); if (usd > 5) trade(s, 'buy', usd / (px + halfSpread(s, px)) * 0.999, px, d, 'top up'); }
+    }
     if (st.rebalance === 'monthly') lastMonth = month;
     for (const h of Object.values(pos)) h.days++;
-    const eq = value(); peak = Math.max(peak, eq); maxDD = Math.min(maxDD, eq / peak - 1);
+    const eqm = value(), eq = eqm * capital / units; peak = Math.max(peak, eq); maxDD = Math.min(maxDD, eq / peak - 1);
     if (Object.keys(pos).length) exposureDays++;
-    curve.push([d, eq]);
+    curve.push([d, eq]); money.push([d, eqm]);
   }
   // benchmark: buy and hold over the same days
   let bcurve = null;
@@ -3272,7 +3292,7 @@ function runBacktest({ key, params, syms, data, start, end, capital = 10000, pro
     const b = series[bench]; let units = null; bcurve = [];
     for (const [d] of curve) { const i = b.at.get(d) ?? lastIndexOnOrBefore(b.d, d); if (i < 0) { bcurve.push([d, capital]); continue; } if (units == null) units = capital / b.c[i]; bcurve.push([d, units * b.c[i]]); }
   }
-  return { curve, bcurve, trades, closed, fees, spreadCost, maxDD, exposure: curve.length ? exposureDays / curve.length : 0, open: Object.entries(pos).map(([s, h]) => ({ sym: s, qty: h.qty, entry: h.cost / h.qty, entryDate: h.entryDate, value: h.qty * series[s].c[ptr[s]], stop: h.stop || null })) };
+  return { money, invested, curve, bcurve, trades, closed, fees, spreadCost, maxDD, exposure: curve.length ? exposureDays / curve.length : 0, open: Object.entries(pos).map(([s, h]) => ({ sym: s, qty: h.qty, entry: h.cost / h.qty, entryDate: h.entryDate, value: h.qty * series[s].c[ptr[s]], stop: h.stop || null })) };
 }
 function lastIndexOnOrBefore(arr, d) { let lo = 0, hi = arr.length - 1, r = -1; while (lo <= hi) { const m = (lo + hi) >> 1; if (arr[m] <= d) { r = m; lo = m + 1; } else hi = m - 1; } return r; }
 const addIso = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 864e5).toISOString().slice(0, 10);
@@ -3309,14 +3329,14 @@ async function backtest(o) {
   const key = o.strategy, st = STRATEGIES[key]; if (!st) fail('Pick a strategy'); if (st.auto) fail('Autopilot picks its own strategies, so it is tested by its tryouts instead');
   const syms = [...new Set((o.syms || []).map(cleanSym).filter(Boolean))].slice(0, 40); if (!syms.length) fail('Pick at least one symbol');
   for (const s of syms) if (!assets.has(s)) addAsset(s, CRYPTO_DEFAULT.includes(s) || o.kinds?.[s] === 'crypto' ? 'crypto' : 'stock');
-  const params = cleanParams(key, o.params), years = clamp(num(o.years, 3), 1, 8), capital = clamp(num(o.capital, 10000), 100, 1e8);
+  const params = cleanParams(key, o.params), years = clamp(num(o.years, 3), 1, 8), capital = clamp(num(o.capital, 10000), 25, 1e8), addWeekly = clamp(num(o.addWeekly, 0), 0, 1e6);
   const bench = benchFor(syms);
   const { data, missing } = await loadUniverse([...new Set([...syms, bench])]);
   const usable = syms.filter(s => data[s]); if (!usable.length) fail('No price history for those symbols right now');
   const lastDates = usable.map(s => data[s].d[data[s].d.length - 1]).sort(); const end = lastDates[lastDates.length - 1];
   const start = addIso(end, -Math.round(years * 365.25));
   const firstDates = usable.map(s => data[s].d[0]).sort();
-  const args = { key, params, syms: usable, data, start, end, capital, profile: o.profile || 'robinhood', route: o.route || 'mm', maxPosPct: clamp(num(o.maxPosPct, 100), 5, 100), bench };
+  const args = { key, params, syms: usable, data, start, end, capital, profile: o.profile || 'robinhood', route: o.route || 'mm', maxPosPct: clamp(num(o.maxPosPct, 100), 5, 100), bench, addWeekly };
   const r = runBacktest(args), P = ppy(usable), sum = summarize(r, P, capital);
   const out = {
     strategy: key, name: st.name, params, syms: usable, missing, bench, start: r.curve[0]?.[0] || start, end, capital, years,
@@ -3324,6 +3344,11 @@ async function backtest(o) {
     ...sum, curve: downsamplePts(r.curve), bcurve: r.bcurve ? downsamplePts(r.bcurve) : null, monthly: monthlyReturns(r.curve),
     recent: r.closed.slice(-40).reverse(), open: r.open, firstData: firstDates[0], benchSym: bench,
   };
+  if (addWeekly > 0) { // with weekly deposits: what went in, what came out, and the same deposits into the benchmark
+    const mEnd = r.money[r.money.length - 1]?.[1] ?? capital; let bEnd = null;
+    if (data[bench]) { const b = data[bench]; let u = 0, lw = null; for (const [d] of r.money) { const i = lastIndexOnOrBefore(b.d, d); if (i < 0) continue; const t = new Date(d + 'T12:00:00Z'), wd = (t.getUTCDay() + 6) % 7; t.setUTCDate(t.getUTCDate() - wd); const wk = t.toISOString().slice(0, 10); if (lw == null) u += capital / b.c[i]; else if (wk !== lw) u += addWeekly / b.c[i]; lw = wk; bEnd = u * b.c[i]; } }
+    out.dca = { addWeekly, invested: r.invested, end: mEnd, profit: mEnd - r.invested, bench: bEnd, benchProfit: bEnd != null ? bEnd - r.invested : null, money: downsamplePts(r.money) };
+  }
   // Out-of-sample check: tune on the first 70% of the period, then test those settings on the last 30% they never saw.
   if (o.robust !== false && r.curve.length > 200 && Object.keys(st.grid).length) {
     const days = r.curve.map(x => x[0]), split = days[Math.floor(days.length * 0.7)];
@@ -3360,11 +3385,11 @@ function gridCombos(grid) {
 const MANDATE_DEF = {
   budget: 0, maxPosPct: 25, dailyLossPct: 5, maxDDPct: 20, maxTradesDay: 12, minTrade: 10, runAt: '15:45', stops: true, notify: 'trades',
   newsFilter: true, earningsDays: 2, minSentiment: -0.35, blockSevere: true, sellOnSevere: false, tilt: false, flattenOnKill: true, allowLive: false, liveCap: 0, councilVeto: false,
-  takeProfitPct: 15, timeStopDays: 30, trailTighten: true,
+  takeProfitPct: 15, timeStopDays: 30, trailTighten: true, addWeekly: 0,
 };
 function cleanMandate(m = {}, base = MANDATE_DEF) {
   const o = { ...base };
-  const nums = { liveCap: [0, 1e7], budget: [0, 1e9], maxPosPct: [5, 100], dailyLossPct: [0, 50], maxDDPct: [0, 90], maxTradesDay: [1, 100], minTrade: [1, 10000], earningsDays: [0, 10], minSentiment: [-1, 0], takeProfitPct: [0, 500], timeStopDays: [0, 365] };
+  const nums = { liveCap: [0, 1e7], budget: [0, 1e9], maxPosPct: [5, 100], dailyLossPct: [0, 50], maxDDPct: [0, 90], maxTradesDay: [1, 100], minTrade: [1, 10000], earningsDays: [0, 10], minSentiment: [-1, 0], takeProfitPct: [0, 500], timeStopDays: [0, 365], addWeekly: [0, 100000] };
   for (const [k, [lo, hi]] of Object.entries(nums)) if (m[k] !== undefined) o[k] = clamp(num(m[k], base[k]), lo, hi);
   for (const k of ['stops', 'newsFilter', 'blockSevere', 'sellOnSevere', 'tilt', 'flattenOnKill', 'allowLive', 'councilVeto', 'trailTighten']) if (m[k] !== undefined) o[k] = !!m[k];
   if (['trades', 'all', 'off'].includes(m.notify)) o.notify = m.notify;
@@ -3404,6 +3429,17 @@ async function runBotInner(id, { manual, dry, night }) {
   if (brk && !BROKER) fail('This bot trades through Alpaca, but the Alpaca keys are not set in Railway.');
   if (brk && S.realHalt && !dry) fail('Alpaca trading is stopped by the kill switch.');
   if (liveMoney && !m.allowLive) fail('This bot is on a real-money wallet but real-money trading is off for it. Turn it on in its limits.');
+  // ---- weekly money in: paper wallets get the deposit, Alpaca bots get a bigger budget (you deposit at Alpaca) ----
+  if (m.addWeekly > 0 && !dry) {
+    const wk = weekOf(etDate());
+    if (!state._addWeek) state._addWeek = wk; // the starting money counts as the first week
+    else if (state._addWeek !== wk) {
+      state._addWeek = wk;
+      if (!w.broker) { await deposit(bot.wid, m.addWeekly, 'practice'); await botLog(id, 'info', `Weekly deposit: ${money(m.addWeekly)}`, `Added ${money(m.addWeekly)} to ${bot.name}'s wallet, like a weekly paycheck going in.`); }
+      else if (m.budget > 0) { m.budget = round(m.budget + m.addWeekly, 2); await Q('update bots set mandate=$1 where id=$2', [JSON.stringify(m), id]); await botLog(id, 'info', `Budget up ${money(m.addWeekly)} to ${money(m.budget)}`, `Your weekly add. Remember to deposit ${money(m.addWeekly)} at Alpaca too; the bot only uses money that's really there.`); }
+      await Q('update bots set state=$1 where id=$2', [JSON.stringify(state), id]);
+    }
+  }
   const real = isReal(w), prof = profOf(w), sess = sessionAt(prof);
   const pos = await positions(bot.wid), acct = await accountInfo(bot.wid, { w, pos });
   const today = etDate(), mine = new Set(bot.syms);
@@ -3447,7 +3483,7 @@ async function runBotInner(id, { manual, dry, night }) {
   }
   const month = today.slice(0, 7), rebalanceDue = st.rebalance === 'none' || !state._lastRebalance || (st.rebalance === 'monthly' ? state._lastRebalance.slice(0, 7) !== month : true) || manual;
   const band = st.band || 0.01;
-  const ctx = { syms: tradable, data: series, idx, params: bot.params, held, bench, maxW: m.maxPosPct / 100, beats: bot.strategy === 'earnings' ? await earningsBeats(tradable).catch(() => null) : null };
+  const ctx = { syms: tradable, data: series, idx, params: bot.params, held, bench, maxW: m.maxPosPct / 100, capital, beats: bot.strategy === 'earnings' ? await earningsBeats(tradable).catch(() => null) : null };
   // the market's mood (S&P 500 for stocks, Bitcoin for crypto) scales new buys; Autopilot and Buy and hold manage their own exposure
   const moodOn = S.moodSwitch !== false && !st.auto && bot.strategy !== 'hold', mood = moodOn ? { stock: moodOf(series.SPY, 'The S&P 500'), crypto: moodOf(series.BTC, 'Bitcoin') } : null;
   const dec = st.auto ? await autopilotDecide(bot, state, series, today, { dry, manual, dd }) : rebalanceDue ? st.decide(ctx) : { weights: Object.fromEntries(Object.entries(held).map(([s, h]) => [s, h.weight || (h.qty * (priceOf(s) || h.entry)) / capital])), stops: {}, notes: Object.fromEntries(Object.keys(held).map(s => [s, 'Holding until the next monthly rebalance.'])) };
@@ -3462,7 +3498,7 @@ async function runBotInner(id, { manual, dry, night }) {
     const list = [...new Set([...wantBuy.map(([s]) => s), ...Object.keys(held), ...tradable])].filter(s => !night || isCrypto(s)).slice(0, 24);
     for (let i = 0; i < list.length; i += 8) await Promise.all(list.slice(i, i + 8).map(s => Promise.race([buzzFor(s), sleep(12000).then(() => null)]).then(x => { if (x) buzz[s] = x; }).catch(() => {})));
   }
-  const decisions = {};
+  const decisions = {}; let moodCut = 0;
   for (const s of new Set([...tradable, ...Object.keys(held)])) {
     if (night && !isCrypto(s)) continue; // the night shift only handles crypto; stocks wait for the day crew
     const want = dec.weights[s] > 0 ? dec.weights[s] : 0, px = priceOf(s), have = (held[s]?.qty || 0) * (px || 0), bz = buzz[s];
@@ -3476,13 +3512,16 @@ async function runBotInner(id, { manual, dry, night }) {
       else if (m.tilt && bz.count >= 5) { const k = clamp(0.75 + bz.sentiment * 0.5, 0.5, 1); if (k < 0.99) { wt = Math.max(have / capital, wt * k); d.why.push(`Sized down to ${Math.round(k * 100)}% because of the news mood.`); } }
     }
     if (bz && held[s] && m.sellOnSevere && bz.flags.includes('severe_news')) { wt = 0; d.why.push('Selling: serious negative news and "sell on bad news" is on.'); }
-    if (mood && wt * capital > have + 1) { const md = isCrypto(s) ? mood.crypto : mood.stock; if (md && md.scale < 1) { wt = (have + (wt * capital - have) * md.scale) / capital; d.why.push(md.line); d.mood = md.k; } }
+    const parking = s === bot.params?.safe && bot.params.safe !== 'cash';
+    if (mood && !parking && wt * capital > have + 1) { const md = isCrypto(s) ? mood.crypto : mood.stock; if (md && md.scale < 1) { const w0 = wt; wt = (have + (wt * capital - have) * md.scale) / capital; moodCut += w0 - wt; d.why.push(md.line); d.mood = md.k; } }
     // correlation guard: don't open a position that moves almost in lockstep with one it already holds
-    if (S.corrGuard !== false && !held[s] && wt > 0 && series[s]) { for (const hs of Object.keys(held)) { if (hs === s) continue; const r = corr60(series[s], series[hs]); if (r != null && r >= (S.corrMax ?? 0.9)) { wt = 0; d.why.push(`Skipped buying: over the last 60 days it moved almost exactly like ${hs} (correlation ${r.toFixed(2)}), which it already holds.`); break; } } }
+    if (S.corrGuard !== false && !parking && !held[s] && wt > 0 && series[s]) { for (const hs of Object.keys(held)) { if (hs === s) continue; const r = corr60(series[s], series[hs]); if (r != null && r >= (S.corrMax ?? 0.9)) { wt = 0; d.why.push(`Skipped buying: over the last 60 days it moved almost exactly like ${hs} (correlation ${r.toFixed(2)}), which it already holds.`); break; } } }
     if (stoppedToday.has(s) && !held[s] && wt > 0) { wt = 0; d.why.push('Not buying back today: its stop loss sold it earlier today.'); }
     if (noBuys && wt * capital > have) { wt = have / capital; d.why.push('No new buys today: the daily loss limit was hit.'); }
     d.target = wt; decisions[s] = d;
   }
+  // what the mood switch held back waits in the T-bill fund (if the bot has one) instead of sitting in cash
+  { const ps = bot.params?.safe, pd = ps && ps !== 'cash' ? decisions[ps] : null; if (pd && moodCut > 0.01 && !noBuys) { pd.target = Math.min(1, pd.target + moodCut); pd.why.push(`The ${Math.round(moodCut * 100)}% the mood switch held back waits in ${ps} (T-bills).`); } }
   // ---- smarter exits: take some profit, and let go of trades that went nowhere ----
   for (const d of Object.values(decisions)) {
     const h = held[d.sym], px = priceOf(d.sym); if (!h || !px || !(d.target > 0)) continue;
@@ -3495,7 +3534,7 @@ async function runBotInner(id, { manual, dry, night }) {
   const sessions = [], councilRec = await councilRecord();
   for (const d of Object.values(decisions).sort((a, b) => b.want - a.want)) {
     const buying = d.want * capital > d.have + Math.max(m.minTrade, 1), selling = d.have > 0 && !(d.target > 0);
-    if (!(buying || selling) || sessions.length >= 12 || !series[d.sym]) continue;
+    if (!(buying || selling) || sessions.length >= 12 || !series[d.sym] || (d.sym === bot.params?.safe && bot.params.safe !== 'cash')) continue;
     const bz = buzz[d.sym], up = bz?.upcoming?.find(u => u.k === 'earnings') || null;
     const s = night ? await nightSession(d, series, bz, up, { strategy: STRATEGIES[bot.strategy]?.name || bot.strategy }) : councilSession(bot, d, series, bz, up, m, capital);
     // the AI members (Claude) vote too: specialists first, then the Analyst, who debates the others
@@ -3573,14 +3612,17 @@ async function runBotInner(id, { manual, dry, night }) {
     const targetV = d.target * capital, diff = targetV - d.have;
     if (d.target <= 0) { d.action = 'sell'; await placeOrder(d.sym, 'sell', { pct: 100 }, `${st.short}: ${d.why.find(w => /^Selling/.test(w)) || d.why[0] || d.note}`); delete state[d.sym]; }
     else if (d.aiTrim) { d.action = 'trim'; await placeOrder(d.sym, 'sell', { qty: held[d.sym].qty / 2 }, `${st.short}: ${d.why.find(w => /^Trimming/.test(w))}`); if (d.takeProfit) state[d.sym] = { ...(state[d.sym] || {}), tookProfit: today }; }
-    else if (rebalanceDue && st.rebalance !== 'none' && -diff > Math.max(m.minTrade, capital * band)) { d.action = 'trim'; await placeOrder(d.sym, 'sell', { qty: Math.min(held[d.sym].qty, -diff / px) }, `${st.short}: rebalance down to ${pct0n(d.target)} of the wallet`); }
+    else if (rebalanceDue && st.rebalance !== 'none' && !dec.noTrim && -diff > Math.max(m.minTrade, capital * band)) { d.action = 'trim'; await placeOrder(d.sym, 'sell', { qty: Math.min(held[d.sym].qty, -diff / px) }, `${st.short}: rebalance down to ${pct0n(d.target)} of the wallet`); }
   }
   const exposure = S.sharedRisk === false ? null : await botExposure(brk).catch(() => null);
+  // topping up between rebalances: all the spare cash goes to the single most underweight holding (one small trade, not several)
+  const topUp = bot.params?.flow === 'flow' && !rebalanceDue ? Object.values(decisions).filter(d => held[d.sym] && d.target > 0 && tradable.includes(d.sym)).sort((a, b) => (b.target * capital - b.have) - (a.target * capital - a.have))[0]?.sym : null;
   for (const d of Object.values(decisions).sort((a, b) => b.target - a.target)) {
     if (!(d.target > 0) || !tradable.includes(d.sym)) continue;
+    if (bot.params?.flow === 'flow' && !rebalanceDue && held[d.sym] && d.sym !== topUp) continue;
     const px = priceOf(d.sym), targetV = d.target * capital, diff = targetV - d.have;
     const isNew = !held[d.sym];
-    if (!isNew && !(rebalanceDue && st.rebalance !== 'none')) continue;
+    if (!isNew && !(rebalanceDue && st.rebalance !== 'none') && bot.params?.flow !== 'flow') continue; // 'top up' bots put spare cash to work any day
     if (diff <= Math.max(m.minTrade, capital * (isNew ? 0.01 : band))) continue;
     const a2 = dry ? acct : await accountInfo(bot.wid);
     const bp = isCrypto(d.sym) || !marginable(d.sym, px) ? a2.bpCrypto : a2.bp;
@@ -3654,6 +3696,7 @@ async function flattenBot(bot, why) {
   return out;
 }
 // Every minute: run bots whose time has come, catch up on a missed day, and say so when one is missed.
+const weekOf = d => { const t = new Date(d + 'T12:00:00Z'), wd = (t.getUTCDay() + 6) % 7; t.setUTCDate(t.getUTCDate() - wd); return t.toISOString().slice(0, 10); }; // the Monday of that week
 const ymd = ([y, m, d]) => `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 function prevTradingDate(y, m, d) { for (let i = 1; i < 15; i++) { const t = addDays(y, m, d, -i); if (isTradingDay(...t)) return ymd(t); } return ymd(addDays(y, m, d, -1)); }
 async function botScheduler() {
@@ -4941,7 +4984,7 @@ GET('/api/strategies', auth, () => ({ strategies: strategiesJson(), universes: U
 const btCache = new Map();
 POST('/api/backtest', auth, async req => {
   botsOn();
-  const b = req.body || {}, key = JSON.stringify([b.strategy, b.params, b.syms, b.years, b.capital, b.profile, b.maxPosPct, b.robust]);
+  const b = req.body || {}, key = JSON.stringify([b.strategy, b.params, b.syms, b.years, b.capital, b.profile, b.maxPosPct, b.robust, b.addWeekly || 0]);
   const hit = btCache.get(key); if (hit && Date.now() - hit.t < 30 * 60e3) return hit.v;
   const v = await backtest(b);
   btCache.set(key, { t: Date.now(), v }); if (btCache.size > 40) btCache.delete(btCache.keys().next().value);
@@ -6423,7 +6466,7 @@ const ICONS = {};
 const icon = (name, fn) => ICONS[name] || (ICONS[name] = fn());
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD646"/><stop offset=".5" stop-color="#FFA028"/><stop offset="1" stop-color="#FA5256"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="#1E1430"/><ellipse cx="31" cy="36" rx="18" ry="22" transform="rotate(30 31 36)" fill="url(#g)"/><path d="M20 41l6.5-6 5 3.5 9.5-10" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37 28.5h4.5V33" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="45" cy="11.5" rx="9" ry="4.6" transform="rotate(-24 45 11.5)" fill="#3BD68A"/></svg>`;
 let BUILD = 'dev', INDEX = null, INDEX_GZ = null;
-const APP_VERSION = '3.0.0'; // stamped by build.sh from package.json
+const APP_VERSION = '3.1.0'; // stamped by build.sh from package.json
 function loadIndex() {
   const file = path.join(__dirname, 'index.html');
   let html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<!doctype html><title>Mango</title><p>index.html is missing next to server.js.</p>';
