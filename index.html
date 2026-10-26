@@ -1201,6 +1201,10 @@ button.tile:active { transform: scale(.98); }
 .tl-clock b { display: block; font-size: 18px; font-family: var(--font-num); } .tl-clock span { font-size: 11px; opacity: .7; }
 .tl-track { height: 6px; border-radius: 3px; background: rgba(255,255,255,.15); overflow: hidden; } .tl-track i { display: block; height: 100%; background: var(--ac); transition: width .4s; }
 .tl-btns { display: flex; gap: 6px; } .tl-btns button { min-width: 36px; height: 32px; border-radius: 10px; border: 0; background: rgba(255,255,255,.12); color: #fff; font-weight: 700; }
+[data-hqt=castle] .hq-bub { font-family: Georgia, 'Times New Roman', serif; background: #F3EEE2; }
+[data-hqt=cyber] .hq-bub { background: #12081F; color: #E8F8FF; box-shadow: 0 0 0 1.5px rgba(255,46,151,.8), 0 0 14px rgba(0,240,255,.35); font-family: ui-monospace, Menlo, monospace; }
+[data-hqt=underwater] .hq-bub { background: #E6FBFF; box-shadow: 0 0 0 1.5px rgba(63,224,208,.7), 0 6px 18px rgba(0,30,60,.4); }
+[data-hqt=mars] .hq-bub { background: #FFF1E6; box-shadow: 0 0 0 1.5px rgba(255,122,61,.6), 0 6px 18px rgba(60,20,10,.35); }
 
 /* ---------- motion ---------- */
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -1320,7 +1324,7 @@ button.tile:active { transform: scale(.98); }
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '2.19.0';
+const BUILD = '__BUILD__', APP_VERSION = '3.0.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -6350,7 +6354,7 @@ async function editCouncilNames(onSaved) {
   const draw = () => {
     const vals = sync ? N0.all : (N0.themes[tab] || {});
     body.innerHTML = `<div class="group"><div class="cell"><div class="main"><div class="title">Same names in every theme</div><div class="sub">Turn off to give each world its own names</div></div>${sw(sync, 'id="cn-sync"')}</div></div>
-      ${sync ? '' : `<div class="mt12">${seg('cnTheme', Object.values(HQT).map(t => [t.id, t.name]), tab)}</div>`}
+      ${sync ? '' : `<div class="chips mt12">${Object.values(HQT).map(t => `<button class="chip ${t.id === tab ? 'on' : ''}" data-cnt="${t.id}">${h(t.name)}</button>`).join('')}</div>`}
       <div class="mt12">${NAME_ORDER.map(k => `<label class="field"><span>${h(roleOf(k))}</span><input class="cn-in" data-k="${k}" maxlength="24" autocomplete="off" placeholder="${h((!sync && N0.all[k]) || NAME_DEFAULT[k])}" value="${h(vals[k] || '')}"></label>`).join('')}</div>
       <p class="note">Leave a box empty to keep the ${sync ? 'default' : 'shared'} name. Up to 24 characters.</p><button class="btn btn-quiet btn-block mt8" id="cn-reset">Reset ${sync ? 'all names' : 'this theme'}</button>`;
     raf(() => placeThumbs(body));
@@ -6359,7 +6363,7 @@ async function editCouncilNames(onSaved) {
     if (e.target.closest('#cn-sync')) { read(); sync = !sync; draw(); buzz(5); }
     if (e.target.closest('#cn-reset')) { if (sync) N0.all = {}; else N0.themes[tab] = {}; draw(); }
   });
-  onSeg(body, 'cnTheme', v => { read(); tab = v; draw(); });
+  body.addEventListener('click', e => { const c = e.target.closest('[data-cnt]'); if (c) { read(); tab = c.dataset.cnt; draw(); } });
   draw();
   $('#cn-save', sh.el).addEventListener('click', async e => {
     read(); busy(e.currentTarget, true);
@@ -6456,6 +6460,283 @@ for (const [id, Q] of Object.entries(QUARTERS)) {
   };
   th.lights = function (st) { const base = lights ? lights.call(this, st) : []; return [...base, ...HQ_L.A.filter(o => o.k === 'nightstand').map(o => [o.x + 0.2, o.y + 0.2, 1.1, Q.stand[1], 0.35]), [41, 24.6, 2.2, Q.king.trim, 0.3]]; };
 }
+
+// ===================================================================
+// Four more worlds: Underwater, Castle, Cyberpunk and Mars. Each one reuses the furniture of an existing
+// world, repainted through its own color grade (every color the drawing code asks for is remapped),
+// and adds its own sky, ground, scenery, ambient life, people and voices.
+// ===================================================================
+
+// ---------- color grading ----------
+const _hsl = (r, g, b) => { r /= 255; g /= 255; b /= 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2; let h = 0, s = 0; if (mx !== mn) { const d = mx - mn; s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn); h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; h *= 60; } return [h, s, l]; };
+const _rgb = (h, s, l) => { h = ((h % 360) + 360) % 360 / 360; s = clamp(s, 0, 1); l = clamp(l, 0, 1); if (!s) return [l, l, l].map(v => Math.round(v * 255)); const q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q, f = t => { t = (t + 1) % 1; return t < 1 / 6 ? p + (q - p) * 6 * t : t < 1 / 2 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p; }; return [f(h + 1 / 3), f(h), f(h - 1 / 3)].map(v => Math.round(v * 255)); };
+function parseCol(c) {
+  if (typeof c !== 'string') return null; c = c.trim();
+  if (c[0] === '#') { let x = c.slice(1); if (x.length === 3 || x.length === 4) x = [...x].map(ch => ch + ch).join(''); if (x.length !== 6 && x.length !== 8) return null; const n = parseInt(x.slice(0, 6), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255, x.length === 8 ? parseInt(x.slice(6), 16) / 255 : 1]; }
+  const m = c.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)$/); if (m) return [+m[1], +m[2], +m[3], m[4] == null ? 1 : +m[4]];
+  return null;
+}
+function grader(fn) {
+  const memo = new Map();
+  return c => {
+    if (typeof c !== 'string') return c; let out = memo.get(c); if (out) return out;
+    const p = parseCol(c); if (!p) { memo.set(c, c); return c; }
+    const [h, s, l] = fn(..._hsl(p[0], p[1], p[2])), [r, g, b] = _rgb(h, s, l);
+    out = p[3] >= 1 ? '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('') : `rgba(${r},${g},${b},${+p[3].toFixed(3)})`;
+    memo.set(c, out); memo.set(out, out); // grading a graded color leaves it alone
+    return out;
+  };
+}
+const hueTo = (h, to, k) => { let d = ((to - h + 540) % 360) - 180; return h + d * k; };
+// a drawing surface that grades every color it's given: the canvas context is wrapped, the Iso methods are shared
+function gradedIso(iso, map) {
+  if (iso._graded === map) return iso;
+  const real = iso.g, fns = new Map();
+  const g = new Proxy(real, {
+    get(t, k) { const v = t[k]; if (typeof v !== 'function') return v; let f = fns.get(k); if (!f) { f = k === 'createLinearGradient' || k === 'createRadialGradient' || k === 'createConicGradient' ? (...a) => { const gr = v.apply(t, a), add = gr.addColorStop.bind(gr); gr.addColorStop = (o, c) => add(o, map(c)); return gr; } : v.bind(t); fns.set(k, f); } return f; },
+    set(t, k, v) { t[k] = (k === 'fillStyle' || k === 'strokeStyle' || k === 'shadowColor') ? map(v) : v; return true; },
+  });
+  const I = Object.create(iso); I.g = g; I._graded = map; return I;
+}
+// a new world built on an existing one: the same furniture, regraded, with its own sky, ground, scenery and life
+function deriveWorld(baseId, o) {
+  const B = HQT[baseId], map = grader(o.grade), wrap = fn => fn && function (iso, ...a) { return fn.call(this, gradedIso(iso, map), ...a); };
+  const W = { ...B, ...o, base: baseId, grade: map,
+    accents: o.accents || Object.fromEntries(Object.entries(B.accents).map(([k, v]) => [k, map(v)])),
+    names: { ...B.names, ...o.names },
+    plinth: o.plinth || wrap(B.plinth), hall: o.hall || wrap(B.hall), floor: o.floor || wrap(B.floor), wall: o.wall || wrap(B.wall),
+    item: o.item ? function (iso, a, ctx) { return o.item.call(this, iso, a, ctx, (I, A, C) => B.item.call(this, gradedIso(I, map), A, C)); } : wrap(B.item),
+    dyn: wrap(B.dyn), lights: st => (B.lights?.call(W, st) || []).map(([x, y, z, c, a]) => [x, y, z, map(c), a]),
+    scenery: o.scenery || (B.scenery && function (ctx) { return (B.scenery.call(this, ctx) || []).map(m => ({ ...m, draw: (iso, c) => m.draw(gradedIso(iso, map), c) })); }),
+  };
+  for (const k of ['night', 'dusk']) if (o[k] === undefined && B[k]) W[k] = map(B[k]);
+  W.grade = map;
+  HQT[o.id] = W; return W;
+}
+const shimmer = (g, x, y, w, h, t, col) => { g.save(); g.globalCompositeOperation = 'lighter'; for (let i = 0; i < 5; i++) { const u = ((t * 0.04 + i * 0.21) % 1) * w * 1.4 - w * 0.2; const gr = g.createLinearGradient(u, 0, u + 80, h); gr.addColorStop(0, col); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.beginPath(); g.moveTo(u, y); g.lineTo(u + 60, y); g.lineTo(u + 220, y + h); g.lineTo(u + 120, y + h); g.closePath(); g.fill(); } g.restore(); };
+
+// ======================================================= UNDERWATER (built on the Island)
+deriveWorld('island', {
+  id: 'underwater', name: 'Underwater', tag: 'Mango Reef, 40 m down', accent: '#3FE0D0',
+  names: { news: 'Sonar room', charts: 'Current maps', lab: 'Coral lab', council: 'Pearl court', trading: 'Kelp market', vault: 'Sunken treasure', control: 'Pressure deck', lounge: 'Bubble lounge', quarters: 'Clam beds' },
+  grade: (h, s, l) => (h > 25 && h < 60 && s > 0.2 && l > 0.45) ? [hueTo(h, 45, 0.3), s * 0.55, l * 0.86] : [hueTo(h, 188, 0.5), Math.min(1, s * 0.95 + 0.05), l * 0.8 + 0.02],
+  night: 'rgba(5,20,60,.6)', dusk: 'rgba(30,80,140,.25)',
+  sky(g, iso, st, t, w, h) {
+    const e = hqEnv(st);
+    skyGrad(g, w, h, e.night ? [[0, '#021226'], [1, '#03233A']] : e.dusk ? [[0, '#0B3D6B'], [1, '#062B48']] : [[0, '#1C8FB8'], [0.55, '#0E5F8C'], [1, '#073E63']]);
+    if (!e.night) shimmer(g, 0, 0, w, h * 0.9, t, 'rgba(180,240,255,.10)');
+    // caustics on the surface far above
+    g.save(); g.globalAlpha = e.night ? 0.06 : 0.14; g.strokeStyle = '#E8FFFF'; g.lineWidth = 2; for (let i = 0; i < 14; i++) { const y = 12 + i * 9, ph = t * 0.6 + i; g.beginPath(); for (let x = 0; x <= w; x += 18) g.lineTo(x, y + Math.sin(x * 0.03 + ph) * 3); g.stroke(); } g.restore();
+    // distant whale, slowly crossing
+    const wx = ((t * 6 + iso.ox * 0.05) % (w + 400)) - 200, wy = h * 0.22; g.fillStyle = e.night ? 'rgba(10,40,70,.5)' : 'rgba(20,70,110,.45)'; g.beginPath(); g.ellipse(wx, wy, 90, 22, 0, 0, 7); g.fill(); g.beginPath(); g.moveTo(wx - 86, wy); g.lineTo(wx - 130, wy - 22); g.lineTo(wx - 124, wy + 18); g.closePath(); g.fill();
+    // rising bubbles in the background
+    st._bub = st._bub || Array.from({ length: 50 }, () => [Math.random(), Math.random(), 1 + Math.random() * 3]);
+    g.strokeStyle = 'rgba(210,250,255,.5)'; g.lineWidth = 1; for (const q of st._bub) { const y = ((q[1] - t * 0.02 * q[2]) % 1 + 1) % 1 * h, x = q[0] * w + Math.sin(t + q[1] * 9) * 6 + iso.ox * 0.03; g.beginPath(); g.arc(x, y, q[2], 0, 7); g.stroke(); }
+  },
+  plinth(iso) {
+    const b = slab(iso, this, '#C8B48A', '#6E6248', { left: '#5E5340', right: '#776A50' });
+    speckle(iso, b.x, b.y, b.w, b.d, ['#B9A57C', '#D6C59C', '#A8956E', '#E2D3AE'], 2400, [3, 10]);
+    iso.onFloor(b.x, b.y, 0.003, g => { g.strokeStyle = 'rgba(255,255,255,.08)'; g.lineWidth = 5; for (let i = 0; i < 26; i++) { g.beginPath(); for (let x = 0; x < b.w * 100; x += 30) g.lineTo(x, i * 160 + Math.sin(x * 0.02 + i) * 14); g.stroke(); } });
+  },
+  scenery() {
+    const out = [], m = this.margin, W = HQ_L.W, D = HQ_L.D, R = rng(404), add = (x, y, f, draw) => out.push({ x, y, f, draw });
+    const kelp = (iso, x, y, s) => { for (let i = 0; i < 4; i++) { const dx = (i - 1.5) * 0.12; iso.cyl(x + dx, y + dx * 0.5, 0, 0.05, (1.4 + (i % 2) * 0.6) * s, i % 2 ? '#2E8B57' : '#3FA866', { top: '#5FC77F' }); for (let k = 0; k < 4; k++) iso.ball(x + dx + (k % 2 ? 0.1 : -0.1), y + dx * 0.5, (0.35 + k * 0.38) * s, 0.09, '#4CB872'); } };
+    const coral = (iso, x, y, c) => { iso.ball(x, y, 0.18, 0.28, c); for (let k = 0; k < 5; k++) { const a = k * 1.25; iso.cyl(x + Math.cos(a) * 0.15, y + Math.sin(a) * 0.15, 0.1, 0.05, 0.35 + (k % 3) * 0.15, shade(c, 0.1), { top: shade(c, 0.35) }); } };
+    for (let i = 0; i < 34; i++) { const side = i % 4; let x, y; if (side === 0) { x = -m + 0.8 + R() * (W + 2 * m - 1.6); y = -m + 0.6 + R() * (m - 1.2); } else if (side === 1) { x = -m + 0.6 + R() * (m - 1.2); y = -m + 0.8 + R() * (D + 2 * m - 1.6); } else if (side === 2) { x = -m + 0.8 + R() * (W + 2 * m - 1.6); y = D + 0.9 + R() * (m - 1.4); } else { x = W + 0.9 + R() * (m - 1.4); y = -m + 0.8 + R() * (D + 2 * m - 1.6); }
+      const k = i % 5, c = ['#FF6F91', '#FF9F43', '#B48CFF', '#FFD166'][i % 4];
+      if (k < 2) add(x, y, [x - 0.4, y - 0.4, 0.8, 0.8], iso => kelp(iso, x, y, 1 + (i % 3) * 0.2)); else if (k < 4) add(x, y, [x - 0.4, y - 0.4, 0.8, 0.8], iso => coral(iso, x, y, c)); else add(x, y, [x - 0.4, y - 0.4, 0.8, 0.8], iso => rock(iso, x, y, 1, '#6E7C80')); }
+    // a treasure chest and a little submarine off the front corner
+    add(W + 2.2, D + 2.2, [W + 1.6, D + 1.8, 1.2, 0.9], iso => { const x = W + 1.6, y = D + 1.8; iso.box(x, y, 0, 1.1, 0.8, 0.55, '#7A4A22', { top: '#9A6232' }); iso.box(x - 0.02, y - 0.02, 0.55, 1.14, 0.84, 0.18, '#8A5A2A', { top: '#FFD646' }); iso.glow(x + 0.55, y + 0.4, 0.8, 0.8, '#FFD646', 0.35); });
+    add(-m + 1.6, D + m - 1.8, [-m + 0.6, D + m - 2.4, 2.2, 1.2], iso => { const x = -m + 1.6, y = D + m - 1.8; iso.ball(x, y, 0.9, 0.7, '#FFC93C'); iso.ball(x + 0.7, y, 0.9, 0.55, '#FFC93C'); iso.box(x + 0.2, y - 0.08, 1.4, 0.3, 0.16, 0.4, '#E0A820'); iso.ball(x - 0.2, y + 0.4, 0.95, 0.18, '#9FE8FF'); });
+    return out;
+  },
+  ambient(iso, st, t, dt) {
+    if (st.calm) return;
+    st.fish = st.fish || Array.from({ length: 14 }, (_, i) => ({ x: Math.random() * HQ_L.W, y: Math.random() * HQ_L.D, z: 2.2 + Math.random() * 1.6, v: 0.6 + Math.random() * 0.9, c: ['#FF9F43', '#FFD166', '#4EC8F0', '#FF6F91', '#B48CFF'][i % 5], ph: Math.random() * 6 }));
+    const g = iso.g, k = iso.zoom;
+    for (const f of st.fish) { f.x += f.v * dt; if (f.x > HQ_L.W + 4) { f.x = -4; f.y = Math.random() * HQ_L.D; } const [cx, cy] = iso.P(f.x, f.y, f.z + Math.sin(t * 2 + f.ph) * 0.1); g.fillStyle = f.c; g.beginPath(); g.ellipse(cx, cy, 7 * k, 3.5 * k, 0.45, 0, 7); g.fill(); g.beginPath(); g.moveTo(cx - 6 * k, cy - 3 * k); g.lineTo(cx - 12 * k, cy - 7 * k); g.lineTo(cx - 11 * k, cy + 1 * k); g.closePath(); g.fill(); }
+    // bubbles rising from the people
+    st.ubub = (st.ubub || []).filter(b => (b.z += dt * 0.9) < 4.5); if (Math.random() < dt * 3) { const all = [...st.agents.values()], a = all[Math.floor(Math.random() * all.length)]; if (a) st.ubub.push({ x: a.x, y: a.y, z: 1.6 }); }
+    g.strokeStyle = 'rgba(220,250,255,.7)'; g.lineWidth = 1.2; for (const b of st.ubub) { const [cx, cy] = iso.P(b.x + Math.sin(b.z * 3) * 0.05, b.y, b.z); g.beginPath(); g.arc(cx, cy, 2.5 * k, 0, 7); g.stroke(); }
+  },
+});
+
+// ======================================================= CASTLE (built on the Village)
+deriveWorld('village', {
+  id: 'castle', name: 'Castle', tag: 'Castle Mango, high on the hill', accent: '#C9A045',
+  names: { news: 'Herald\'s room', charts: 'War room', lab: 'Wizard\'s tower', council: 'Throne room', trading: 'Great bazaar', vault: 'Royal treasury', control: 'Battlements', lounge: 'Banquet hall', quarters: 'Royal chambers' },
+  grade: (h, s, l) => (s > 0.55 && l > 0.42) ? [h, s, l] : (h >= 12 && h <= 62) ? [hueTo(h, 35, 0.4), s * 0.16, l * 0.92] : (h > 62 && h < 175) ? [hueTo(h, 115, 0.3), s * 0.7, l * 0.78] : [h, s * 0.85, l * 0.9],
+  night: 'rgba(20,24,60,.6)', dusk: 'rgba(180,100,90,.22)',
+  sky(g, iso, st, t, w, h) {
+    const e = hqEnv(st);
+    skyGrad(g, w, h, e.night ? [[0, '#0B0F2A'], [1, '#232A52']] : e.dusk ? [[0, '#3A2E6A'], [0.6, '#D87A6A'], [1, '#F6C07A']] : e.mood < -0.8 ? [[0, '#5E6478'], [1, '#A6A8B0']] : [[0, '#5EA8E0'], [1, '#CDE6F4']]);
+    if (e.night) stars(g, st, w, h * 0.7, 80, 0.04, t, 61);
+    // far mountains with snowy tops, then a far-off tower on a ridge
+    const k = clamp(iso.zoom, 0.18, 2.6), top = iso.P(HQ_L.W / 2, -this.margin - 2, 0)[1];
+    for (const [i, col, par, amp] of [[0, e.night ? '#1A2140' : '#8A9AB8', 0.2, 90], [1, e.night ? '#141A30' : '#6E7E96', 0.35, 60]]) { const base = top + (10 + i * 40) * k; g.fillStyle = col; g.beginPath(); g.moveTo(-10, h); for (let x = -10; x <= w + 10; x += 10) { const u = (x - iso.ox * par) / k; g.lineTo(x, base - (Math.abs(Math.sin(u * 0.004 + i)) * amp + Math.sin(u * 0.013) * 12) * k); } g.lineTo(w + 10, h); g.closePath(); g.fill(); }
+    const tx = w * 0.18 + iso.ox * 0.25, ty = top + 20 * k; g.fillStyle = e.night ? '#10142A' : '#5A6478'; g.fillRect(tx - 10 * k, ty - 70 * k, 20 * k, 70 * k); g.beginPath(); g.moveTo(tx - 14 * k, ty - 70 * k); g.lineTo(tx, ty - 98 * k); g.lineTo(tx + 14 * k, ty - 70 * k); g.fill(); g.fillStyle = '#C0392B'; g.fillRect(tx, ty - 112 * k, 12 * k, 7 * k);
+    if (e.night) { g.fillStyle = '#FFE7A0'; g.fillRect(tx - 3 * k, ty - 50 * k, 6 * k, 9 * k); }
+    if (!e.night) drawClouds(g, iso, st, t, w, h, { id: 'castle', phase: e.dusk ? 'd' : e.mood < -0.8 ? 'g' : 'a', seed: 63, n: 8, wind: 6, top0: 0.12, band: 0.26, alpha: 0.9, top: e.dusk ? '#FFE0D0' : '#FFFFFF', bot: e.dusk ? '#C08A9A' : '#B8C4D4' });
+  },
+  plinth(iso) {
+    const b = slab(iso, this, '#8C8F86', '#55574F', { left: '#4A4C45', right: '#5E6058' });
+    tiles(iso, b.x, b.y, b.w, b.d, '#8E9188', 'rgba(50,52,46,.35)', 1, { vary: 0.08, lw: 3 });
+    // a moat around the walls
+    const m = this.margin; iso.onFloor(-m, -m, 0.004, g => { g.strokeStyle = 'rgba(40,90,130,.85)'; g.lineWidth = 70; g.strokeRect(35, 35, (HQ_L.W + 2 * m) * 100 - 70, (HQ_L.D + 2 * m) * 100 - 70); g.strokeStyle = 'rgba(180,220,240,.25)'; g.lineWidth = 4; g.strokeRect(20, 20, (HQ_L.W + 2 * m) * 100 - 40, (HQ_L.D + 2 * m) * 100 - 40); });
+  },
+  scenery() {
+    const out = [], m = this.margin, W = HQ_L.W, D = HQ_L.D, add = (x, y, f, draw) => out.push({ x, y, f, draw });
+    const tower = (iso, x, y, flag) => { iso.cyl(x, y, 0, 0.9, 3.4, '#8A8D84', { top: '#9A9D94' }); for (let i = 0; i < 8; i++) { const a = i / 8 * Math.PI * 2; iso.box(x + Math.cos(a) * 0.78 - 0.12, y + Math.sin(a) * 0.78 - 0.12, 3.4, 0.24, 0.24, 0.3, '#7A7D74', { top: '#9A9D94' }); } iso.cone(x, y, 3.4, 0.95, 1.4, '#3E4A7A'); iso.cyl(x, y, 4.8, 0.03, 0.9, '#3A2A1A'); iso.box(x, y, 5.35, 0.5, 0.02, 0.3, flag, { left: flag }); iso.onWall('n', x - 0.2, y + 0.9, 1.9, g => { g.fillStyle = '#1A1A1A'; g.fillRect(0, 0, 40, 60); g.fillStyle = 'rgba(255,220,140,.35)'; g.fillRect(4, 4, 32, 52); }); };
+    for (const [x, y, c] of [[-m + 1, -m + 1, '#C0392B'], [W + m - 1, -m + 1, '#2A5A9A'], [-m + 1, D + m - 1, '#2A5A9A'], [W + m - 1, D + m - 1, '#C0392B']]) add(x, y, [x - 1, y - 1, 2, 2], iso => tower(iso, x, y, c));
+    // crenellated curtain walls along the edges, banners on them
+    for (let x = -m + 2.5; x < W + m - 2.5; x += 2.2) for (const y of [-m + 0.6]) add(x, y, [x - 1.1, y - 0.3, 2.2, 0.6], iso => { iso.box(x - 1.1, y - 0.3, 0, 2.2, 0.6, 1.6, '#83867D', { top: '#9A9D94' }); iso.box(x - 1.1, y - 0.3, 1.6, 0.6, 0.6, 0.35, '#7A7D74', { top: '#9A9D94' }); iso.box(x + 0.2, y - 0.3, 1.6, 0.6, 0.6, 0.35, '#7A7D74', { top: '#9A9D94' }); if (Math.round(x) % 3 === 0) iso.onWall('n', x - 0.3, y + 0.301, 1.5, g => { g.fillStyle = '#9C2B2B'; g.fillRect(0, 0, 60, 110); g.fillStyle = '#FFD646'; g.beginPath(); g.arc(30, 45, 14, 0, 7); g.fill(); }); });
+    for (let y = -m + 2.5; y < D + m - 2.5; y += 2.2) add(-m + 0.6, y, [-m + 0.3, y - 1.1, 0.6, 2.2], iso => { iso.box(-m + 0.3, y - 1.1, 0, 0.6, 2.2, 1.6, '#83867D', { top: '#9A9D94' }); iso.box(-m + 0.3, y - 1.1, 1.6, 0.6, 0.6, 0.35, '#7A7D74', { top: '#9A9D94' }); iso.box(-m + 0.3, y + 0.2, 1.6, 0.6, 0.6, 0.35, '#7A7D74', { top: '#9A9D94' }); });
+    return out;
+  },
+  ambient(iso, st, t) {
+    if (st.calm) return;
+    // torches by the doors flicker, banners ripple
+    for (const r of Object.values(HQ_ROOMS)) { const [x, y] = r.doorPt; iso.glow(x, y, 1.6, 0.45 + 0.08 * Math.sin(t * 9 + x), '#FF9A2E', 0.35); flame(iso, x, y, 1.55, 0.7, t); }
+  },
+});
+
+// ======================================================= CYBERPUNK (built on the Office)
+deriveWorld('office', {
+  id: 'cyber', name: 'Cyberpunk', tag: 'Neo-Mango, sector 7', accent: '#FF2E97',
+  names: { news: 'Netfeed', charts: 'Data den', lab: 'Chop lab', council: 'Syndicate', trading: 'Black market', vault: 'Crypto vault', control: 'ICE wall', lounge: 'Noodle bar', quarters: 'Capsule pods' },
+  grade: (h, s, l) => { if (s > 0.42) { const to = [300, 186, 265, 330].reduce((b, c) => Math.abs(((c - h + 540) % 360) - 180) < Math.abs(((b - h + 540) % 360) - 180) ? c : b); return [to, 0.95, l < 0.5 ? l * 0.62 + 0.04 : Math.min(0.62, l)]; } return [hueTo(h, 255, 0.85), Math.max(0.12, s * 0.6), l > 0.5 ? 0.1 + (l - 0.5) * 0.4 : l * 0.38 + 0.04]; },
+  night: 'rgba(30,0,60,.45)', dusk: 'rgba(120,20,120,.2)',
+  sky(g, iso, st, t, w, h) {
+    skyGrad(g, w, h, [[0, '#07020F'], [0.5, '#14062A'], [1, '#2A0A3A']]);
+    // a smoggy glow on the horizon and a skyline of neon towers in three layers
+    const top = iso.P(HQ_L.W / 2, -this.margin - 1, 0)[1], k = clamp(iso.zoom, 0.18, 2.6);
+    const gr = g.createLinearGradient(0, top - 140 * k, 0, top + 120 * k); gr.addColorStop(0, 'rgba(255,46,151,0)'); gr.addColorStop(1, 'rgba(255,46,151,.25)'); g.fillStyle = gr; g.fillRect(0, top - 140 * k, w, 260 * k);
+    st._cy = st._cy || [0, 1, 2].map(L => { const R = rng(700 + L), out = []; for (let x = -200; x < 2400; x += 30 + R() * 50) out.push({ x, w: 26 + R() * 46, h: (60 + R() * 180) * (1 - L * 0.22), sign: R() < 0.35 ? ['#FF2E97', '#00F0FF', '#FFE600', '#9D4DFF'][Math.floor(R() * 4)] : null, s: R() }); return out; });
+    st._cy.forEach((layer, L) => { const par = 0.15 + L * 0.2, base = top + (60 - L * 30) * k, col = ['#1A0B2E', '#120822', '#0A0516'][L];
+      const span = 2600 * k * 0.6; for (const b of layer) { const x = (((b.x + 200) * k * 0.6 + iso.ox * par) % span + span) % span - 120 * k; if (x < -100 || x > w + 100) continue; const bw = b.w * k * 0.6, bh = b.h * k; g.fillStyle = col; g.fillRect(x, base - bh, bw, bh + 400); g.fillStyle = 'rgba(0,240,255,.35)'; for (let yy = base - bh + 6 * k; yy < base; yy += 9 * k) for (let xx = x + 3 * k; xx < x + bw - 3 * k; xx += 7 * k) if (Math.sin(xx * 13.1 + yy * 7.7 + b.s * 50) > 0.55) g.fillRect(xx, yy, 2.5 * k, 3 * k);
+        if (b.sign) { const on = Math.sin(t * 3 + b.s * 20) > -0.85; g.fillStyle = on ? b.sign : 'rgba(80,40,90,.6)'; g.shadowColor = b.sign; g.shadowBlur = on ? 12 : 0; g.fillRect(x + bw * 0.2, base - bh - 14 * k, bw * 0.6, 8 * k); g.shadowBlur = 0; } } });
+    // flying cars in lanes
+    for (let i = 0; i < 6; i++) { const lane = h * (0.12 + (i % 3) * 0.07), sp = 40 + i * 13, x = ((t * sp + i * 300) % (w + 200)) - 100, dir = i % 2 ? 1 : -1, px = dir > 0 ? x : w - x; g.fillStyle = '#2A1840'; g.fillRect(px - 9, lane - 3, 18, 6); g.fillStyle = dir > 0 ? '#FF3B5C' : '#FFFFFF'; g.fillRect(px + (dir > 0 ? -10 : 8), lane - 1, 3, 2); g.fillStyle = dir > 0 ? '#FFFFFF' : '#FF3B5C'; g.fillRect(px + (dir > 0 ? 8 : -10), lane - 1, 3, 2); }
+  },
+  plinth(iso) {
+    const b = slab(iso, this, '#1A1426', '#0C0A14', { left: '#0A0812', right: '#120E1C' });
+    tiles(iso, b.x, b.y, b.w, b.d, '#1C1630', 'rgba(0,240,255,.12)', 1.5, { vary: 0.05, lw: 2 });
+    const m = this.margin; iso.onFloor(-m, -m, 0.004, g => { g.strokeStyle = 'rgba(255,46,151,.8)'; g.lineWidth = 5; g.strokeRect(12, 12, (HQ_L.W + 2 * m) * 100 - 24, (HQ_L.D + 2 * m) * 100 - 24); });
+  },
+  scenery() {
+    const out = [], m = this.margin, W = HQ_L.W, D = HQ_L.D, add = (x, y, f, draw) => out.push({ x, y, f, draw });
+    const sign = (iso, x, y, word, c) => { iso.cyl(x, y, 0, 0.06, 2.4, '#2A2438'); iso.box(x - 0.9, y - 0.05, 2.4, 1.8, 0.1, 0.7, '#120E1C', { top: '#1C1630' }); iso.onWall('n', x - 0.9, y + 0.051, 3.1, g => { g.fillStyle = c; g.shadowColor = c; g.shadowBlur = 18; g.font = `800 44px ${FONT}`; g.textAlign = 'center'; g.fillText(word, 90, 52); g.shadowBlur = 0; g.strokeStyle = c; g.lineWidth = 3; g.strokeRect(6, 6, 168, 58); }); };
+    for (const [x, y, wd, c] of [[6, D + 0.6, 'ラーメン', '#FF2E97'], [18, D + 0.6, 'MANGO', '#00F0FF'], [30, D + 0.6, '24/7', '#FFE600']]) add(x, y, [x - 1, y - 0.2, 2, 0.4], iso => sign(iso, x, y, wd, c));
+    for (const [x, y] of [[W + 0.5, 5], [W + 0.5, 15], [W + 0.5, 24]]) add(x, y, [x - 0.3, y - 0.3, 0.6, 0.6], iso => { iso.cyl(x, y, 0, 0.12, 3, '#2A2438'); iso.box(x - 0.15, y - 0.15, 3, 0.3, 0.3, 0.15, '#00F0FF', { top: '#9FFFFF' }); });
+    void m; return out;
+  },
+  ambient(iso, st, t, dt) {
+    if (st.calm) return;
+    // holograms over the Syndicate table and a scrolling glitch line through the halls
+    const [cx, cy] = iso.P(TABLE[0], TABLE[1], 2.6), g = iso.g, k = iso.zoom; g.save(); g.globalCompositeOperation = 'lighter'; g.strokeStyle = `rgba(0,240,255,${0.5 + 0.2 * Math.sin(t * 7)})`; g.lineWidth = 1.5 * k; for (let i = 0; i < 4; i++) { g.beginPath(); g.ellipse(cx, cy - i * 8 * k, (34 - i * 6) * k, (12 - i * 2) * k, t * 0.7 + i, 0, 7); g.stroke(); } g.restore();
+    st.cyb = (st.cyb ?? 0) + dt; if (Math.sin(t * 0.7) > 0.97) { g.fillStyle = 'rgba(255,46,151,.07)'; g.fillRect(0, (t * 300) % iso.h, iso.w, 6); }
+  },
+});
+
+// ======================================================= MARS (built on the Starship)
+deriveWorld('space', {
+  id: 'mars', name: 'Mars', tag: 'Mango Base, Jezero Crater', accent: '#FF7A3D',
+  names: { news: 'Comms dish', charts: 'Survey room', lab: 'Greenhouse', council: 'Base command', trading: 'Supply depot', vault: 'Ore vault', control: 'Life support', lounge: 'Rec dome', quarters: 'Bunk modules' },
+  grade: (h, s, l) => (h > 150 && h < 260) ? [hueTo(h, 22, 0.85), Math.min(1, s * 1.05), l * 0.95 + 0.03] : (h >= 260 && h < 330) ? [hueTo(h, 350, 0.6), s * 0.8, l] : s < 0.22 ? [18, Math.max(s, 0.14), l * 1.02 + 0.03] : [h, s, l],
+  night: 'rgba(40,20,40,.55)', dusk: 'rgba(120,80,140,.25)',
+  sky(g, iso, st, t, w, h) {
+    const e = hqEnv(st);
+    skyGrad(g, w, h, e.night ? [[0, '#0E0814'], [1, '#2A1420']] : e.dusk ? [[0, '#5A6A9A'], [0.6, '#C0907A'], [1, '#E0A070']] : [[0, '#C9805A'], [0.6, '#E0A57A'], [1, '#F0C49A']]);
+    if (e.night) { stars(g, st, w, h * 0.7, 90, 0.03, t, 71); }
+    // a small pale sun (or blue sunset) and the two moons, Phobos fast and Deimos slow
+    const sx = w * 0.78 + iso.ox * 0.04, sy = h * 0.15; if (!e.night) { const gr = g.createRadialGradient(sx, sy, 0, sx, sy, 60); gr.addColorStop(0, e.dusk ? 'rgba(170,200,255,.9)' : 'rgba(255,245,225,.9)'); gr.addColorStop(1, 'rgba(255,245,225,0)'); g.fillStyle = gr; g.fillRect(sx - 60, sy - 60, 120, 120); }
+    g.fillStyle = '#8A7A6E'; g.beginPath(); g.arc(w * (0.1 + ((t * 0.01) % 0.8)), h * 0.1, 6, 0, 7); g.fill(); g.fillStyle = '#A2948A'; g.beginPath(); g.arc(w * 0.35 + iso.ox * 0.02, h * 0.07, 3.5, 0, 7); g.fill();
+    // crater rim mountains
+    const k = clamp(iso.zoom, 0.18, 2.6), top = iso.P(HQ_L.W / 2, -this.margin - 2, 0)[1];
+    for (const [i, col, par] of [[0, e.night ? '#2A1418' : '#A85A3A', 0.25], [1, e.night ? '#1E0E12' : '#8E4A30', 0.45]]) { const base = top + (24 + i * 34) * k; g.fillStyle = col; g.beginPath(); g.moveTo(-10, h); for (let x = -10; x <= w + 10; x += 10) { const u = (x - iso.ox * par) / k; g.lineTo(x, base - (Math.abs(Math.sin(u * 0.003 + i * 2)) * 50 + Math.sin(u * 0.02) * 6) * k); } g.lineTo(w + 10, h); g.closePath(); g.fill(); }
+    g.fillStyle = e.night ? 'rgba(40,20,30,.3)' : 'rgba(220,150,110,.25)'; g.fillRect(0, top + 40 * k, w, h);
+  },
+  plinth(iso) {
+    const b = slab(iso, this, '#B5613A', '#6E3420', { left: '#5E2C1A', right: '#7A3A24' });
+    speckle(iso, b.x, b.y, b.w, b.d, ['#A5552F', '#C4703F', '#9A4A2A', '#D08050'], 2600, [3, 12]);
+    iso.onFloor(b.x, b.y, 0.003, g => { const R = rng(9); for (let i = 0; i < 26; i++) { const x = R() * b.w * 100, y = R() * b.d * 100, r = 20 + R() * 60; g.strokeStyle = 'rgba(60,20,10,.25)'; g.lineWidth = 6; g.beginPath(); g.ellipse(x, y, r, r * 0.8, 0, 0, 7); g.stroke(); g.fillStyle = 'rgba(80,30,15,.15)'; g.fill(); } });
+    // a paved pad under the base
+    iso.onFloor(-0.6, -0.6, 0.004, g => { g.fillStyle = 'rgba(70,60,60,.55)'; g.fillRect(0, 0, (HQ_L.W + 1.2) * 100, (HQ_L.D + 1.2) * 100); });
+  },
+  scenery() {
+    const out = [], m = this.margin, W = HQ_L.W, D = HQ_L.D, R = rng(808), add = (x, y, f, draw) => out.push({ x, y, f, draw });
+    for (let i = 0; i < 22; i++) { const side = i % 3; const x = side === 0 ? -m + 0.6 + R() * (W + 2 * m - 1.2) : side === 1 ? -m + 0.5 + R() * (m - 1.2) : W + 0.9 + R() * (m - 1.4), y = side === 0 ? -m + 0.5 + R() * (m - 1.2) : -m + 0.6 + R() * (D + 2 * m - 1.2); add(x, y, [x - 0.4, y - 0.4, 0.8, 0.8], iso => rock(iso, x, y, 0.8 + R() * 0.6, '#8E4A30')); }
+    // habitat domes, a rover and a comms dish
+    for (const [x, y, r] of [[-m + 1.8, D * 0.35, 1.5], [-m + 1.8, D * 0.78, 1.2]]) add(x, y, [x - r, y - r, 2 * r, 2 * r], iso => { iso.cyl(x, y, 0, r, 0.3, '#C9C2BA', { top: '#D8D2CA' }); iso.ball(x, y, 0.3, r * 0.95, 'rgba(200,230,255,.45)', { hi: 0.2 }); iso.glow(x, y, 0.8, r * 0.7, '#7CFF9E', 0.25); });
+    add(W + 2, D + 2, [W + 1.2, D + 1.4, 1.8, 1.2], iso => { const x = W + 1.2, y = D + 1.4; iso.box(x, y, 0.35, 1.6, 1, 0.45, '#E8E2DA', { top: '#F4F0EA' }); for (const [dx, dy] of [[0.15, 0], [1.3, 0], [0.15, 0.85], [1.3, 0.85]]) iso.cyl(x + dx, y + dy, 0, 0.2, 0.36, '#3A3A3A'); iso.box(x + 1.1, y + 0.3, 0.8, 0.12, 0.12, 0.6, '#8A8A8A'); iso.box(x + 0.9, y + 0.2, 1.4, 0.5, 0.4, 0.06, '#2A4A8A', { top: '#3A6AC0' }); });
+    add(W + 2.2, -m + 1.8, [W + 1.6, -m + 1.2, 1.2, 1.2], iso => { const x = W + 2.2, y = -m + 1.8; iso.cyl(x, y, 0, 0.12, 1.6, '#9A9A9A'); iso.cone(x, y, 1.6, 0.9, 0.5, '#E8E2DA'); iso.ball(x, y, 2.2, 0.08, '#FF4D6D'); });
+    return out;
+  },
+  ambient(iso, st, t, dt) {
+    if (st.calm) return;
+    // a dust devil wandering across the plain
+    st.dd = st.dd || { x: -4, y: HQ_L.D + 2 }; st.dd.x += dt * 0.8; if (st.dd.x > HQ_L.W + 6) st.dd.x = -6;
+    const g = iso.g, k = iso.zoom; for (let i = 0; i < 10; i++) { const z = i * 0.35, [cx, cy] = iso.P(st.dd.x + Math.sin(t * 4 + i) * 0.1 * i * 0.3, st.dd.y, z); g.strokeStyle = `rgba(200,130,90,${0.35 - i * 0.025})`; g.lineWidth = 2 * k; g.beginPath(); g.ellipse(cx, cy, (6 + i * 3) * k, (2.5 + i) * k, 0, t * 6 + i, t * 6 + i + 4.5); g.stroke(); }
+  },
+});
+
+// ---------- people ----------
+{
+  const base = (id, over) => { const B = CAST[id]; return { ...B, ...over, member: { ...B.member, ...(over.member || {}) } }; };
+  CAST.underwater = base('island', {
+    bot(a, L) { return { shirt: a.color, pants: shade(a.color, -0.4), shoes: '#1A2A3A', sleeve: shade(a.color, -0.1), belt: '#1A2A3A', helmet: '#9FE8FF', face: 'visor', badge: 2, prop: L.v === 1 ? 'fish' : null, hat: a.big ? 'captain' : null, hatCol: '#0E5F8C' }; },
+    member: { surfer: { shirt: '#4EA8FF', pants: '#1A3A6A', face: 'goggles', prop: 'surfboard', helmet: '#9FE8FF' }, rocket: { shirt: '#FF7A45', pants: '#3A2A22', face: 'grin', prop: 'fish', helmet: '#9FE8FF' }, shield: { shirt: '#9AA6B8', pants: '#2A3A4A', hat: 'knight', hatCol: '#5A8A9A', prop: 'shield', face: 'hidden', armor: 1 }, doubt: { shirt: '#B48CFF', pants: '#3A2A5A', skin: '#8FD6C8', face: 'alien', hat: 'alien', hair: 0 } },
+    chair: { shirt: '#FF9F1C', pants: '#0E5F8C', cape: '#1C8FB8', hat: 'crown', face: 'beard', hairCol: '#EDEDED', prop: 'staff' }, sign: 'surf',
+  });
+  CAST.castle = base('village', {
+    bot(a, L) { return { shirt: a.color, pants: '#3A3A44', shoes: '#2A2A2A', sleeve: '#B8C2CE', belt: '#3A2A1A', armor: L.v % 2 ? 1 : 0, hat: a.big ? 'crown' : ['knight', 'hood', null, 'knight'][L.v], hatCol: '#B8C2CE', face: L.v === 0 || L.v === 3 ? 'hidden' : 'normal', prop: L.v % 2 ? 'shield' : 'scroll' }; },
+    chair: { shirt: '#9C2B2B', pants: '#3A2A6A', cape: '#6A1E3A', hat: 'crown', face: 'beard', hairCol: '#E8C87A', prop: 'gavel' }, sign: 'wood',
+  });
+  CAST.cyber = base('office', {
+    bot(a, L) { return { shirt: '#1A1426', pants: '#120E1C', shoes: '#0A0812', sleeve: a.color, belt: a.color, face: L.v % 2 ? 'visor' : 'shades', hat: a.big ? 'headset' : ['hood', 'headset', null, 'beanie'][L.v], hatCol: a.color, hairCol: ['#FF2E97', '#00F0FF', '#FFE600', '#9D4DFF'][L.v], prop: L.v === 1 ? 'pda' : L.v === 3 ? 'coffee' : null, badge: 2 }; },
+    member: { surfer: { shirt: '#1A1426', sleeve: '#00F0FF', pants: '#120E1C', face: 'visor', hat: 'hood', hatCol: '#00F0FF', prop: 'pda' }, rocket: { shirt: '#1A1426', sleeve: '#FF2E97', pants: '#120E1C', face: 'grin', hairCol: '#FF2E97', prop: 'pda' }, doubt: { shirt: '#120E1C', pants: '#0A0812', face: 'shades', hat: 'hood', hatCol: '#9D4DFF' } },
+    chair: { shirt: '#1A1426', pants: '#120E1C', blazer: '#FF2E97', tie: '#00F0FF', hat: 'crown', face: 'shades', prop: 'gavel' }, sign: 'holo',
+  });
+  CAST.mars = base('space', {
+    bot(a, L) { return { shirt: '#E8E2DA', pants: '#C9C2BA', shoes: '#5A3A2A', sleeve: a.color, belt: a.color, helmet: '#F4F0EA', face: 'visor', badge: 2, prop: L.v === 1 ? 'wrench' : L.v === 2 ? 'pda' : null, hat: a.big ? 'captain' : null, hatCol: a.color }; },
+    chair: { shirt: '#FF7A3D', pants: '#7A3A24', belt: '#2A1A14', hat: 'captain', hatCol: '#FF7A3D', face: 'normal', prop: 'gavel', crownToo: 1, badge: 2 }, sign: 'holo',
+  });
+}
+
+// ---------- voices: the same facts, said the way each world says them ----------
+{
+  const deep = (a, b) => { const o = { ...a }; for (const [k, v] of Object.entries(b)) o[k] = v && typeof v === 'object' && !Array.isArray(v) && typeof a[k] === 'object' ? deep(a[k], v) : v; return o; };
+  VOICE.underwater = deep(VOICE.island || VOICE.office, {
+    roles: { surfer: 'Dolphin · trend', rocket: 'Swordfish · momentum', scoop: 'Sea gossip · news', shield: 'Lifeguard · risk', prof: 'Old turtle · stats', doubt: 'Octopus · contrarian' },
+    wallet: 'the treasure', phase: { news: ['Listening to the sonar…', 'Reading messages in bottles', 'Checking the current reports'], council: ['Swimming to the Pearl court', 'Bubbling this up to the court'], trade: ['Off to the kelp market', 'Diving to the depot'] },
+    asks: n => `${n} surfaces a proposal`, stamp: { APPROVED: 'FULL STEAM', OVERRULED: 'OVERRULED', REJECTED: 'SUNK', SELL: 'SURFACE', HOLD: 'HOLD' },
+    decision: s => /^no changes|nothing to change/i.test(s) ? 'Calm waters: no changes today.' : `Ship's log: ${s}`, alert: t => `Leak detected! ${t}`, report: t => `Message in a bottle: ${t}`,
+    quip: { market: s => `The tide (SPY) is ${s} today.`, sleep: ['Snoozing in a clam.', 'Floating, fast asleep.'], fluff: ['Has anyone seen my snorkel?', 'An octopus took my stapler again.', 'The pressure up here is fine, thanks.', 'Bubbles are a form of communication.'] },
+  });
+  VOICE.castle = deep(VOICE.village || VOICE.office, {
+    roles: { surfer: 'Knight · trend', rocket: 'Squire · momentum', scoop: 'Herald · news', shield: 'Royal guard · risk', prof: 'Court wizard · stats', doubt: 'Jester · contrarian' },
+    wallet: 'the royal treasury', phase: { news: ['What says the herald?', 'Reading the royal dispatches…'], council: ['To the throne room!', 'I beg an audience with the court'], trade: ['To the great bazaar', 'Summon the merchants!'] },
+    asks: n => `${n} kneels before the throne`, stamp: { APPROVED: 'BY ROYAL DECREE', OVERRULED: 'OVERRULED', REJECTED: 'BANISHED', SELL: 'TO THE GALLOWS', HOLD: 'HOLD' },
+    decision: s => /^no changes|nothing to change/i.test(s) ? 'The crown decrees: no changes this day.' : `By order of the crown: ${s}`, alert: t => `To arms! ${t}`, report: t => `Royal proclamation: ${t}`,
+    quip: { market: s => `The realm's index (SPY) stands ${s} today.`, sleep: ['Resting in the chambers.', 'The knight sleeps.'], fluff: ['Who left a catapult in the hallway?', 'The dragon is NOT a valid hedge.', 'Polishing my armor, back soon.', 'The jester shorted the moat again.'] },
+  });
+  VOICE.cyber = deep(VOICE.office, {
+    roles: { surfer: 'Netrunner · trend', rocket: 'Speed dealer · momentum', scoop: 'Info broker · news', shield: 'ICE guard · risk', prof: 'Data witch · stats', doubt: 'Rogue AI · contrarian' },
+    wallet: 'the stash', phase: { news: ['Jacking into the netfeed…', 'Scraping the data streams', 'Decrypting the earnings leak'], council: ['Taking it to the Syndicate', 'Need the Syndicate\'s sign-off'], trade: ['Hitting the black market', 'Routing the order through the proxies'] },
+    asks: n => `${n} pitches the Syndicate`, stamp: { APPROVED: 'EXECUTE', OVERRULED: 'OVERRIDE', REJECTED: 'FLATLINED', SELL: 'DUMP', HOLD: 'IDLE' },
+    decision: s => /^no changes|nothing to change/i.test(s) ? 'Status: idle. No changes.' : `> ${s}`, alert: t => `!! ICE breach: ${t}`, report: t => `Data drop: ${t}`,
+    quip: { market: s => `SPY feed reads ${s}. ${parseFloat(s) >= 0 ? 'Chrome is shining.' : 'Static on the line.'}`, sleep: ['Offline. Do not ping.', 'In standby mode.'], fluff: ['My cyberdeck needs a defrag.', 'Ramen again? Ramen again.', 'Someone spoofed my retinas.', 'Rain never stops in sector 7.'] },
+  });
+  VOICE.mars = deep(VOICE.space || VOICE.office, {
+    roles: { surfer: 'Rover pilot · trend', rocket: 'Rocket engineer · momentum', scoop: 'Comms officer · news', shield: 'Safety chief · risk', prof: 'Geologist · stats', doubt: 'The Martian · contrarian' },
+    wallet: 'base supplies', phase: { news: ['Pinging Earth for news… (14-minute delay)', 'Reading the relay from orbit'], council: ['Heading to Base command', 'Requesting a go/no-go'], trade: ['Off to the supply depot', 'Loading the rover'] },
+    asks: n => `${n} requests a go/no-go`, stamp: { APPROVED: 'GO', OVERRULED: 'OVERRIDE', REJECTED: 'NO-GO', SELL: 'JETTISON', HOLD: 'HOLD' },
+    decision: s => /^no changes|nothing to change/i.test(s) ? 'Sol report: all systems nominal, no changes.' : `Sol report: ${s}`, alert: t => `Dust storm warning: ${t}`, report: t => `Relay from Earth: ${t}`,
+    quip: { market: s => `Earth's market (SPY) is ${s} today.`, sleep: ['In the bunk module.', 'Sleeping through the night cycle.'], fluff: ['Potatoes again for dinner.', 'Found a cool rock. It\'s red.', 'The dust gets everywhere.', 'Sunsets here are blue, which is weird.'] },
+  });
+}
+// ---------- the Council quarters: each new world reuses its base world's beds, regraded ----------
+for (const id of ['underwater', 'castle', 'cyber', 'mars']) { const th = HQT[id], B = HQT[th.base]; th.accents.quarters = th.grade(B.accents.quarters || '#8FA2FF'); }
 
 // ===================================================================
 // Mango HQ: your bots as little workers in a themed isometric world, and the Council that votes
@@ -7113,23 +7394,29 @@ function weatherOf(st) {
   const th = st.theme.id, spy = st.data?.market?.spy ?? 0, season = seasonOf();
   let k = spy <= -2 ? 'storm' : spy <= -1 ? (season === 'winter' && th !== 'island' ? 'snow' : 'rain') : spy >= 1 ? 'sun' : season === 'fall' ? 'leaves' : season === 'spring' ? 'petals' : season === 'winter' && th !== 'island' ? 'flurry' : 'clear';
   if (th === 'space') k = spy <= -1 ? 'meteors' : 'clear';
+  if (th === 'mars') k = spy <= -2 ? 'duststorm' : spy <= -1 ? 'dust' : spy >= 1 ? 'sun' : 'drift';
+  if (th === 'underwater') k = spy <= -1 ? 'murk' : spy >= 1 ? 'sun' : 'clear';
+  if (th === 'cyber') k = spy <= -2 ? 'storm' : spy <= -1 ? 'rain' : spy >= 1 ? 'clear' : 'drizzle';
   return { k, season, spy };
 }
-const WX_LABEL = { storm: '⛈ Storm: the market is down hard', rain: '🌧 Rain: the market is down', snow: '❄️ Snow: the market is down', sun: '☀️ Sunny: the market is up', leaves: '🍂 Fall', petals: '🌸 Spring', flurry: '❄️ Winter', clear: '', meteors: '☄️ Meteor shower: the market is down' };
+const WX_LABEL = { storm: '⛈ Storm: the market is down hard', rain: '🌧 Rain: the market is down', snow: '❄️ Snow: the market is down', sun: '☀️ Sunny: the market is up', leaves: '🍂 Fall', petals: '🌸 Spring', flurry: '❄️ Winter', clear: '', meteors: '☄️ Meteor shower: the market is down', dust: '🌪 Dust: the market is down', duststorm: '🌪 Dust storm: the market is down hard', drift: '', murk: '🌫 Murky water: the market is down', drizzle: '' };
 function drawWeather(p, dt) {
   const st = p.hq, g = st.iso.g, W = st.iso.w, H = st.iso.h; if (!LIFE.get().weather || st.calm || st.photoClean) { $('#hq-wx', p.body)?.classList.add('hidden'); if (st.wx) st.wx.k = null; return; }
   const wx = st.wx = st.wx || { k: null, parts: [], flash: 0 };
   const cur = weatherOf(st); if (cur.k !== wx.k) { wx.k = cur.k; wx.parts = []; const el = $('#hq-wx', p.body); if (el) { const l = WX_LABEL[cur.k]; el.classList.toggle('hidden', !l); el.textContent = l; } }
-  const want = { storm: 220, rain: 140, snow: 110, flurry: 45, leaves: 26, petals: 30, meteors: 6, sun: 0, clear: 0 }[wx.k] || 0;
+  const want = { storm: 220, rain: 140, drizzle: 60, snow: 110, flurry: 45, leaves: 26, petals: 30, meteors: 6, dust: 90, duststorm: 220, drift: 30, murk: 70, sun: 0, clear: 0 }[wx.k] || 0;
   while (wx.parts.length < want) wx.parts.push({ x: Math.random() * W, y: Math.random() * H - H, v: 0.6 + Math.random() * 0.8, r: Math.random() * 6.28, s: Math.random() });
   g.save();
   // a seasonal wash so each season feels a little different
-  const wash = { winter: 'rgba(160,190,255,.06)', fall: 'rgba(255,150,60,.05)', spring: 'rgba(255,190,220,.04)', summer: 'rgba(255,230,140,.04)' }[cur.season];
+  const wash = ['underwater', 'cyber', 'mars', 'space'].includes(st.theme.id) ? null : { winter: 'rgba(160,190,255,.06)', fall: 'rgba(255,150,60,.05)', spring: 'rgba(255,190,220,.04)', summer: 'rgba(255,230,140,.04)' }[cur.season];
   if (wash && st.theme.id !== 'space') { g.fillStyle = wash; g.fillRect(0, 0, W, H); }
   if (wx.k === 'storm' || wx.k === 'rain') { g.fillStyle = `rgba(30,40,70,${wx.k === 'storm' ? 0.18 : 0.1})`; g.fillRect(0, 0, W, H); }
+  if (wx.k === 'duststorm' || wx.k === 'dust') { g.fillStyle = `rgba(190,100,60,${wx.k === 'duststorm' ? 0.22 : 0.1})`; g.fillRect(0, 0, W, H); }
+  if (wx.k === 'murk') { g.fillStyle = 'rgba(20,60,60,.18)'; g.fillRect(0, 0, W, H); }
   if (wx.k === 'sun') { const gr = g.createRadialGradient(W * 0.85, -H * 0.1, 10, W * 0.85, -H * 0.1, H * 0.9); gr.addColorStop(0, 'rgba(255,230,150,.28)'); gr.addColorStop(1, 'rgba(255,230,150,0)'); g.fillStyle = gr; g.fillRect(0, 0, W, H); }
   for (const q of wx.parts) {
-    if (wx.k === 'rain' || wx.k === 'storm') { q.y += (520 + q.s * 280) * dt; q.x -= 90 * dt; g.strokeStyle = 'rgba(190,210,255,.45)'; g.lineWidth = 1.2; g.beginPath(); g.moveTo(q.x, q.y); g.lineTo(q.x - 4, q.y + 14); g.stroke(); }
+    if (wx.k === 'dust' || wx.k === 'duststorm' || wx.k === 'drift' || wx.k === 'murk') { const sp = wx.k === 'duststorm' ? 260 : wx.k === 'dust' ? 120 : 40; q.x += (sp + q.s * sp * 0.5) * dt; q.y += Math.sin(st.t + q.r) * 10 * dt + (wx.k === 'murk' ? -8 * dt : 4 * dt); g.fillStyle = wx.k === 'murk' ? `rgba(200,240,230,${0.15 + q.s * 0.2})` : `rgba(230,150,100,${0.25 + q.s * 0.35})`; g.beginPath(); g.arc(q.x, q.y, 1 + q.s * (wx.k === 'murk' ? 2.5 : 1.8), 0, 7); g.fill(); if (q.x > W + 20) { q.x = -20; q.y = Math.random() * H; } continue; }
+    if (wx.k === 'rain' || wx.k === 'storm' || wx.k === 'drizzle') { q.y += (520 + q.s * 280) * dt; q.x -= 90 * dt; g.strokeStyle = st.theme.id === 'cyber' ? (q.s > 0.5 ? 'rgba(255,46,151,.45)' : 'rgba(0,240,255,.4)') : 'rgba(190,210,255,.45)'; g.lineWidth = 1.2; g.beginPath(); g.moveTo(q.x, q.y); g.lineTo(q.x - 4, q.y + 14); g.stroke(); }
     else if (wx.k === 'snow' || wx.k === 'flurry') { q.y += (40 + q.s * 40) * dt; q.x += Math.sin(st.t * 1.3 + q.r) * 20 * dt; g.fillStyle = 'rgba(255,255,255,.85)'; g.beginPath(); g.arc(q.x, q.y, 1.2 + q.s * 2, 0, 7); g.fill(); }
     else if (wx.k === 'leaves' || wx.k === 'petals') { q.y += (34 + q.s * 30) * dt; q.x += (Math.sin(st.t + q.r) * 40 + 15) * dt; q.r += dt * (1 + q.s); g.save(); g.translate(q.x, q.y); g.rotate(q.r); g.fillStyle = wx.k === 'leaves' ? ['#D9822B', '#C0392B', '#E8B04A', '#8E5A2B'][Math.floor(q.s * 4)] : ['#FFB7CE', '#FFD1DC', '#FFFFFF'][Math.floor(q.s * 3)]; g.beginPath(); g.ellipse(0, 0, 5, 2.6, 0, 0, 7); g.fill(); g.restore(); }
     else if (wx.k === 'meteors') { q.y += 300 * dt; q.x += 420 * dt; g.strokeStyle = 'rgba(255,200,140,.8)'; g.lineWidth = 2; g.beginPath(); g.moveTo(q.x, q.y); g.lineTo(q.x - 40, q.y - 28); g.stroke(); }
