@@ -2,6 +2,8 @@
 
 A paper trading app for iPhone with real market prices. It runs from the Home Screen and is built on Node and Postgres.
 
+**⬇️ [Download the latest version](https://github.com/MangoMods-code/Mango-PT-App/releases/latest)** · Current: [V3.6.0, Leaderboard 2](https://github.com/MangoMods-code/Mango-PT-App/releases/tag/V3.6.0) · [All releases](https://github.com/MangoMods-code/Mango-PT-App/releases)
+
 Trade stocks, ETFs and crypto with practice money. You can also put strategies to work as bots, let Autopilot run a mix of them, and watch it all happen in **Mango HQ**: a small isometric world where your bots walk around and a Council of up to ten members votes on every trade. If you connect an Alpaca account, the same app can trade it, on paper or with real money, on a separate side with its own safeguards.
 
 ---
@@ -85,7 +87,7 @@ Trade stocks, ETFs and crypto with practice money. You can also put strategies t
 
 ## Releases
 
-Every version is on the repo's **Releases** page with what changed and a ready-to-run zip (`server.js`, `index.html`, `package.json`, `README.md` and an `.env.example` listing the settings). Download it, put it on any Node 20+ host with Postgres, fill in the variables and run `npm install` then `npm start`.
+Every version is on the repo's **[Releases](https://github.com/MangoMods-code/Mango-PT-App/releases)** page with what changed and a ready-to-run zip (`server.js`, `index.html`, `package.json`, `README.md` and an `.env.example` listing the settings). Download it, put it on any Node 20+ host with Postgres, fill in the variables and run `npm install` then `npm start`.
 
 ## Running it
 
