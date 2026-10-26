@@ -291,6 +291,18 @@ const MIGRATIONS = [
   },
   // 7: price improvement on each fill
   async c => { await c.query('alter table trd add column if not exists imp numeric'); },
+  // 8: cash-account violations, IRA and Roth IRA wallets
+  async c => {
+    await c.query(`
+      alter table wallets add column if not exists restricted_until timestamptz;
+      alter table wallets add column if not exists ira_opened timestamptz;
+      alter table wallets add column if not exists ira_basis numeric not null default 0;
+      create table if not exists cashfund(id serial primary key, wid int not null, sym text not null, qty numeric not null, amount numeric not null, settles timestamptz not null, trd_id int, ts timestamptz not null default now());
+      create index if not exists cashfund_w on cashfund(wid, sym);
+      create table if not exists cashviol(id serial primary key, wid int not null, kind text not null, sym text, note text, trd_id int, ts timestamptz not null default now());
+      create table if not exists contrib(id serial primary key, wid int not null, year int not null, amount numeric not null, kind text not null, note text, penalty numeric, tax numeric, ts timestamptz not null default now());
+    `);
+  },
 ];
 
 async function migrate() {
@@ -310,7 +322,7 @@ const DEF = {
   // trading
   feeFlat: 0, feePct: 0, slippage: 0, maxPos: 0, reservePct: 0, wholeShares: false,
   closedTrading: 'fill', rthOrders: true,
-  f_mwcb: true, f_luld: true, fracRules: true, priceImprove: true, sanity: true, san_far: true, san_big: true, san_open: true, san_earn: true, san_thin: true, autoSL: 0, autoTP: 0, defaultBuy: 0,
+  cashRules: true, f_mwcb: true, f_luld: true, fracRules: true, priceImprove: true, sanity: true, san_far: true, san_big: true, san_open: true, san_earn: true, san_thin: true, autoSL: 0, autoTP: 0, defaultBuy: 0,
   confirmStyle: 'hold', confirmBuy: false, confirmSell: true, cashAPY: 0, startBalance: 10000,
   // notifications
   pushAlerts: true, pushOrders: true, notifySummary: true, notifyMoves: true, moveThreshold: 5,
@@ -1394,9 +1406,13 @@ async function accountInfo(wid, { c = pool, w = null, pos = null, exclude = null
     return { profile: 'alpaca', acct: w.acct, broker: true, cash, settled: cash, unsettled: 0, nextSettle: null, pendingDeposits: 0, holdsCash: 0, holdsShares: {}, lmv, lmvMarginable: lmvM, equity: +a.equity || equity, debit, maint: +a.maintenance_margin || maint, excess: (+a.equity || equity) - (+a.maintenance_margin || maint),
       bp: +a.buying_power || 0, bpCrypto: +a.non_marginable_buying_power || Math.max(0, cash), withdrawable: +a.cash_withdrawable || 0, marginOn: +a.multiplier > 1, marginRate: 0, accrued: 0, call: 0, daytrades: +a.daytrade_count || 0, status: a.status };
   }
+  // a cash account may spend money from sales that haven't settled (selling what it buys too soon is a violation),
+  // unless it's restricted to settled cash for 90 days, or the rule is switched off
+  const restricted = real && w.acct === 'cash' && tsMs(w.restricted_until) > Date.now() ? tsMs(w.restricted_until) : null;
   if (!real) { bp = bpCrypto = Math.max(0, cash); withdrawable = Math.max(0, cash); }
-  else if (w.acct === 'cash') { bp = bpCrypto = Math.max(0, cash - unsettled - holds.cash); withdrawable = bp; }
-  else if (w.acct === 'margin' && equity >= 2000) {
+  else if (w.acct === 'cash') { const settledOnly = restricted || S.cashRules === false; bp = bpCrypto = Math.max(0, cash - (settledOnly ? unsettled : 0) - holds.cash); withdrawable = Math.max(0, cash - unsettled - holds.cash); }
+  else if (IRA_ACCTS.includes(w.acct)) { bp = bpCrypto = Math.max(0, avail); withdrawable = Math.max(0, cash - unsettled - holds.cash); } // IRAs: no borrowing; unsettled sale money can be reused (limited margin)
+  else if (w.acct === 'margin' && equity >= 2000 && !isMinor()) {
     marginOn = true;
     const regT = lmvM + 2 * avail, maintCap = (equity - maint) / (prof.maintBase / 100);
     const cap = w.margin_max == null ? Infinity : avail + +w.margin_max;
@@ -1404,7 +1420,7 @@ async function accountInfo(wid, { c = pool, w = null, pos = null, exclude = null
     withdrawable = debit > 0 ? 0 : Math.max(0, Math.min(cash - unsettled - holds.cash, equity - maint));
   } else { bp = bpCrypto = Math.max(0, avail); withdrawable = Math.max(0, cash - unsettled - holds.cash); }
   return {
-    profile: prof.key, acct: w.acct, cash, settled: cash - unsettled, unsettled, nextSettle, pendingDeposits: pending, holdsCash: holds.cash, holdsShares: holds.shares,
+    profile: prof.key, acct: w.acct, restricted, cash, settled: cash - unsettled, unsettled, nextSettle, pendingDeposits: pending, holdsCash: holds.cash, holdsShares: holds.shares,
     lmv, lmvMarginable: lmvM, equity, debit, maint, excess: equity - maint, bp, bpCrypto, withdrawable, marginOn,
     marginRate: debit > 0 ? marginRate(prof, debit) : marginRate(prof, 0), accrued: +w.margin_accrued || 0, call: +w.call_amt > 0 ? +w.call_amt : 0,
   };
@@ -1489,6 +1505,9 @@ async function execTrade(wid, sym, side, o = {}) {
     const pos = await positions(wid, c), acct = await accountInfo(wid, { c, w, pos, exclude: o.limId });
     const pl = await planOrder(c, w, pos, acct, sym, side, o);
     const p = pos.find(x => x.sym === sym), prof = profOf(w);
+    // a cash wallet selling shares bought with money that hasn't settled yet: a good faith violation (bots skip it)
+    const gfv = side === 'sell' ? await gfvRisk(c, w, sym, pl.qty) : null;
+    if (gfv && o.bot) fail(`Skipped: selling ${sym} now would be a good faith violation (it was bought with money that settles ${new Date(gfv.settles).toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'long' })}).`);
     const newCash = round(pl.cashAfter, 6);
     let closed = false;
     await c.query('update wallets set cash=$1 where id=$2', [newCash, wid]);
@@ -1513,14 +1532,17 @@ async function execTrade(wid, sym, side, o = {}) {
     let tax = null;
     if (side === 'buy') await addLot(c, wid, sym, pl.qty, (pl.notional + pl.fees.total) / pl.qty, t.id);
     else tax = await consumeLots(c, w, sym, pl.qty, pl.notional - pl.fees.total, t.id);
+    if (side === 'buy') await noteUnsettledBuy(c, w, acct, sym, pl.qty, pl.notional + pl.fees.total, t.id);
+    let gfvCount = null; if (gfv) gfvCount = await recordGfv(c, w, sym, gfv, t.id);
     if (pl.settle) await c.query('insert into settle(wid,amount,settles,trd_id) values($1,$2,$3,$4)', [wid, round(pl.notional - pl.fees.total, 6), new Date(pl.settle), t.id]);
     return {
       id: t.id, ts: tsMs(t.ts), wid, sym, side, qty: pl.qty, price: pl.px, fee: pl.fees.total, fees: pl.fees.lines, pnl: pl.pnl, pnlPct: pl.pnl != null && p ? pl.pnl / (p.avg * pl.qty) * 100 : null,
       cash: newCash, closed, bid: pl.quote.bid, ask: pl.quote.ask, quoteSrc: pl.quote.src, sess: pl.sess, settle: pl.settle, via: pl.via, borrow: pl.borrow, tax, profile: prof.key,
-      stale: prices.get(sym)?.src === 'cache', improve: pl.improve || 0, imp: pl.imp || 0,
+      stale: prices.get(sym)?.src === 'cache', improve: pl.improve || 0, imp: pl.imp || 0, gfv: gfvCount,
     };
   });
   for (const cb of fillCbs) try { await cb(fill); } catch (e) { warn('after trade', e.message); }
+  if (fill.gfv) notify('order', `Good faith violation · ${sym}`, `You sold ${sym} before the money you bought it with settled. That's ${fill.gfv} in the last 12 months.${fill.gfv >= 3 ? ' This wallet can only use settled cash for the next 90 days.' : ' At 3, the wallet is restricted to settled cash for 90 days.'}`, { wid, sym, url: '/#/account' }).catch(() => {});
   return fill;
 }
 // The original simple engine, kept for wallets on practice rules.
@@ -2321,6 +2343,160 @@ async function analytics(wid) {
     whys: trades.reduce((o, t) => (o[t.why] = (o[t.why] || 0) + 1, o), {}),
   };
 }
+// =====================================================================
+// Account types and the rules that come with them
+// - Your profile: date of birth (asked once), filing status, income. Real ages drive the age rules.
+// - Cash accounts: you can buy with money from a sale that hasn't settled, but selling that new position before
+//   the money settles is a good faith violation. 3 in 12 months restricts the wallet to settled cash for 90 days.
+// - IRA and Roth IRA wallets: a yearly contribution limit shared across all of them, no margin or shorting,
+//   no taxes on trades inside, withdrawals with the 10% early penalty, required withdrawals for traditional IRAs.
+// Figures for 2026 (IRS Notice 2025-67; IRS RMD FAQs).
+// =====================================================================
+const RET_RULES = {
+  2026: { limit: 7500, catchUp: 1100, roth: { single: [153000, 168000], hoh: [153000, 168000], joint: [242000, 252000], sep: [0, 10000] } },
+  2025: { limit: 7000, catchUp: 1000, roth: { single: [150000, 165000], hoh: [150000, 165000], joint: [236000, 246000], sep: [0, 10000] } },
+};
+const retRules = y => RET_RULES[y] || RET_RULES[Math.max(...Object.keys(RET_RULES).map(Number).filter(k => k <= y))] || RET_RULES[2026];
+// IRS Uniform Lifetime Table (2022 onward): the divisor for required minimum distributions
+const ULT = { 72: 27.4, 73: 26.5, 74: 25.5, 75: 24.6, 76: 23.7, 77: 22.9, 78: 22.0, 79: 21.1, 80: 20.2, 81: 19.4, 82: 18.5, 83: 17.7, 84: 16.8, 85: 16.0, 86: 15.2, 87: 14.4, 88: 13.7, 89: 12.9, 90: 12.2, 91: 11.5, 92: 10.8, 93: 10.1, 94: 9.5, 95: 8.9, 96: 8.4, 97: 7.8, 98: 7.3, 99: 6.8, 100: 6.4 };
+const IRA_ACCTS = ['ira', 'roth'];
+const isIra = w => IRA_ACCTS.includes(w?.acct);
+// ---------- profile ----------
+let PROFILE = null;
+async function loadProfile() { try { PROFILE = JSON.parse(await kvGet('profile', 'null') || 'null'); } catch (e) { PROFILE = null; } return PROFILE; }
+const profileJson = () => PROFILE ? { dob: PROFILE.dob, filing: PROFILE.filing || 'single', income: PROFILE.income ?? null, earned: PROFILE.earned ?? null, age: ageOn(), set: true } : { set: false };
+// age in whole years on a date (ET)
+function ageOn(iso = etDate()) { if (!PROFILE?.dob) return null; const [y, m, d] = PROFILE.dob.split('-').map(Number), [Y, M, D] = iso.split('-').map(Number); return Y - y - ((M < m || (M === m && D < d)) ? 1 : 0); }
+// the date someone turns 59½
+function halfAgeDate() { if (!PROFILE?.dob) return null; const [y, m, d] = PROFILE.dob.split('-').map(Number); const t = new Date(Date.UTC(y + 59, m - 1 + 6, d)); return t.toISOString().slice(0, 10); }
+const pastHalf = (iso = etDate()) => { const h = halfAgeDate(); return h ? iso >= h : false; };
+const rmdAge = () => { if (!PROFILE?.dob) return 73; return +PROFILE.dob.slice(0, 4) >= 1960 ? 75 : 73; }; // SECURE 2.0: 73 now, 75 for people born in 1960 or later
+const isMinor = () => { const a = ageOn(); return a != null && a < 18; };
+POST('/api/profile', auth, async req => {
+  const b = req.body || {}, cur = PROFILE || {};
+  const dob = b.dob !== undefined ? String(b.dob) : cur.dob;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dob || '') || Number.isNaN(Date.parse(dob + 'T12:00:00Z'))) fail('Enter your date of birth');
+  const yr = +dob.slice(0, 4), now = +etDate().slice(0, 4); if (yr < now - 110 || dob > etDate()) fail('Check your date of birth');
+  if (cur.dob && cur.dob !== dob && !b.confirmDob) fail('Changing your date of birth changes your age rules. Confirm to change it.');
+  const filing = ['single', 'joint', 'hoh', 'sep'].includes(b.filing) ? b.filing : cur.filing || 'single';
+  const money0 = v => v === null || v === '' ? null : clamp(num(v, 0), 0, 1e9);
+  PROFILE = { dob, filing, income: b.income !== undefined ? money0(b.income) : cur.income ?? null, earned: b.earned !== undefined ? money0(b.earned) : cur.earned ?? null, at: cur.at || Date.now() };
+  await kvSet('profile', JSON.stringify(PROFILE));
+  // under 18: no margin (brokers require an adult for margin); margin wallets act as cash-and-instant
+  broadcast({ t: 'evt', e: 'settings' });
+  return { profile: profileJson() };
+});
+GET('/api/profile', auth, () => ({ profile: profileJson() }));
+
+// ---------- cash accounts: good faith violations ----------
+const cashRulesOn = () => S.cashRules !== false;
+async function restrictedUntil(wid, c = pool) { const r = (await c.query('select restricted_until t from wallets where id=$1', [wid])).rows[0]; const t = tsMs(r?.t); return t && t > Date.now() ? t : null; }
+// a buy in a cash wallet paid partly with money from sales that haven't settled: remember it
+async function noteUnsettledBuy(c, w, acct, sym, qty, need, trdId) {
+  if (w.acct !== 'cash' || !cashRulesOn()) return;
+  const settledFree = acct.cash - acct.unsettled - acct.holdsCash;
+  const used = Math.min(need, need - Math.max(0, settledFree)); if (!(used > 0.005)) return;
+  // the money settles when the newest of the sales it came from settles
+  const st = (await c.query('select max(settles) t from settle where wid=$1 and settles > now()', [w.id])).rows[0];
+  if (!st?.t) return;
+  await c.query("insert into cashfund(wid,sym,qty,amount,settles,trd_id) values($1,$2,$3,$4,$5,$6)", [w.id, sym, qty * used / need, used, st.t, trdId]);
+}
+// would selling this many shares now be a good faith violation? → { qty, settles } or null
+async function gfvRisk(c, w, sym, qty) {
+  if (w?.acct !== 'cash' || !cashRulesOn() || isCrypto(sym)) return null;
+  const rows0 = (await c.query('select * from cashfund where wid=$1 and sym=$2 and settles > now() and qty > 0 order by id', [w.id, sym])).rows; if (!rows0.length) return null;
+  const pos = (await c.query('select qty from pos where wid=$1 and sym=$2', [w.id, sym])).rows[0], held = pos ? +pos.qty : 0;
+  // shares bought with unsettled money are sold last (the paid-for ones go first)
+  const risky = rows0.reduce((t, r) => t + +r.qty, 0), safe = Math.max(0, held - risky);
+  const over = qty - safe; if (over <= 1e-9) return null;
+  return { qty: Math.min(over, risky), settles: tsMs(rows0[rows0.length - 1].settles) };
+}
+async function recordGfv(c, w, sym, risk, trdId) {
+  await c.query("insert into cashviol(wid,kind,sym,note,trd_id) values($1,'gfv',$2,$3,$4)", [w.id, sym, `Sold ${+risk.qty.toFixed(6)} ${sym} bought with money that settles ${new Date(risk.settles).toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric' })}`, trdId]);
+  // use up the rows behind the shares just sold
+  let left = risk.qty; for (const r of (await c.query('select * from cashfund where wid=$1 and sym=$2 and settles > now() and qty > 0 order by id', [w.id, sym])).rows) { if (left <= 1e-12) break; const t = Math.min(+r.qty, left); await c.query('update cashfund set qty=qty-$1 where id=$2', [t, r.id]); left -= t; }
+  const n = +(await c.query("select count(*) n from cashviol where wid=$1 and kind='gfv' and ts > now() - interval '12 months'", [w.id])).rows[0].n;
+  if (n >= 3) await c.query("update wallets set restricted_until = now() + interval '90 days' where id=$1 and (restricted_until is null or restricted_until < now() + interval '90 days')", [w.id]);
+  return n;
+}
+async function violationsJson(wid) {
+  const v = await rows("select * from cashviol where wid=$1 and ts > now() - interval '12 months' order by id desc", [wid]);
+  return { list: v.map(x => ({ id: x.id, kind: x.kind, sym: x.sym, note: x.note, ts: tsMs(x.ts), dropsOff: tsMs(x.ts) + 365 * 864e5 })), count: v.filter(x => x.kind === 'gfv').length, restrictedUntil: await restrictedUntil(wid) };
+}
+GET('/api/violations', auth, async req => violationsJson(await activeWalletId(req)));
+
+// ---------- IRA and Roth IRA ----------
+async function contribYear(year, c = pool) { return +(await c.query("select coalesce(sum(amount),0) s from contrib where year=$1 and kind='contribution'", [year])).rows[0].s; }
+// how much more can go into IRAs this year
+async function contribRoom(w, year = +etDate().slice(0, 4), c = pool) {
+  const R = retRules(year), age = PROFILE?.dob ? (year - +PROFILE.dob.slice(0, 4)) : null; // age at year end
+  let cap = R.limit + (age != null && age >= 50 ? R.catchUp : 0), why = [`${year} limit ${money(R.limit)}${age != null && age >= 50 ? ` + ${money(R.catchUp)} catch-up at 50+` : ''}`];
+  if (PROFILE?.earned != null) { if (PROFILE.earned < cap) why.push(`capped at your earned income of ${money(PROFILE.earned)}`); cap = Math.min(cap, PROFILE.earned); }
+  else if (isMinor()) { cap = 0; why.push('a custodial IRA needs earned income: add yours in Settings → Profile'); }
+  let rothCap = cap;
+  if (w?.acct === 'roth' && PROFILE?.income != null) {
+    const [lo, hi] = R.roth[PROFILE.filing || 'single'] || R.roth.single;
+    if (PROFILE.income >= hi) { rothCap = 0; why.push(`your income is over the ${money(hi)} Roth limit`); }
+    else if (PROFILE.income > lo) { let r = cap * (hi - PROFILE.income) / (hi - lo); r = Math.ceil(r / 10) * 10; if (r < 200) r = 200; rothCap = Math.min(cap, r); why.push(`reduced to ${money(rothCap)} by your income`); }
+  }
+  const used = await contribYear(year, c), lim = w?.acct === 'roth' ? rothCap : cap;
+  return { year, limit: lim, used, left: Math.max(0, lim - used), why };
+}
+// called before money goes into an IRA wallet
+async function checkContribution(c, w, amount) {
+  if (!isIra(w)) return;
+  const room = await contribRoom(w, undefined, c);
+  if (amount > room.left + 0.005) fail(room.left > 0 ? `You can put ${money(room.left)} more into IRAs in ${room.year} (${room.why.join('; ')}). This year you've put in ${money(room.used)}.` : `You've hit your ${room.year} IRA limit (${room.why.join('; ')}). It resets on January 1.`);
+}
+async function noteContribution(c, w, amount, note = 'deposit') {
+  if (!isIra(w)) return;
+  await c.query("insert into contrib(wid,year,amount,kind,note) values($1,$2,$3,'contribution',$4)", [w.id, +etDate().slice(0, 4), amount, note]);
+  await c.query('update wallets set ira_opened = coalesce(ira_opened, now()), ira_basis = coalesce(ira_basis,0) + $1 where id=$2', [amount, w.id]);
+}
+// what taking money out of an IRA costs: the 10% early penalty and income tax, as estimates
+function iraWithdrawCost(w, amount) {
+  const today = etDate(), early = !pastHalf(today), out = { amount, early, penalty: 0, taxable: 0, free: 0, lines: [] };
+  if (!PROFILE?.dob) out.lines.push('Add your date of birth in Settings → Profile so the age rules are right.');
+  if (w.acct === 'ira') {
+    out.taxable = amount; if (early) out.penalty = amount * 0.10;
+    out.lines.push(`All of it counts as income on your taxes${early ? ', plus a 10% early-withdrawal penalty because you are under 59½' : ''}.`);
+  } else {
+    const basis = Math.max(0, +w.ira_basis || 0), fromBasis = Math.min(amount, basis), earn = amount - fromBasis;
+    const fiveYears = w.ira_opened && (Date.now() - tsMs(w.ira_opened)) >= 5 * 365.25 * 864e5;
+    out.free = fromBasis;
+    if (earn > 0.005) { if (!early && fiveYears) out.free += earn; else { out.taxable = earn; out.penalty = early ? earn * 0.10 : 0; } }
+    out.lines.push(fromBasis > 0 ? `${money(fromBasis)} is money you put in, so it comes out tax-free and penalty-free.` : 'You have no contributions left to take out first.');
+    if (earn > 0.005) out.lines.push(!early && fiveYears ? 'The rest is earnings, tax-free because you are over 59½ and the account is 5+ years old.' : `The other ${money(earn)} is earnings: taxed as income${early ? ', plus the 10% penalty' : ''}${!fiveYears ? ', because the account is under 5 years old' : ''}.`);
+  }
+  return out;
+}
+async function noteWithdrawal(c, w, amount) {
+  if (!isIra(w)) return null;
+  const cost = iraWithdrawCost(w, amount);
+  await c.query("insert into contrib(wid,year,amount,kind,note,penalty,tax) values($1,$2,$3,'withdrawal',$4,$5,$6)", [w.id, +etDate().slice(0, 4), amount, cost.lines.join(' '), round(cost.penalty, 2), round(cost.taxable, 2)]);
+  if (w.acct === 'roth') await c.query('update wallets set ira_basis = greatest(0, coalesce(ira_basis,0) - $1) where id=$2', [Math.min(amount, +w.ira_basis || 0), w.id]);
+  return cost;
+}
+// required minimum distributions for traditional IRAs
+async function rmdFor(w) {
+  if (w.acct !== 'ira' || !PROFILE?.dob) return null;
+  const by = +PROFILE.dob.slice(0, 4), startAge = rmdAge(), firstYear = by + startAge, year = +etDate().slice(0, 4);
+  if (year < firstYear) return { due: false, startYear: firstYear, startAge, text: `Required withdrawals start in ${firstYear}, the year you turn ${startAge}.` };
+  const age = year - by, factor = ULT[Math.min(100, Math.max(72, age))];
+  const dec31 = await row('select eq from snap where wid=$1 and ts < $2 order by ts desc limit 1', [w.id, new Date(etToUtc(year, 1, 1))]);
+  const bal = dec31 ? +dec31.eq : +w.cash + marketValue(await positions(w.id));
+  const amount = bal / factor, taken = +(await row("select coalesce(sum(amount),0) s from contrib where wid=$1 and year=$2 and kind='withdrawal'", [w.id, year])).s;
+  const deadline = year === firstYear ? `${year + 1}-04-01` : `${year}-12-31`;
+  return { due: true, year, age, factor, balance: bal, amount, taken, left: Math.max(0, amount - taken), deadline, text: `Take at least ${money(amount)} out by ${deadline} (last year-end balance ${money(bal)} ÷ ${factor}). Missing it costs a 25% excise tax on the shortfall, 10% if fixed within 2 years.` };
+}
+async function iraJson(w) {
+  if (!isIra(w)) return null;
+  const year = +etDate().slice(0, 4), room = await contribRoom(w, year), hist = await rows('select * from contrib where wid=$1 order by id desc limit 20', [w.id]);
+  return { kind: w.acct, room, basis: +w.ira_basis || 0, opened: tsMs(w.ira_opened), rmd: await rmdFor(w), halfAge: halfAgeDate(), pastHalf: pastHalf(), age: ageOn(),
+    history: hist.map(h => ({ ts: tsMs(h.ts), kind: h.kind, amount: +h.amount, note: h.note, penalty: h.penalty == null ? null : +h.penalty, tax: h.tax == null ? null : +h.tax })) };
+}
+GET('/api/ira', auth, async req => { const w = await walletRow(await activeWalletId(req)); return { ira: await iraJson(w), profile: profileJson() }; });
+POST('/api/ira/preview', auth, async req => { const w = await walletRow(await activeWalletId(req)); if (!isIra(w)) fail('This is not an IRA wallet'); return iraWithdrawCost(w, num(req.body.amount)); });
 
 // =====================================================================
 // Money movement and margin: bank transfers, instant deposits, margin interest, margin calls
@@ -2331,8 +2507,9 @@ async function deposit(wid, amount, how = 'bank') {
   const w = await walletRow(wid);
   if (w.broker) fail('Move money in and out with your broker. This wallet mirrors that account.');
   if (!(amount > 0) || amount > 1e9) fail('Enter a valid amount');
+  if (isIra(w)) await checkContribution(pool, w, amount);
   if (!isReal(w) || how === 'practice') {
-    await tx(async c => moveCash(c, wid, amount, 'deposit'));
+    await tx(async c => { await moveCash(c, wid, amount, 'deposit'); await noteContribution(c, w, amount); });
     return { done: true, instant: amount, pending: 0 };
   }
   const prof = profOf(w);
@@ -2343,6 +2520,7 @@ async function deposit(wid, amount, how = 'bank') {
   const x = await tx(async c => {
     const r = (await c.query("insert into xfer(wid,kind,amount,instant,status,avail,method) values($1,'deposit',$2,$3,'pending',$4,'ach') returning id", [wid, amount, instant, new Date(avail)])).rows[0];
     if (instant > 0) await moveCash(c, wid, instant, 'instant deposit');
+    await noteContribution(c, w, amount);
     return r;
   });
   return { done: false, id: x.id, instant, pending: amount - instant, avail };
@@ -2351,15 +2529,17 @@ async function withdraw(wid, amount, how = 'bank') {
   const w = await walletRow(wid);
   if (w.broker) fail('Move money in and out with your broker. This wallet mirrors that account.');
   if (!(amount > 0)) fail('Enter a valid amount');
-  if (!isReal(w) || how === 'practice') { await tx(async c => moveCash(c, wid, -amount, 'withdrawal')); return { done: true }; }
+  if (!isReal(w) || how === 'practice') { let cost = null; await tx(async c => { await moveCash(c, wid, -amount, 'withdrawal'); cost = await noteWithdrawal(c, w, amount); }); return { done: true, ira: cost }; }
   const acct = await accountInfo(wid, { w });
   if (amount > acct.withdrawable + 0.005) fail(`You can withdraw up to ${money(acct.withdrawable)}.${acct.unsettled > 0 ? ` ${money(acct.unsettled)} from recent stock sales hasn't settled yet.` : ''}${acct.debit > 0 ? ' Pay off your margin balance first.' : ''}${acct.holdsCash > 0 ? ` ${money(acct.holdsCash)} is held for open orders.` : ''}`);
   const prof = profOf(w), avail = businessDaysLater(prof.wdDays);
+  let cost = null;
   await tx(async c => {
     await moveCash(c, wid, -amount, 'withdrawal');
     await c.query("insert into xfer(wid,kind,amount,status,avail,method) values($1,'withdrawal',$2,'pending',$3,'ach')", [wid, amount, new Date(avail)]);
+    cost = await noteWithdrawal(c, w, amount);
   });
-  return { done: false, avail };
+  return { done: false, avail, ira: cost };
 }
 async function xferJob() {
   for (const x of await rows("select * from xfer where status='pending' and avail <= now() order by id")) {
@@ -2383,6 +2563,8 @@ async function cancelXfer(id) {
       await moveCash(c, x.wid, -+x.instant, 'deposit cancelled');
     }
     await c.query("update xfer set status='cancelled', done=now() where id=$1", [x.id]);
+    const w = (await c.query('select * from wallets where id=$1', [x.wid])).rows[0];
+    if (isIra(w)) { await c.query("insert into contrib(wid,year,amount,kind,note) values($1,$2,$3,'contribution','deposit cancelled')", [x.wid, +etDate(tsMs(x.created)).slice(0, 4), -+x.amount]); await c.query('update wallets set ira_basis = greatest(0, ira_basis - $1) where id=$2', [+x.amount, x.wid]); }
   });
 }
 
@@ -2589,7 +2771,8 @@ async function taxYear(wid, y) {
     from trd where wid=$1 and ts >= $2 and ts < $3`, [wid, from, to]);
   const years = (await rows("select distinct extract(year from sold at time zone 'America/New_York')::int y from realized where wid=$1 union select distinct extract(year from ts at time zone 'America/New_York')::int from trd where wid=$1 and side='div' order by 1 desc", [wid])).map(r => r.y);
   if (!years.includes(y)) years.unshift(y);
-  return { y, years: [...new Set(years)].sort((a, b) => b - a), short: group(r => r.term === 'short' && !r.crypto), long: group(r => r.term === 'long' && !r.crypto), cryptoShort: group(r => r.crypto && r.term === 'short'), cryptoLong: group(r => r.crypto && r.term === 'long'), all: group(() => true), dividends: +inc.div, interest: +inc.intr, marginInterest: +inc.mint, fees: +inc.fees, rows: rs };
+  const wq = await walletRow(wid);
+  return { sheltered: isIra(wq) ? wq.acct : null, y, years: [...new Set(years)].sort((a, b) => b - a), short: group(r => r.term === 'short' && !r.crypto), long: group(r => r.term === 'long' && !r.crypto), cryptoShort: group(r => r.crypto && r.term === 'short'), cryptoLong: group(r => r.crypto && r.term === 'long'), all: group(() => true), dividends: +inc.div, interest: +inc.intr, marginInterest: +inc.mint, fees: +inc.fees, rows: rs };
 }
 
 // ---------- monthly statements ----------
@@ -4974,7 +5157,7 @@ GET('/api/state', auth, async req => {
   for (const s of new Set(mine)) ensureMeta(s).catch(() => {});
   const eq = await equitySeries(wid, '1D').catch(() => null);
   const out = {
-    v: BUILD, appVersion: APP_VERSION, now: Date.now(), market: market(), mstate: mstateJson(), calNote: calendarNote(), user: APP_USER,
+    v: BUILD, appVersion: APP_VERSION, now: Date.now(), market: market(), mstate: mstateJson(), calNote: calendarNote(), profile: profileJson(), user: APP_USER,
     wallet: w, wallets, pos, ord, lims, account, xfers, rules: rulesJson(wr), broker: brokerJson(), trd: trd.map(tradeJson), watch: watch.map(x => x.sym), alerts: alerts.map(alertJson),
     preds: preds.map(p => ({ id: p.id, sym: p.sym, dir: p.dir, start: +p.start_px, startTs: tsMs(p.start_ts), end: tsMs(p.end_ts) })),
     assets: assetsJson(syms), prices: pricesJson(), spark: sp, eq1d: eq,
@@ -5111,6 +5294,11 @@ POST('/api/trade', auth, async req => {
     const acct0 = await accountInfo(wid, { w }).catch(() => null), px0 = otype === 'limit' ? num(b.price) : otype === 'stoplimit' ? num(b.lpx) : priceOf(sym) || 0;
     const notional = mode === 'usd' ? amount : mode === 'qty' ? amount * px0 : 0;
     const checks = await sanityChecks(w, { sym, side, otype, price: b.price, lpx: b.lpx, notional, equity: acct0?.equity || 0 });
+    if (side === 'sell' && w.acct === 'cash' && cashRulesOn()) {
+      const p0 = (await positions(wid)).find(x => x.sym === sym), q = !p0 ? 0 : mode === 'qty' ? amount : mode === 'pct' ? p0.qty * Math.min(100, amount) / 100 : amount / (priceOf(sym) || p0.avg);
+      const risk = await gfvRisk(pool, w, sym, q), n = risk ? +(await row("select count(*) n from cashviol where wid=$1 and kind='gfv' and ts > now() - interval '12 months'", [wid])).n : 0;
+      if (risk) checks.unshift({ k: 'gfv', text: `Selling now is a good faith violation: you bought ${+risk.qty.toFixed(4)} of these shares with money from a sale that settles ${new Date(risk.settles).toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'long' })}. You have ${n} in the last 12 months; at 3 the wallet can only use settled cash for 90 days. Wait until then to sell for free.` });
+    }
     if (checks.length) return { confirm: true, checks };
   }
   if (otype === 'trail') {
@@ -5254,14 +5442,17 @@ GET('/api/dividends', auth, async req => {
 // =====================================================================
 // Wallets
 // =====================================================================
-const COLORS = ['mango', 'leaf', 'sky', 'grape', 'rose', 'slate'], PROFILE_KEYS = ['robinhood', 'alpaca', 'practice'], ACCTS = ['cash', 'instant', 'margin'], LOTS = ['fifo', 'lifo', 'hifo'];
+const COLORS = ['mango', 'leaf', 'sky', 'grape', 'rose', 'slate'], PROFILE_KEYS = ['robinhood', 'alpaca', 'practice'], ACCTS = ['cash', 'instant', 'margin', 'ira', 'roth'], LOTS = ['fifo', 'lifo', 'hifo'];
 GET('/api/wallets', auth, () => walletsSummary());
 POST('/api/wallets', auth, async req => {
   const b = req.body, name = String(b.name || '').trim().slice(0, 30) || 'New wallet';
   const start = clamp(num(b.start, 10000), 100, 1e9);
   if (+(await row('select count(*) n from wallets')).n >= 25) fail('You can have up to 25 wallets');
+  if (b.acct === 'margin' && isMinor()) fail('Margin accounts need you to be 18 or older. Pick a cash or instant account.');
+  if (IRA_ACCTS.includes(b.acct)) { if (!PROFILE?.dob) fail('Add your date of birth first: IRA rules depend on your age.'); if (b.profile === 'practice') b.profile = 'robinhood'; }
   const r = await row(`insert into wallets(name,emoji,color,cash,start_bal,sort,profile,acct,gold,drip,lot_method,crypto_route,margin_max) values($1,$2,$3,$4,$4,(select coalesce(max(sort),0)+1 from wallets),$5,$6,$7,$8,$9,$10,$11) returning *`,
     [name, String(b.emoji || '💼').slice(0, 8), COLORS.includes(b.color) ? b.color : 'sky', start, PROFILE_KEYS.includes(b.profile) ? b.profile : 'robinhood', ACCTS.includes(b.acct) ? b.acct : 'instant', !!b.gold, !!b.drip, LOTS.includes(b.lotMethod) ? b.lotMethod : 'fifo', b.cryptoRoute === 'exchange' ? 'exchange' : 'mm', num(b.marginMax) > 0 ? num(b.marginMax) : null]);
+  if (IRA_ACCTS.includes(r.acct)) await Q('update wallets set ira_opened=now(), ira_basis=$1 where id=$2', [r.acct === 'roth' ? start : 0, r.id]); // the starting money counts as a rollover, not this year's contribution
   await loadWalletMeta(); await snapshot(r.id); checkAchievementsSoon();
   return walletJson(r);
 });
@@ -5275,6 +5466,8 @@ PATCH('/api/wallets/:id', auth, async req => {
   // Trading rules for the wallet
   if (!w.broker) {
     const acct = ACCTS.includes(b.acct) ? b.acct : w.acct;
+    if (acct !== w.acct && (IRA_ACCTS.includes(acct) || IRA_ACCTS.includes(w.acct))) fail('An IRA is its own kind of account. Open a new IRA wallet instead of switching this one.');
+    if (acct === 'margin' && w.acct !== 'margin' && isMinor()) fail('Margin accounts need you to be 18 or older.');
     if (acct !== 'margin' && w.acct === 'margin' && +w.cash < -0.005) fail(`Pay off the ${money(-+w.cash)} margin balance before switching off margin`);
     await Q('update wallets set profile=$1, acct=$2, gold=$3, drip=$4, lot_method=$5, crypto_route=$6, margin_max=$7 where id=$8', [
       PROFILE_KEYS.includes(b.profile) ? b.profile : w.profile, acct, b.gold !== undefined ? !!b.gold : w.gold, b.drip !== undefined ? !!b.drip : w.drip,
@@ -5321,6 +5514,7 @@ POST('/api/cash', auth, async req => {
   else if (act === 'withdraw') out = await withdraw(wid, a, how);
   else {
     const w = await walletRow(wid); if (w.broker) fail("A broker wallet's cash comes from your real account");
+    if (IRA_ACCTS.includes(w.acct)) fail('An IRA balance only changes with deposits (which count toward the yearly limit) and withdrawals.');
     await tx(async c => { const cur = (await c.query('select cash from wallets where id=$1', [wid])).rows[0]; const delta = a - +cur.cash; if (Math.abs(delta) >= 0.005) await moveCash(c, wid, delta, 'balance set'); });
   }
   await snapshot(wid); return out;
@@ -5338,7 +5532,11 @@ POST('/api/wallets/transfer', auth, async req => {
   const fw = await walletRow(from), tw = await walletRow(to);
   if (fw.broker || tw.broker) fail("Broker wallets mirror a real account. Move that money through the broker.");
   if (isReal(fw)) { const acc = await accountInfo(from, { w: fw }); if (a > acc.withdrawable + 0.005) fail(`${fw.name} can move up to ${money(acc.withdrawable)} right now (settled cash not held for orders).`); }
-  await tx(async c => { await moveCash(c, from, -a, 'transfer out'); await moveCash(c, to, a, 'transfer in'); });
+  if (isIra(fw) && isIra(tw)) fail('Moving money between IRAs is a rollover with its own paperwork. In Mango, withdraw and deposit instead.');
+  if (isIra(tw)) await checkContribution(pool, tw, a);
+  let cost = null;
+  await tx(async c => { await moveCash(c, from, -a, 'transfer out'); await moveCash(c, to, a, 'transfer in'); if (isIra(tw)) await noteContribution(c, tw, a, 'transfer in'); if (isIra(fw)) cost = await noteWithdrawal(c, fw, a); });
+  if (cost) return { ok: true, ira: cost };
   await snapshot(from); await snapshot(to);
 });
 
@@ -7088,7 +7286,7 @@ const ICONS = {};
 const icon = (name, fn) => ICONS[name] || (ICONS[name] = fn());
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD646"/><stop offset=".5" stop-color="#FFA028"/><stop offset="1" stop-color="#FA5256"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="#1E1430"/><ellipse cx="31" cy="36" rx="18" ry="22" transform="rotate(30 31 36)" fill="url(#g)"/><path d="M20 41l6.5-6 5 3.5 9.5-10" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37 28.5h4.5V33" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="45" cy="11.5" rx="9" ry="4.6" transform="rotate(-24 45 11.5)" fill="#3BD68A"/></svg>`;
 let BUILD = 'dev', INDEX = null, INDEX_GZ = null;
-const APP_VERSION = '3.7.0'; // stamped by build.sh from package.json
+const APP_VERSION = '3.8.0'; // stamped by build.sh from package.json
 function loadIndex() {
   const file = path.join(__dirname, 'index.html');
   let html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<!doctype html><title>Mango</title><p>index.html is missing next to server.js.</p>';
@@ -7197,7 +7395,7 @@ process.on('unhandledRejection', e => warn('unhandled', e && (e.stack || e.messa
   loadIndex();
   await migrate();
   tokenSalt = (await kvGet('token_salt', '')) || '';
-  await loadSettings(); await refreshPasskeysOn(); await loadAssets(); await loadPriceCache(); await loadOrders(); await loadMstate(); await loadAlerts(); await initPush();
+  await loadSettings(); await refreshPasskeysOn(); await loadAssets(); await loadPriceCache(); await loadOrders(); await loadMstate(); await loadProfile(); await loadAlerts(); await initPush();
   await refreshUserSyms(); await walletsSummary();
   server.listen(PORT, () => log(`🥭 Mango is running on port ${PORT} · v${APP_VERSION} (build ${BUILD}) · ${FINNHUB_KEY ? 'stocks on' : 'stocks off (no FINNHUB_KEY)'}${BROKER ? ` · Alpaca ${BROKER.env}` : ''}`));
   cbConnect(); fhConnect(); if (BROKER) adConnect(); startJobs();

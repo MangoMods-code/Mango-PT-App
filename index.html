@@ -1470,7 +1470,7 @@ html[data-standby] #halt-bar { bottom: calc(var(--nav-h, 64px) + env(safe-area-i
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '3.7.0';
+const BUILD = '__BUILD__', APP_VERSION = '3.8.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -2511,7 +2511,7 @@ function orderSummary() {
   if ((S.lims || []).length) parts.push(S.lims.length + ' limit/stop');
   return parts.join(' · ') || 'Waiting to trigger';
 }
-const ACCT_NAME = { cash: 'Cash account', instant: 'Instant account', margin: 'Margin account' };
+const ACCT_NAME = { cash: 'Cash account', instant: 'Instant account', margin: 'Margin account', ira: 'Traditional IRA', roth: 'Roth IRA' };
 const PROF_NAME = { robinhood: 'Robinhood rules', alpaca: 'Alpaca rules', practice: 'Practice rules' };
 const accountSub = S => S.wallet?.broker ? `Alpaca ${S.wallet.brokerEnv === 'live' ? 'live, real money' : 'paper'}` : `${PROF_NAME[S.wallet?.profile] || ''}${S.wallet?.profile === 'practice' ? '' : ' · ' + (ACCT_NAME[S.wallet?.acct] || '')}`;
 const menuCell = (ic, t, sub, to) => `<button class="cell" data-act="go" data-to="${to}"><div class="lead">${icon(ic)}</div><div class="main"><div class="title">${h(t)}</div><div class="sub ellip">${h(sub)}</div></div>${icon('right', 'chev')}</button>`;
@@ -3687,7 +3687,7 @@ function walletEdit(w = null, opt = {}) {
       <label class="field"><span>Name</span><input id="we-n" maxlength="30" placeholder="e.g. Crypto only, Long term, Risky bets" value="${h(st.name)}"></label>
       ${w ? '' : `<label class="field"><span>Starting balance</span><div class="money-in has-pre"><span class="pre">$</span><input id="we-s" inputmode="decimal" value="${h(st.start)}"></div></label><div class="chips mt8" style="margin:8px 0 0;padding:0">${[1000, 10000, 25000, 100000, 1000000].map(v => `<button class="chip" data-sv="${v}">$${v >= 1e6 ? v / 1e6 + 'M' : v / 1e3 + 'K'}</button>`).join('')}</div>`}
       ${brk ? '' : `<div class="field" id="we-rules"><span>Trading rules</span>${pick('profile', [['robinhood', 'Robinhood rules', PROF_DESC.robinhood], ['alpaca', 'Alpaca rules', PROF_DESC.alpaca], ['practice', 'Practice rules', PROF_DESC.practice]], st.profile)}</div>
-      ${real ? `<div class="field"><span>Account type</span>${pick('acct', [['cash', 'Cash account', ACCT_DESC.cash], ['instant', 'Instant account', ACCT_DESC.instant], ['margin', 'Margin account', ACCT_DESC.margin]], st.acct)}</div>` : ''}`}
+      ${real ? `<div class="field"><span>Account type</span>${pick('acct', [['cash', 'Cash account', ACCT_DESC.cash], ['instant', 'Instant account', ACCT_DESC.instant], ...(App.S.profile?.age != null && App.S.profile.age < 18 ? [] : [['margin', 'Margin account', ACCT_DESC.margin]]), ...(w && !['ira', 'roth'].includes(w.acct) ? [] : [['ira', 'Traditional IRA', ACCT_DESC.ira], ['roth', 'Roth IRA', ACCT_DESC.roth]])].filter(x => !w || !['ira', 'roth'].includes(w.acct) || x[0] === w.acct), st.acct)}${App.S.profile?.age != null && App.S.profile.age < 18 ? '<p class="t-foot" style="margin:6px 2px 0">Margin accounts need you to be 18 or older.</p>' : ''}${!w && ['ira', 'roth'].includes(st.acct) ? '<p class="t-foot" style="margin:6px 2px 0">The starting balance counts as a rollover from an old work plan, so it doesn\'t use this year\'s limit. Later deposits do.</p>' : ''}</div>` : ''}`}
       <div class="group mt16">
         <div class="cell"><div class="main"><div class="title">Reinvest dividends</div><div class="sub">Dividends buy more of the same stock, fractional shares included</div></div>${sw(st.drip, 'data-tg="drip"')}</div>
         ${!brk && st.profile === 'robinhood' && st.acct !== 'cash' ? `<div class="cell"><div class="main"><div class="title">Robinhood Gold</div><div class="sub">First $1,000 of margin free and $5,000 instant deposits, for $5 a month</div></div>${sw(st.gold, 'data-tg="gold"')}</div>` : ''}
@@ -3773,18 +3773,19 @@ ACT.cash = el => {
   const st = { action: el?.dataset?.a || 'add', amount: '', how: real ? 'bank' : 'practice' };
   const s = sheet({ title: real ? 'Move money' : 'Cash' });
   const draw = () => {
-    const a = App.S.account || {}, r = App.S.rules || {};
+    const a = App.S.account || {}, r = App.S.rules || {}, ira = ['ira', 'roth'].includes(App.S.wallet.acct);
+    if (ira && st.action === 'set') st.action = 'add';
     const instantLeft = Math.max(0, (r.instant || 0) - 0);
     const hint = !real ? "It's practice money, so add as much as you like. Deposits and withdrawals don't count as profit or loss."
       : st.action === 'add' ? (st.how === 'bank' ? `A bank transfer takes about ${r.achDays || 3} business days.${instantLeft && App.S.wallet.acct !== 'cash' ? ` Up to ${money(instantLeft)} of pending deposits can be used right away with Instant Deposits.` : App.S.wallet.acct === 'cash' ? ' Cash accounts wait for the full transfer.' : ''} Deposits don't count as profit.` : 'Practice cash skips the bank and lands right away, like a magic deposit.')
       : st.action === 'withdraw' ? `You can withdraw ${money(a.withdrawable ?? App.S.wallet.cash)}. ${st.how === 'bank' ? 'It reaches your bank in about 2 business days.' : 'Practice withdrawals leave right away.'}${a.unsettled > 0.005 ? ` ${money(a.unsettled)} from recent sales has to settle first.` : ''}`
       : 'Sets the cash balance to exactly this, right away. A practice shortcut that skips the bank.';
     s.html(`<div class="center"><div class="t-cap">${h(W().emoji)} ${h(W().name)} has</div><div class="n priv" style="font-size:34px;font-weight:750;letter-spacing:-.03em">${money(App.S.wallet.cash)}</div><div class="t-foot">in cash${real && a.bp != null ? ` · ${money(a.bp)} buying power` : ''}</div></div>
-      <div class="mt16">${seg('ca', [['add', real ? 'Deposit' : 'Add'], ['withdraw', 'Withdraw'], ['set', 'Set exactly']], st.action)}</div>
+      <div class="mt16">${seg('ca', [['add', real ? 'Deposit' : 'Add'], ['withdraw', 'Withdraw'], ...(ira ? [] : [['set', 'Set exactly']])], st.action)}</div>
       ${real && st.action !== 'set' ? `<div class="mt8">${seg('cah', [['bank', 'Bank transfer'], ['practice', 'Practice cash']], st.how)}</div>` : ''}
       <label class="field"><div class="money-in has-pre"><span class="pre">$</span><input id="ca-v" inputmode="decimal" placeholder="0.00" value="${h(st.amount)}"></div></label>
       <div class="chips mt8" style="margin:8px 0 0;padding:0">${[100, 1000, 5000, 10000, 50000].map(v => `<button class="chip" data-v="${v}">$${compact(v)}</button>`).join('')}</div>
-      <p class="note">${h(hint)}</p>
+      <p class="note">${h(ira ? (st.action === 'add' ? 'IRA deposits count toward your yearly limit, shared across all your IRAs. See Account for what is left. ' : 'Taking money out of an IRA can cost income tax and a 10% penalty before 59½. You will see the cost before it goes. ') + hint : hint)}</p>
       ${(App.S.xfers || []).filter(x => x.status === 'pending').length ? `<div class="group mt12">${App.S.xfers.filter(x => x.status === 'pending').map(x => `<div class="cell"><div class="lead">${icon(x.kind === 'deposit' ? 'download' : 'upload')}</div><div class="main"><div class="title">${x.kind === 'deposit' ? 'Deposit' : 'Withdrawal'} ${money(x.amount)}</div><div class="sub">${xferLabel(x)}${x.instant > 0 ? ` · ${money(x.instant)} already usable` : ''}</div></div></div>`).join('')}</div>` : ''}`);
     s.foot(`<button class="btn btn-primary btn-lg btn-block" id="ca-go">${st.action === 'add' ? (real && st.how === 'bank' ? 'Start bank deposit' : 'Add cash') : st.action === 'withdraw' ? 'Withdraw cash' : 'Set balance'}</button>`);
     raf(() => placeThumbs(s.body));
@@ -3795,6 +3796,11 @@ ACT.cash = el => {
     $('#ca-go', s.footEl).addEventListener('click', async () => {
       const go = $('#ca-go', s.footEl); busy(go, true);
       try {
+        if (['ira', 'roth'].includes(App.S.wallet.acct) && st.action === 'withdraw') {
+          const c = await post('ira/preview', { amount: num(st.amount) }); busy(go, false);
+          if (!(await confirmBox({ title: 'Withdraw from your IRA?', msg: c.lines.join('\n\n') + (c.penalty > 0 ? `\n\nEstimated 10% penalty: ${money(c.penalty)}.` : '') + (c.taxable > 0 ? ` About ${money(c.taxable)} counts as taxable income.` : ''), ok: 'Withdraw' }))) return;
+          busy(go, true);
+        }
         const r = await post('cash', { action: st.action, amount: num(st.amount), how: st.how });
         busy(go, false);
         if (st.action === 'add' && r.done === false) toast(`Deposit started: ${money(num(st.amount))}`, { sub: r.instant > 0 ? `${money(r.instant)} is usable now. The rest arrives ${fmtDay(r.avail)}.` : `It arrives ${fmtDay(r.avail)}.`, ms: 5000 });
@@ -3843,7 +3849,9 @@ ACT.inboxMenu = () => {
 // Account: buying power, settlement, margin, transfers, rules, taxes, statements, broker
 // ===================================================================
 const ACCT_DESC = {
-  cash: 'Pay in full with settled cash. Money from stock sales settles the next business day (T+1) before you can use it again.',
+  cash: 'No borrowing. You can reuse money from a stock sale before it settles (T+1), but selling what you bought with it before then is a good faith violation. 3 in 12 months limits the wallet to settled cash for 90 days.',
+  ira: 'Traditional IRA: taxes wait until you take money out. Up to $7,500 a year across all your IRAs ($8,600 at 50+). No margin. Withdrawals before 59½ cost a 10% penalty. Required withdrawals start at 73 or 75.',
+  roth: 'Roth IRA: money goes in after tax, and growth comes out tax-free after 59½. Shares the yearly limit with your other IRAs. What you put in can come out any time, free.',
   instant: 'Use money from sales right away and up to the instant deposit limit while bank transfers clear. No borrowing.',
   margin: 'Borrow against your stocks: up to 2x buying power with $2,000 or more. Interest is charged on what you borrow, and a drop can trigger a margin call.',
 };
@@ -3881,7 +3889,7 @@ PAGES.account = {
         ${a.marginOn ? `<div class="t-foot">${money(a.bpCrypto)} for crypto, which can't use margin</div>` : ''}
         <div class="stack">${parts.filter(x => x.v > 0.005).map(x => `<i style="flex:${x.v / tot};background:${x.c}"></i>`).join('')}</div>
         <div class="stack-legend">${parts.filter(x => x.v > 0.005).map(x => `<span><i style="background:${x.c}"></i>${x.l} ${money(x.v)}</span>`).join('')}</div>
-        <div class="mt12">${kv('Cash', `<span class="priv ${a.cash < 0 ? 'dn' : ''}">${money(a.cash)}</span>`)}${real && a.cash >= 0 && a.unsettled > 0.005 ? kv('Settled cash', `<span class="priv">${money(a.settled)}</span>`) : ''}${a.unsettled > 0.005 ? kv('Settling', `${money(a.unsettled)}${a.nextSettle ? ' · ' + fmtDay(a.nextSettle) : ''}`) : ''}${a.holdsCash > 0.005 ? kv('Held for open buy orders', money(a.holdsCash)) : ''}${a.pendingDeposits > 0.005 ? kv('Deposits on the way', money(a.pendingDeposits)) : ''}${kv('Can withdraw', `<span class="priv">${money(a.withdrawable)}</span>`)}</div>
+        <div class="mt12">${kv('Cash', `<span class="priv ${a.cash < 0 ? 'dn' : ''}">${money(a.cash)}</span>`)}${real && a.cash >= 0 && a.unsettled > 0.005 ? kv('Settled cash', `<span class="priv">${money(Math.max(0, a.settled))}</span>`) : ''}${a.unsettled > 0.005 ? kv('Settling', `${money(a.unsettled)}${a.nextSettle ? ' · ' + fmtDay(a.nextSettle) : ''}`) : ''}${a.holdsCash > 0.005 ? kv('Held for open buy orders', money(a.holdsCash)) : ''}${a.pendingDeposits > 0.005 ? kv('Deposits on the way', money(a.pendingDeposits)) : ''}${kv('Can withdraw', `<span class="priv">${money(a.withdrawable)}</span>`)}</div>
         ${brk ? '' : `<div class="btns mt12"><button class="btn btn-quiet" data-act="cash" data-a="withdraw">${icon('upload')}Withdraw</button><button class="btn btn-primary" data-act="cash" data-a="add">${icon('download')}Add money</button></div>`}</div>`;
     if (a.acct === 'margin' && real && !brk) {
       const eqPct = a.lmv ? a.equity / a.lmv * 100 : 100, mPct = a.lmv ? a.maint / a.lmv * 100 : 25;
@@ -3889,6 +3897,7 @@ PAGES.account = {
         ${a.lmv > 0 ? `<div class="t-foot">Equity is ${pct0(eqPct, 0)} of what you hold. It needs to stay above ${pct0(mPct, 0)}.</div><div class="meter"><i style="width:${clamp(eqPct, 0, 100)}%;background:${a.equity < a.maint ? 'var(--dn)' : eqPct < mPct * 1.3 ? 'var(--ac)' : 'var(--up)'}"></i><b style="left:${clamp(mPct, 0, 100)}%"></b></div>` : ''}
         ${kv('Equity', `<span class="priv">${money(a.equity)}</span>`)}${kv('Borrowed', a.debit > 0 ? `<span class="dn">${money(a.debit)}</span>` : '$0.00')}${kv('Maintenance requirement', money(a.maint))}${kv('Cushion before a margin call', `<span class="${a.excess < 0 ? 'dn' : ''}">${money(a.excess)}</span>`)}${kv('Interest rate', pct0(a.marginRate, 2) + ' a year' + (w.gold && w.profile === 'robinhood' ? ' · first $1,000 free with Gold' : ''))}${kv('Interest so far this month', money(a.accrued))}${w.marginMax != null ? kv('Your borrowing limit', money(w.marginMax)) : ''}</div>`;
     }
+    html += '<div id="acct-extra"></div>';
     if (!brk && (xfers.length || real)) html += `<div class="section-h"><h2>Transfers</h2></div><div class="group">${xfers.length ? xfers.map(x => `<div class="cell"><div class="lead">${icon(x.kind === 'deposit' ? 'download' : 'upload')}</div><div class="main"><div class="title">${x.kind === 'deposit' ? 'Deposit' : 'Withdrawal'} ${money(x.amount)}</div><div class="sub">${xferLabel(x)}${x.instant > 0 ? ` · ${money(x.instant)} available instantly` : ''} · started ${fmtDate(x.created)}</div></div>${x.status === 'pending' && x.kind === 'deposit' ? `<button class="btn btn-sm btn-quiet" data-x="cancel" data-id="${x.id}">Cancel</button>` : `<span class="xfer-st ${x.status === 'done' ? 'up' : 'mu'}">${x.status === 'done' ? 'Done' : x.status === 'pending' ? 'Pending' : 'Cancelled'}</span>`}</div>`).join('') : `<div class="cell"><div class="main t-foot">No bank transfers yet. Deposits take about ${r.achDays} business days${r.instant ? `, with up to ${money(r.instant)} usable right away` : ''}.</div></div>`}</div>`;
     if (settling.length) html += `<div class="section-h"><h2>Settling</h2><span class="t-foot">T+1</span></div><div class="group">${settling.map(x => `<div class="cell"><div class="lead">${icon('hourglass')}</div><div class="main"><div class="title">${money(x.amount)}${x.sym ? ' from selling ' + h(x.sym) : ''}</div><div class="sub">Settles ${fmtDay(x.settles)}${w.acct === 'cash' ? '' : ' · you can already trade with it'}</div></div></div>`).join('')}</div>`;
     if (brk && broker?.account) html += `<div class="section-h"><h2>Alpaca account</h2></div><div class="card">${kv('Account', h(broker.account.number))}${kv('Status', h(broker.account.status))}${kv('Type', +broker.account.multiplier > 1 ? `Margin (${broker.account.multiplier}x)` : 'Cash')}${kv('Day trades in 5 days', broker.account.daytrades)}${kv('Crypto', h(broker.account.crypto || '–'))}${broker.account.blocked ? '<div class="callout warn mt8">' + icon('info') + '<div>Alpaca has blocked trading on this account.</div></div>' : ''}</div>`;
@@ -3898,6 +3907,7 @@ PAGES.account = {
       <div class="cell"><div class="lead">${icon('hourglass')}</div><div class="main"><div class="title">Settlement</div><div class="sub">Stock sales settle the next business day (T+1). A sale today settles ${fmtDay(r.settleNext)}. Crypto settles right away.</div></div></div>
       ${rowLink('coin', 'Fees and rules', 'Every fee, with the dates they took effect', 'rules')}</div>`;
     p.body.innerHTML = html;
+    if (real && !brk && (a.acct === 'cash' || a.acct === 'ira' || a.acct === 'roth')) acctExtra(p, a);
     p.body.onclick = async e => {
       const b = e.target.closest('[data-x="cancel"]'); if (!b) return;
       if (!(await confirmBox({ title: 'Cancel this deposit?', msg: 'The instant part comes back out of your cash.', ok: 'Cancel deposit', cancel: 'Keep it', danger: true }))) return;
@@ -3957,6 +3967,7 @@ PAGES.taxes = {
     const st = d.rows.filter(r => r.term === 'short'), lt = d.rows.filter(r => r.term === 'long');
     p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Taxes</h1><p class="t-sub" style="margin:0 2px">${h(W().emoji)} ${h(W().name)} · gains and income like a 1099</p>
       ${d.years.length > 1 ? `<div class="mt12">${seg('ty', d.years.slice(0, 4).map(y => [y, String(y)]), d.y)}</div>` : ''}
+      ${d.sheltered ? `<div class="callout mt12">${icon('shield')}<div><b>Nothing here is taxed this year.</b> ${d.sheltered === 'roth' ? 'This is a Roth IRA: gains and dividends inside it are never taxed if you wait until 59½ and the account is 5 years old.' : 'This is a traditional IRA: gains and dividends inside it are not taxed. Money you take out counts as income instead.'} The list below is for your records only.</div></div>` : ''}
       <div class="tax-big mt16"><div class="tile"><div class="k">Short term</div><div class="v ${cls(d.short.gain + d.cryptoShort.gain)}">${money(d.short.gain + d.cryptoShort.gain, { sign: true })}</div><div class="s">Held a year or less, taxed like pay</div></div><div class="tile"><div class="k">Long term</div><div class="v ${cls(d.long.gain + d.cryptoLong.gain)}">${money(d.long.gain + d.cryptoLong.gain, { sign: true })}</div><div class="s">Held over a year, lower rates</div></div></div>
       <div class="section-h"><h2>Sales</h2><span class="t-foot">${d.all.count} lot${d.all.count === 1 ? '' : 's'}</span></div><div class="card">
         <div class="kv"><span class="k">Proceeds</span><span class="v">${money(d.all.proceeds)}</span></div><div class="kv"><span class="k">Cost basis</span><span class="v">${money(d.all.basis)}</span></div>
@@ -4048,6 +4059,31 @@ async function brokerBox(el) {
     const op = $('#bk-open', el); if (op) op.addEventListener('click', () => switchWallet(b.wid).then(() => Router.closeAll()));
     const sy = $('#bk-sync', el); if (sy) sy.addEventListener('click', async () => { busy(sy, true); try { await post('broker/sync'); await loadState(); toast('Synced with Alpaca'); } catch (e) { toastErr(e); } busy(sy, false); });
   } catch (e) { el.innerHTML = `<div class="t-foot">${h(e.message)}</div>`; }
+}
+
+// cash wallets: the violations record; IRA wallets: this year's room, withdrawals, required withdrawals
+async function acctExtra(p, a) {
+  const el = $('#acct-extra', p.body); if (!el) return;
+  try {
+    if (a.acct === 'cash') {
+      const v = await api('violations');
+      el.innerHTML = `<div class="section-h"><h2>Good faith violations</h2><span class="t-foot">${v.count} of 3 in 12 months</span></div>
+        ${v.restrictedUntil ? `<div class="callout warn">${icon('lock')}<div><b>Settled cash only until ${fmtDay(v.restrictedUntil)}.</b> This wallet had 3 good faith violations in 12 months, so for 90 days it can only buy with money that has settled.</div></div>` : ''}
+        <div class="group ${v.restrictedUntil ? 'mt12' : ''}">${v.list.length ? v.list.map(x => `<div class="cell"><div class="lead">${icon('flag')}</div><div class="main"><div class="title">${h(x.sym || 'Violation')}</div><div class="sub">${h(x.note || '')}. Drops off ${fmtDate(x.dropsOff, { year: 'numeric' })}</div></div></div>`).join('') : `<div class="cell"><div class="main"><div class="sub">None. In a cash account you can buy with money from a sale before it settles, but wait for that money to settle before you sell what you bought with it.</div></div></div>`}</div>`;
+    } else {
+      const d = await api('ira'), r = d.ira; if (!r) return;
+      const room = r.room, rmd = r.rmd;
+      el.innerHTML = `<div class="section-h"><h2>${r.kind === 'roth' ? 'Roth IRA' : 'Traditional IRA'}</h2><span class="t-foot">${d.profile.set ? `Age ${d.profile.age}` : ''}</span></div>
+        <div class="card ira-card"><div class="t-cap">Left to put in for ${room.year}</div><div class="big">${money(room.left)}</div>
+          <div class="meter"><i style="width:${room.limit ? clamp(room.used / room.limit * 100, 0, 100) : 100}%;background:var(--ac)"></i></div>
+          <div class="t-foot">${money(room.used)} of ${money(room.limit)} used across all your IRAs. ${h(room.why.join('; '))}.</div>
+          ${r.kind === 'roth' ? `<div class="kv mt12"><span class="k">Your contributions (come out free)</span><span class="v">${money(r.basis)}</span></div>` : ''}
+          <div class="kv ${r.kind === 'roth' ? '' : 'mt12'}"><span class="k">Penalty-free withdrawals from</span><span class="v">${r.halfAge ? (r.pastHalf ? 'Now' : fmtDate(r.halfAge + 'T12:00', { year: 'numeric' })) : 'Add your date of birth'}</span></div>
+          ${rmd ? `<div class="kv"><span class="k">Required withdrawals</span><span class="v">${rmd.due ? `<b class="dn">${money(rmd.left)} left</b>` : `From ${rmd.startYear}`}</span></div><p class="t-foot">${h(rmd.text)}</p>` : ''}
+          <p class="t-foot">Trades in this wallet don't count for taxes. ${r.kind === 'roth' ? 'Growth is never taxed if you wait until 59½ and the account is 5 years old.' : 'Withdrawals count as income.'}</p></div>
+        ${r.history.length ? `<div class="section-h"><h2>Deposits and withdrawals</h2></div><div class="group">${r.history.map(x => `<div class="cell"><div class="lead">${icon(x.kind === 'withdrawal' ? 'upload' : 'download')}</div><div class="main"><div class="title">${x.kind === 'withdrawal' ? 'Withdrawal' : x.amount < 0 ? 'Deposit cancelled' : 'Contribution'}</div><div class="sub">${fmtDay(x.ts)}${x.penalty ? ` · 10% penalty about ${money(x.penalty)}` : ''}${x.tax ? ` · ${money(x.tax)} taxable` : ''}</div></div><b class="n">${money(Math.abs(x.amount))}</b></div>`).join('')}</div>` : ''}`;
+    }
+  } catch (e) { el.innerHTML = ''; }
 }
 
 // ===================================================================
@@ -8367,6 +8403,26 @@ PAGES.costs = {
 // Newest first. Each release: version, date, a one-line headline and grouped notes.
 // ===================================================================
 const CHANGELOG = [
+  { v: '3.8.0', d: '2026-10-26', title: 'Account types: real cash accounts, IRAs and Roth IRAs', groups: [
+    ['Your profile', [
+      'Mango asks for your date of birth once, and the account rules use your real age, the way a broker does: margin needs you to be 18 or older, IRA withdrawals are penalty-free from 59½, and required withdrawals start at 73 (75 if you were born in 1960 or later).',
+      'Optional filing status, income and earnings from work, for the IRA limits. Change them any time in Settings → Your profile.',
+    ]],
+    ['Cash accounts, for real', [
+      'Cash wallets can now buy with money from a sale before it settles (stocks settle the next business day), like real cash accounts. That money can\'t be withdrawn until it settles.',
+      'Selling shares you bought with that money before it settles is a good faith violation. Mango asks first and says when the money settles. 3 violations in 12 months restricts the wallet to settled cash for 90 days.',
+      'The Account page lists each violation, when it drops off, and any restriction. Bots in cash wallets skip a sale that would cause a violation and say so in their journal.',
+      'Free-riding (selling shares you never paid for) can\'t happen in Mango, because a cash wallet can never buy with money it doesn\'t have.',
+    ]],
+    ['IRA and Roth IRA wallets', [
+      'Two new wallet types. Deposits share one yearly limit across all your IRAs: $7,500 for 2026, plus $1,100 at 50 or older, and no more than what you earned from work if you entered it. Roth deposits phase out between $153,000 and $168,000 of income ($242,000 to $252,000 married filing jointly).',
+      'No margin, and trades inside never count for taxes: the Taxes page says so.',
+      'Withdrawals show the cost first: from a traditional IRA they count as income, with a 10% penalty before 59½. From a Roth, what you put in comes out free; earnings are taxed and penalized unless you are over 59½ and the account is 5 years old.',
+      'Traditional IRAs show the year your required withdrawals start. When they are due, the amount is last year-end\'s balance divided by the IRS factor for your age, with the deadline and the 25% excise tax for missing it.',
+      'A new IRA\'s starting balance counts as a rollover from an old work plan, so it doesn\'t use this year\'s limit.',
+    ]],
+    ['Also', ['Every new rule has a switch in Settings → Market rules.']],
+  ] },
   { v: '3.7.0', d: '2026-10-26', title: 'Market rules engine', groups: [
     ['Circuit breakers', [
       'Market-wide circuit breakers, as the exchanges run them: if the S&P 500 falls 7% (Level 1) or 13% (Level 2) from yesterday\'s close before 3:25 pm, all stock trading halts for 15 minutes. After 3:25 pm those levels don\'t halt. A 20% fall (Level 3) closes stocks for the rest of the day. Each level fires once a day at most.',
@@ -8755,12 +8811,43 @@ function marketRulesCard() {
     ${rowToggle('f_luld', 'Single-stock price bands', 'Pause a stock for 5 minutes after a sudden jump or drop (Limit Up-Limit Down)')}
     ${rowToggle('fracRules', 'Fractional-share rules', 'Fractions and dollar amounts trade as market or day limit orders, in regular hours')}
     ${rowToggle('priceImprove', 'Price improvement', 'Market orders fill a little inside the bid and ask, like at a real broker')}
+    ${rowToggle('cashRules', 'Cash-account rules', 'Good faith violations and the 90-day settled-cash restriction')}
     ${rowToggle('sanity', 'Order checks', 'Ask before an order that looks like a mistake')}
     ${SET().sanity !== false ? `${rowToggle('san_far', '· Limit price far from the market', 'More than 10% away')}${rowToggle('san_big', '· Big orders', 'Over 25% of the wallet')}${rowToggle('san_open', '· Right after the open', 'Market orders in the first 5 minutes')}${rowToggle('san_earn', '· Before earnings', 'Buying the day before or of a report')}${rowToggle('san_thin', '· Thinly traded stocks', 'Market orders in stocks that trade under $1 million a day')}` : ''}
     ${rowLink('calendar', 'Market calendar', 'Holidays, early closes, and when trading stops', 'calendar')}</div>`;
 }
 // the home screen: a heads-up the day before a holiday or an early close
 function calNoteHtml() { const n = App.S?.calNote; if (!n || isRealSpace() === undefined) return ''; return `<button class="callout cal-note mt12" data-act="go" data-to="calendar">${icon('calendar')}<div>${h(n.text)}</div></button>`; }
+
+// ===================================================================
+// Your profile: date of birth (asked once, the age rules use it), filing status and income for IRA limits.
+// ===================================================================
+function profileSheet({ first = false } = {}) {
+  const pr = App.S?.profile || {}, st = { dob: pr.dob || '', filing: pr.filing || 'single', income: pr.income ?? '', earned: pr.earned ?? '' };
+  const s = sheet({ title: first ? 'One quick thing' : 'Your profile', tall: true, onClose: () => { if (first && !App.S?.profile?.set) setTimeout(() => { askDobAgain(); }, 60000); }, html: `
+    <p class="dialog-msg">${first ? 'Mango now uses your real age for account rules, the way a broker does. ' : ''}Margin and options need you to be 18 or older, IRA withdrawals are penalty-free from 59½, and required withdrawals start at 73 or 75.</p>
+    <label class="field"><span>Date of birth</span><input type="date" id="pf-dob" value="${h(st.dob)}" max="${new Date().toISOString().slice(0, 10)}"></label>
+    <div class="section-h"><h2>For IRA limits</h2><span class="t-foot">Optional</span></div>
+    <div class="field"><span>Tax filing status</span>${seg('pf-fil', [['single', 'Single'], ['joint', 'Married, jointly'], ['hoh', 'Head of household']], st.filing)}</div>
+    <div class="pf-grid"><label class="field"><span>Income this year ($)</span><input type="number" inputmode="decimal" id="pf-inc" value="${h(st.income)}" placeholder="For the Roth limit"></label>
+      <label class="field"><span>Earned from work ($)</span><input type="number" inputmode="decimal" id="pf-ear" value="${h(st.earned)}" placeholder="Caps IRA deposits"></label></div>
+    <p class="note">Stays on your own server. It's used only for these rules. IRA deposits can't be more than what you earned from work that year.</p>`,
+    foot: `<button class="btn btn-primary btn-block btn-lg" id="pf-go">${first ? 'Continue' : 'Save'}</button>` });
+  raf(() => placeThumbs(s.body)); onSeg(s.body, 'pf-fil', v => { st.filing = v; });
+  $('#pf-go', s.footEl).addEventListener('click', async e => {
+    const dob = $('#pf-dob', s.body).value; if (!dob) { toast('Enter your date of birth', { kind: 'err' }); return; }
+    const body = { dob, filing: st.filing, income: $('#pf-inc', s.body).value, earned: $('#pf-ear', s.body).value };
+    if (pr.dob && pr.dob !== dob) { if (!(await confirmBox({ title: 'Change your date of birth?', msg: 'Your age rules (margin, IRA penalties, required withdrawals) follow it.', ok: 'Change it' }))) return; body.confirmDob = true; }
+    busy(e.currentTarget, true);
+    try { await post('profile', body); s.close(); await loadState(); toast('Saved'); } catch (err) { busy(e.currentTarget, false); toastErr(err); }
+  });
+  return s;
+}
+// asked once, after the update, before anything else
+on('state', function askDob() { if (askDob.shown || !App.S || App.S.profile?.set || !App.T) return; askDob.shown = true; setTimeout(() => profileSheet({ first: true }), 900); });
+const askDobAgain = () => { if (!App.S?.profile?.set) profileSheet({ first: true }); }; // until it's set, it comes back a minute later
+ACT.profile = () => profileSheet();
+const profileRow = () => { const pr = App.S?.profile; return `<button class="cell" data-act="profile"><div class="lead">${icon('key')}</div><div class="main"><div class="title">Your profile</div><div class="sub">${pr?.set ? `Age ${pr.age} · used for margin, options and IRA rules` : 'Add your date of birth for the age rules'}</div></div>${icon('right', 'chev')}</button>`; };
 
 // ===================================================================
 // Settings
@@ -8815,7 +8902,7 @@ PAGES.settings = {
       ${standbyCard()}${panicCard()}${marketRulesCard()}${guardsCard()}${promoCard()}${briefsCard()}${widgetCard()}${opsCard()}${councilCard()}${nightCard()}${analystCard()}
       <div class="group mt16">${Object.entries(SECTIONS).map(([k, v]) => rowLink(v.icon, v.title, v.sub, 'settings/' + k)).join('')}</div>
       <div class="group mt16">${rowLink('wallet', 'Wallets', 'Create, rename, reset, move cash', 'wallets')}${rowToggle('hideBalances', 'Hide balances', 'Blur dollar amounts. Press and hold to peek.')}</div>
-      <div class="group mt16">${rowLink('lock', 'Face ID and backups', 'Log in with Face ID, protect real money, save your data', 'security')}</div>
+      <div class="group mt16">${profileRow()}${rowLink('lock', 'Face ID and backups', 'Log in with Face ID, protect real money, save your data', 'security')}</div>
       <div class="group mt16"><button class="cell" data-act="changePass"><div class="lead">${icon('key')}</div><div class="main"><div class="title">Change password</div></div>${icon('right', 'chev')}</button><button class="cell" data-act="logout"><div class="lead">${icon('logout')}</div><div class="main"><div class="title">Log out of this device</div></div></button><button class="cell" data-act="logoutAll"><div class="lead" style="color:var(--dn)">${icon('lock')}</div><div class="main"><div class="title">Log out everywhere</div><div class="sub">Signs out every phone and computer</div></div></button></div>
       <p class="note center">Mango v${h(APP_VERSION)} · build ${h(BUILD.slice(0, 7))} · ${S.broker?.on && S.broker.env === 'live' ? 'a live Alpaca account is connected' : 'practice money only'}</p>`;
   },
