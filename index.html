@@ -1184,6 +1184,23 @@ button.tile:active { transform: scale(.98); }
 .hb-card { display: flex; gap: 8px; margin: 10px 0 4px; } .hb-card span { flex: 1; padding: 8px 10px; border-radius: 12px; background: rgba(255,255,255,.06); font-size: 11.5px; color: #B9B2CC; } .hb-card b { display: block; font-size: 20px; color: #fff; font-variant-numeric: tabular-nums; }
 .hq-night { pointer-events: auto; display: flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 12px; background: rgba(40, 30, 80, .82); color: #E3DBFF; font-size: 12.5px; font-weight: 700; box-shadow: inset 0 0 0 1px rgba(199, 146, 234, .35); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); } .hq-night svg { width: 14px; height: 14px; color: #C792EA; } .hq-night.hidden { display: none; }
 .hq-tag { transition: opacity .25s ease; } .hq-tag.hid { opacity: 0 !important; pointer-events: none; }
+/* life in HQ */
+.hq-event { position: absolute; left: 50%; top: calc(var(--hq-bar, 60px) + 12px); transform: translateX(-50%); z-index: 6; padding: 8px 14px; border-radius: 999px; font-weight: 700; font-size: 14px; background: rgba(20,16,32,.82); color: #fff; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); white-space: nowrap; max-width: calc(100% - 32px); overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.hq-event[data-k="crash"] { background: rgba(200,30,50,.88); animation: hqpulse 1s ease-in-out infinite; }
+.hq-event[data-k="party"] { background: rgba(40,160,100,.88); }
+@keyframes hqpulse { 50% { box-shadow: 0 0 0 6px rgba(255,60,80,.25); } }
+@media (prefers-reduced-motion: reduce) { .hq-event[data-k="crash"] { animation: none; } }
+.hq-wx { position: absolute; right: 12px; bottom: 52px; z-index: 5; font-size: 12px; padding: 4px 10px; border-radius: 999px; background: rgba(20,16,32,.6); color: #fff; pointer-events: none; }
+.hq-tag[data-lv]::after { content: 'Lv ' attr(data-lv); font-size: .8em; opacity: .85; margin-left: 3px; padding: 0 4px; border-radius: 6px; background: rgba(255,214,70,.25); }
+.hq-lv { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); } .hq-lv .meter { margin: 6px 0; } .hq-lv p { margin: 0; }
+.hq.photo .hq-top, .hq.photo .hq-ticker, .hq.photo .hq-card, .hq.photo .hq-board, .hq.photo .hq-case, .hq.photo .hq-alarm, .hq.photo .hq-tools > :not(#hq-cam), .hq.photo .hq-wx, .hq.photo .hq-tag::after, .hq.photo .hq-event, .hq.photo .hq-tl { display: none !important; }
+.hq.photo-clean .hq-tag, .hq.photo-clean .hq-room { opacity: 0 !important; }
+.hq-photo { position: absolute; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 8; padding: 10px; border-radius: 18px; background: rgba(20,16,32,.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.hq-photo .hp-row { display: flex; gap: 8px; margin-top: 8px; } .hq-photo .hp-row .btn { flex: 1; }
+.hq-tl { position: absolute; left: 12px; right: 12px; bottom: 52px; z-index: 7; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 16px; background: rgba(20,16,32,.85); color: #fff; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.tl-clock b { display: block; font-size: 18px; font-family: var(--font-num); } .tl-clock span { font-size: 11px; opacity: .7; }
+.tl-track { height: 6px; border-radius: 3px; background: rgba(255,255,255,.15); overflow: hidden; } .tl-track i { display: block; height: 100%; background: var(--ac); transition: width .4s; }
+.tl-btns { display: flex; gap: 6px; } .tl-btns button { min-width: 36px; height: 32px; border-radius: 10px; border: 0; background: rgba(255,255,255,.12); color: #fff; font-weight: 700; }
 
 /* ---------- motion ---------- */
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -1303,7 +1320,7 @@ button.tile:active { transform: scale(.98); }
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '2.18.0';
+const BUILD = '__BUILD__', APP_VERSION = '2.19.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1423,6 +1440,7 @@ const ICON_PATHS = {
   crown: '<path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5L3 8Z"/>',
   send: '<path d="M4 12 20 4l-6 16-3-7-7-1Z"/>',
   chat: '<path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H10l-5 4v-4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/>',
+  image: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="12" cy="12" r="3.5"/><path d="M8 5l1.5-2h5L16 5"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>',
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
@@ -5992,7 +6010,7 @@ function drawPerson(iso, a, th, o = {}) {
   const F = facing4(a), cd = CARD[F], rt = [-cd[1], cd[0]];          // forward and right, snapped to the grid
   const wa = seated ? 0 : (a.walkAmt || 0), ph = a.phase || 0;          // how much they're walking (0..1) and where in the stride
   const swing = Math.sin(ph) * 0.085 * sz * wa, lift = k => Math.max(0, Math.sin(ph + k * Math.PI)) * 0.045 * sz * wa;
-  const bob = wa ? Math.abs(Math.cos(ph)) * 0.03 * sz * wa : Math.sin(t * 2 + a.id) * 0.008;   // up on each step; breathing when still
+  const bob = (wa ? Math.abs(Math.cos(ph)) * 0.03 * sz * wa : Math.sin(t * 2 + a.id) * 0.008) + (a.hop || 0);   // up on each step; breathing when still
   const lean = 0.035 * sz * wa;
   const W = 0.34 * sz, cx = a.x + cd[0] * lean * 0.5, cy = a.y + cd[1] * lean * 0.5, x0 = cx - W / 2, y0 = cy - W / 2;
   const skin = C.skin || L.skin, shirt = C.shirt || a.color || '#888', pants = C.pants || '#333', shoes = C.shoes || '#222', sleeve = C.sleeve || shirt;
@@ -7066,6 +7084,246 @@ ACT.hqTheme = () => {
   // little previews of each world, drawn with the real renderer
   raf(() => { for (const b of $$('.hq-th', sh.body)) { const t = HQT[b.dataset.id], cv = $('canvas', b); try { const env = hqEnv(top.hq), phase = env.night ? 'n' : env.dusk ? 'd' : 'a', iso = new Iso(cv), S = HQ_L.W + HQ_L.D, g = iso.g; iso.w = 320; iso.h = 180; iso.zoom = 0.155; iso.dpr = 1; iso.ox = -((HQ_L.W - HQ_L.D) / 2) * iso.TW / 2 * iso.zoom; iso.oy = -(S / 2 * iso.TH / 2) * iso.zoom + 14; const fake = { ...top.hq, iso, _stars: null, _clouds: null, _spark: null }; t.sky(g, iso, fake, 0, 320, 180); const c = HQCache.build(t, top.hq, iso.zoom, phase), k = iso.zoom / c.zc; g.drawImage(c.c, 160 + iso.ox - c.X0 * k, 90 + iso.oy - c.Y0 * k, c.c.width * k, c.c.height * k); } catch (e) { console.warn(e); } } });
   sh.body.addEventListener('click', e => { const b = e.target.closest('.hq-th'); if (!b) return; PAGES.hq.setTheme(top, b.dataset.id); $$('.hq-th', sh.body).forEach(x => x.classList.toggle('on', x === b)); buzz(6); });
+};
+
+// ===================================================================
+// Life in Mango HQ: market events (crash alarm, win party, earnings day), seasons and weather that
+// follow the calendar and the market, bot levels with gear, hire and farewell ceremonies, visitors,
+// photo mode and the day timelapse. Everything hooks onto the HQ page without changing its drawing core.
+// ===================================================================
+const LIFE = { get: () => { try { return { events: true, weather: true, visitors: true, ...(store.get('hqLife') || {}) }; } catch (e) { return { events: true, weather: true, visitors: true }; } }, set: (k, v) => store.set('hqLife', { ...LIFE.get(), [k]: v }) };
+const HQ_DOOR = [0.4, 9.5]; // the west end of the main hall: where people come and go
+const CONFETTI = ['#FF5C77', '#FFD646', '#3DDC97', '#4EA8FF', '#B48CFF', '#FF9F1C'];
+
+// ---------- levels and gear ----------
+const GEAR = [[3, 'a name badge'], [5, 'a cap'], [8, 'gold trim'], [12, 'a top hat'], [16, 'a gold hat'], [20, 'a crown']];
+const gearOf = lv => GEAR.filter(([n]) => lv >= n).map(([, g]) => g);
+const _costumeOf = costumeOf;
+costumeOf = function (th, a) {
+  const C = _costumeOf(th, a), lv = a.bot?.level || 0; if (!lv || a.persona || a.k === 'chair') return C;
+  if (lv >= 5 && (!C.hat || C.hat === 'antenna')) C.hat = lv >= 12 ? 'top' : 'cap';
+  if (lv >= 8) C.hatCol = lv >= 16 ? '#FFD646' : C.hatCol || '#C9A045';
+  if (lv >= 20) C.crownToo = true;
+  return C;
+};
+
+// ---------- weather and seasons ----------
+const seasonOf = (d = new Date()) => ['winter', 'winter', 'spring', 'spring', 'spring', 'summer', 'summer', 'summer', 'fall', 'fall', 'fall', 'winter'][d.getMonth()];
+function weatherOf(st) {
+  const th = st.theme.id, spy = st.data?.market?.spy ?? 0, season = seasonOf();
+  let k = spy <= -2 ? 'storm' : spy <= -1 ? (season === 'winter' && th !== 'island' ? 'snow' : 'rain') : spy >= 1 ? 'sun' : season === 'fall' ? 'leaves' : season === 'spring' ? 'petals' : season === 'winter' && th !== 'island' ? 'flurry' : 'clear';
+  if (th === 'space') k = spy <= -1 ? 'meteors' : 'clear';
+  return { k, season, spy };
+}
+const WX_LABEL = { storm: '⛈ Storm: the market is down hard', rain: '🌧 Rain: the market is down', snow: '❄️ Snow: the market is down', sun: '☀️ Sunny: the market is up', leaves: '🍂 Fall', petals: '🌸 Spring', flurry: '❄️ Winter', clear: '', meteors: '☄️ Meteor shower: the market is down' };
+function drawWeather(p, dt) {
+  const st = p.hq, g = st.iso.g, W = st.iso.w, H = st.iso.h; if (!LIFE.get().weather || st.calm || st.photoClean) { $('#hq-wx', p.body)?.classList.add('hidden'); if (st.wx) st.wx.k = null; return; }
+  const wx = st.wx = st.wx || { k: null, parts: [], flash: 0 };
+  const cur = weatherOf(st); if (cur.k !== wx.k) { wx.k = cur.k; wx.parts = []; const el = $('#hq-wx', p.body); if (el) { const l = WX_LABEL[cur.k]; el.classList.toggle('hidden', !l); el.textContent = l; } }
+  const want = { storm: 220, rain: 140, snow: 110, flurry: 45, leaves: 26, petals: 30, meteors: 6, sun: 0, clear: 0 }[wx.k] || 0;
+  while (wx.parts.length < want) wx.parts.push({ x: Math.random() * W, y: Math.random() * H - H, v: 0.6 + Math.random() * 0.8, r: Math.random() * 6.28, s: Math.random() });
+  g.save();
+  // a seasonal wash so each season feels a little different
+  const wash = { winter: 'rgba(160,190,255,.06)', fall: 'rgba(255,150,60,.05)', spring: 'rgba(255,190,220,.04)', summer: 'rgba(255,230,140,.04)' }[cur.season];
+  if (wash && st.theme.id !== 'space') { g.fillStyle = wash; g.fillRect(0, 0, W, H); }
+  if (wx.k === 'storm' || wx.k === 'rain') { g.fillStyle = `rgba(30,40,70,${wx.k === 'storm' ? 0.18 : 0.1})`; g.fillRect(0, 0, W, H); }
+  if (wx.k === 'sun') { const gr = g.createRadialGradient(W * 0.85, -H * 0.1, 10, W * 0.85, -H * 0.1, H * 0.9); gr.addColorStop(0, 'rgba(255,230,150,.28)'); gr.addColorStop(1, 'rgba(255,230,150,0)'); g.fillStyle = gr; g.fillRect(0, 0, W, H); }
+  for (const q of wx.parts) {
+    if (wx.k === 'rain' || wx.k === 'storm') { q.y += (520 + q.s * 280) * dt; q.x -= 90 * dt; g.strokeStyle = 'rgba(190,210,255,.45)'; g.lineWidth = 1.2; g.beginPath(); g.moveTo(q.x, q.y); g.lineTo(q.x - 4, q.y + 14); g.stroke(); }
+    else if (wx.k === 'snow' || wx.k === 'flurry') { q.y += (40 + q.s * 40) * dt; q.x += Math.sin(st.t * 1.3 + q.r) * 20 * dt; g.fillStyle = 'rgba(255,255,255,.85)'; g.beginPath(); g.arc(q.x, q.y, 1.2 + q.s * 2, 0, 7); g.fill(); }
+    else if (wx.k === 'leaves' || wx.k === 'petals') { q.y += (34 + q.s * 30) * dt; q.x += (Math.sin(st.t + q.r) * 40 + 15) * dt; q.r += dt * (1 + q.s); g.save(); g.translate(q.x, q.y); g.rotate(q.r); g.fillStyle = wx.k === 'leaves' ? ['#D9822B', '#C0392B', '#E8B04A', '#8E5A2B'][Math.floor(q.s * 4)] : ['#FFB7CE', '#FFD1DC', '#FFFFFF'][Math.floor(q.s * 3)]; g.beginPath(); g.ellipse(0, 0, 5, 2.6, 0, 0, 7); g.fill(); g.restore(); }
+    else if (wx.k === 'meteors') { q.y += 300 * dt; q.x += 420 * dt; g.strokeStyle = 'rgba(255,200,140,.8)'; g.lineWidth = 2; g.beginPath(); g.moveTo(q.x, q.y); g.lineTo(q.x - 40, q.y - 28); g.stroke(); }
+    if (q.y > H + 20 || q.x > W + 60 || q.x < -60) { q.y = -20 - Math.random() * 80; q.x = Math.random() * (W + 120) - 40; }
+  }
+  if (wx.k === 'storm') { wx.flash -= dt; if (wx.flash < -6 - Math.random() * 6) wx.flash = 0.25; if (wx.flash > 0) { g.fillStyle = `rgba(255,255,255,${wx.flash * 1.6})`; g.fillRect(0, 0, W, H); } }
+  g.restore();
+}
+
+// ---------- market events ----------
+function eventOf(st) {
+  const d = st.data; if (!d || !LIFE.get().events) return null;
+  const spy = d.market?.spy, val = (st.bots || []).reduce((t, b) => t + (b.value || 0), 0), dayPct = val ? d.vault.day / val * 100 : 0;
+  if ((spy != null && spy <= -2) || dayPct <= -3) return { k: 'crash', text: `🚨 Crash alarm: ${spy != null && spy <= -2 ? `the S&P 500 is down ${Math.abs(spy).toFixed(1)}%` : `your bots are down ${Math.abs(dayPct).toFixed(1)}% today`}` };
+  if ((spy != null && spy >= 1.5) || dayPct >= 1.5) return { k: 'party', text: `🎉 Win party: ${dayPct >= 1.5 ? `your bots are up ${dayPct.toFixed(1)}% today` : `the S&P 500 is up ${spy.toFixed(1)}%`}` };
+  if (d.earnToday?.length) return { k: 'earn', text: `📣 Earnings day: ${d.earnToday.slice(0, 4).join(', ')}`, syms: d.earnToday };
+  return null;
+}
+const EV_LINES = {
+  crash: ['Everybody stay calm!', 'Check the stops!', 'Is this a dip or a cliff?', 'Hold the line!', 'Deep breaths, it\'s paper money.', 'Who sold?!'],
+  party: ['Green across the board!', 'Drinks on the vault!', 'We\'re so back.', 'Best. Day. Ever.', 'Somebody frame this chart.'],
+  earn: ['Numbers are out!', 'Did they beat?', 'Guidance! What\'s the guidance?', 'Press release incoming!', 'The call starts in five.'],
+};
+function runEvents(p, dt) {
+  const st = p.hq, ev = eventOf(st), bar = $('#hq-event', p.body);
+  if (bar) { bar.classList.toggle('hidden', !ev); if (ev && bar._t !== ev.text) { bar.textContent = ev.text; bar._t = ev.text; bar.dataset.k = ev.k; } }
+  const prev = st.evK; st.evK = ev?.k || null;
+  if (ev && ev.k !== prev) { // the event starts: everyone reacts
+    for (const a of st.agents.values()) { if (a.busy || a.mood === 'sleep') continue; if (ev.k === 'crash') a.goRoom('control'); else if (ev.k === 'party') a.goRoom('lounge'); else if (ev.k === 'earn' && ev.syms.some(s => (a.bot?.holding || []).includes(s))) a.goRoom('news'); }
+    if (st.chair) PAGES.hq.say(p, st.chair, ev.k === 'crash' ? 'Battle stations! Everyone to Control.' : ev.k === 'party' ? 'Party in the lounge! You\'ve earned it.' : 'Earnings day. Eyes on the news room.', ev.k === 'crash' ? 'bad' : 'good');
+  }
+  if (!ev || st.calm) return;
+  st.evT = (st.evT ?? 3) - dt;
+  if (st.evT <= 0) {
+    st.evT = ev.k === 'party' ? 2.5 : 6 + Math.random() * 5;
+    const list = [...st.agents.values()].filter(a => a.mood !== 'sleep'), a = list[Math.floor(Math.random() * list.length)];
+    if (a && Math.random() < 0.6) PAGES.hq.say(p, a, pickLine(EV_LINES[ev.k]), 'chat');
+    if (ev.k === 'party') { const r = HQ_ROOMS.lounge; for (let i = 0; i < 24; i++) st.parts.push({ x: r.x + r.w / 2 + (Math.random() - 0.5) * 3, y: r.y + r.d / 2 + (Math.random() - 0.5) * 3, z: 2.4, vx: (Math.random() - 0.5) * 3, vy: (Math.random() - 0.5) * 3, vz: 2 + Math.random() * 3, life: 2, c: CONFETTI[i % CONFETTI.length] }); }
+    if (ev.k === 'party') for (const b of list.slice(0, 6)) for (let i = 0; i < 10; i++) st.parts.push({ x: b.x, y: b.y, z: 1.6, vx: (Math.random() - 0.5) * 2.4, vy: (Math.random() - 0.5) * 2.4, vz: 2.5 + Math.random() * 2.5, life: 1.8, c: CONFETTI[i % CONFETTI.length] });
+    if (ev.k === 'earn') { const r = HQ_ROOMS.news; for (let i = 0; i < 8; i++) st.parts.push({ x: r.x + 2 + Math.random() * (r.w - 4), y: r.y + 2 + Math.random() * (r.d - 4), z: 2.2, vx: (Math.random() - 0.5), vy: (Math.random() - 0.5), vz: 1 + Math.random(), life: 2.2, c: '#F5F5F0' }); }
+  }
+  if (ev.k === 'crash') { // a red pulse at the edges and a turning beacon over Control
+    const g = st.iso.g, W = st.iso.w, H = st.iso.h, a = 0.18 + Math.sin(st.t * 4) * 0.1, gr = g.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.75);
+    gr.addColorStop(0, 'rgba(255,40,60,0)'); gr.addColorStop(1, `rgba(255,40,60,${a})`); g.fillStyle = gr; g.fillRect(0, 0, W, H);
+    const r = HQ_ROOMS.control, [bx, by] = st.iso.P(r.x + r.w / 2, r.y + r.d / 2, 3.2), ang = st.t * 3, k = st.iso.zoom;
+    g.save(); g.translate(bx, by); g.fillStyle = 'rgba(255,60,60,.9)'; g.beginPath(); g.arc(0, 0, 7 * k, 0, 7); g.fill(); g.globalAlpha = 0.35; g.beginPath(); g.moveTo(0, 0); g.arc(0, 0, 90 * k, ang, ang + 0.5); g.closePath(); g.fill(); g.beginPath(); g.moveTo(0, 0); g.arc(0, 0, 90 * k, ang + Math.PI, ang + Math.PI + 0.5); g.closePath(); g.fill(); g.restore();
+  }
+  if (ev.k === 'party' && !st.calm) for (const a of st.agents.values()) if (a.room === 'lounge' && !a.path.length && !a.sit && a.mood !== 'sleep') a.hop = Math.abs(Math.sin(st.t * 6 + a.id)) * 0.25;
+}
+
+// ---------- hires, farewells and visitors ----------
+function spawnWalker(st, o) { const a = new Agent({ x: HQ_DOOR[0], y: HQ_DOOR[1], room: 'news', speed: 1.9, ...o }); st.extra = st.extra || []; st.extra.push(a); return a; }
+function leave(st, a, done) { a.release?.(); a.path = [...(a.path.length ? [] : []), ...[HQ_L.nodes.j1, HQ_L.nodes.n1, HQ_DOOR, [-1.5, HQ_DOOR[1]]]]; a.target = null; a.leaving = true; a.onGone = done; }
+function ceremonies(p) {
+  const st = p.hq; let known = null; try { known = store.get('hqKnown'); } catch (e) {}
+  const now = Object.fromEntries((st.bots || []).map(b => [b.id, { name: b.name, strategy: b.strategy }]));
+  if (known && typeof known === 'object') {
+    for (const b of st.bots || []) if (!known[b.id] && Date.now() - (b.created || 0) < 7 * 864e5) { // hired
+      const a = st.agents.get(b.id); if (!a) continue;
+      a.x = HQ_DOOR[0]; a.y = HQ_DOOR[1]; a.release(); a.goRoom('council', HQ_L.petition[0]); a.busy = true;
+      setTimeout(() => { if (!document.body.contains(p.el)) return; PAGES.hq.say(p, st.chair, `Welcome to the team, ${b.name}!`, 'good'); for (let i = 0; i < 40; i++) st.parts.push({ x: a.x, y: a.y, z: 1.8, vx: (Math.random() - 0.5) * 3, vy: (Math.random() - 0.5) * 3, vz: 3 + Math.random() * 2, life: 2, c: CONFETTI[i % CONFETTI.length] }); }, 5200);
+      setTimeout(() => { if (!document.body.contains(p.el)) return; a.busy = false; a.goRoom(PAGES.hq.homeOf(a.bot)); }, 9000);
+    }
+    for (const [id, k] of Object.entries(known)) if (!now[id]) { // let go
+      const a = spawnWalker(st, { id: 900 + (+id % 90), name: k.name, color: hueOf(k.strategy), hat: 'antenna', mood: 'sad', x: HQ_ROOMS.lounge.x + 3, y: HQ_ROOMS.lounge.y + 3 });
+      a.goRoom('council', HQ_L.petition[1]);
+      setTimeout(() => { if (!document.body.contains(p.el)) return; PAGES.hq.say(p, st.chair, `Farewell, ${k.name}. Thanks for your service.`, ''); PAGES.hq.say(p, a, pickLine(['I\'ll miss you all.', 'Don\'t forget to set stop losses.', 'It was fun while it lasted.', 'Back to the lab, I guess.']), 'chat'); }, 6000);
+      setTimeout(() => { if (document.body.contains(p.el)) leave(st, a); }, 9500);
+    }
+  }
+  try { store.set('hqKnown', now); } catch (e) {}
+}
+const VISITORS = [
+  { k: 'mail', name: 'Mail carrier', color: '#4EA8FF', room: 'news', when: st => new Date().getHours() < 11, line: 'Morning brief, special delivery!' },
+  { k: 'auditor', name: 'The Auditor', color: '#9AA6B8', room: 'vault', when: () => new Date().getDay() === 5, line: 'Just checking the books. Carry on.' },
+  { k: 'reporter', name: 'Reporter', color: '#E85D75', room: 'news', when: st => !!st.data?.earnToday?.length, line: st => `Any comment on ${st.data.earnToday[0]} earnings?` },
+  { k: 'inspector', name: 'Risk inspector', color: '#5BC0BE', room: 'control', when: st => !!(st.data?.alarm?.killed?.length || st.data?.alarm?.brake?.length), line: 'I hear someone hit their limits.' },
+  { k: 'intern', name: 'New intern', color: '#C3E88D', room: 'trading', when: () => true, line: 'Is it true you never sleep?' },
+  { k: 'pizza', name: 'Pizza delivery', color: '#FF7A45', room: 'lounge', when: st => st.evK === 'party' || new Date().getHours() >= 18, line: 'Somebody order a large pepperoni?' },
+];
+function visitors(p, dt) {
+  const st = p.hq; if (!LIFE.get().visitors || st.photoClean) return;
+  st.visT = (st.visT ?? 25 + Math.random() * 20) - dt;
+  if (st.visT <= 0) {
+    st.visT = 90 + Math.random() * 120;
+    const opts = VISITORS.filter(v => v.when(st) && !(st.extra || []).some(a => a.vk === v.k)), v = opts[Math.floor(Math.random() * opts.length)];
+    if (v) {
+      const a = spawnWalker(st, { id: 950 + VISITORS.indexOf(v), name: v.name, color: v.color, vk: v.k, visitor: true });
+      a.goRoom(v.room);
+      setTimeout(() => { if (document.body.contains(p.el)) PAGES.hq.say(p, a, typeof v.line === 'function' ? v.line(st) : v.line, 'chat'); }, 9000);
+      setTimeout(() => { if (document.body.contains(p.el)) leave(st, a); }, 17000);
+    }
+  }
+}
+function stepExtras(p, dt) {
+  const st = p.hq; if (!st.extra?.length) return;
+  for (const a of st.extra) { a.step(dt); if (a.leaving && !a.path.length) a.gone = true; }
+  st.extra = st.extra.filter(a => !a.gone);
+}
+
+// ---------- photo mode ----------
+const PHOTO_FX = [['none', 'Normal', ''], ['warm', 'Warm', 'saturate(1.25) sepia(.18) brightness(1.04)'], ['noir', 'Noir', 'grayscale(1) contrast(1.2)'], ['film', 'Film', 'contrast(.92) saturate(.85) sepia(.3) brightness(1.05)'], ['pop', 'Pop', 'saturate(1.7) contrast(1.1)']];
+function photoMode(p, on) {
+  const st = p.hq, box = $('#hq', p.body); st.photo = on; box.classList.toggle('photo', on);
+  let bar = $('#hq-photo', p.body);
+  if (!on) { bar?.remove(); $('#hq-c', p.body).style.filter = ''; st.photoClean = false; return; }
+  if (!bar) { bar = document.createElement('div'); bar.id = 'hq-photo'; bar.className = 'hq-photo'; box.appendChild(bar); }
+  const fx = st.photoFx || 'none';
+  bar.innerHTML = `<div class="chips">${PHOTO_FX.map(([k, l]) => `<button class="chip ${k === fx ? 'on' : ''}" data-fx="${k}">${l}</button>`).join('')}</div>
+    <div class="hp-row"><button class="btn btn-quiet btn-sm" data-ph="clean">${st.photoClean ? 'Show weather and tags' : 'Hide tags and weather'}</button><button class="btn btn-primary btn-sm" data-ph="save">${icon('download')}Save photo</button><button class="btn btn-quiet btn-sm" data-ph="done">Done</button></div>`;
+  $('#hq-c', p.body).style.filter = PHOTO_FX.find(x => x[0] === fx)[2];
+  box.classList.toggle('photo-clean', !!st.photoClean);
+  bar.onclick = async e => {
+    const f = e.target.closest('[data-fx]'); if (f) { st.photoFx = f.dataset.fx; photoMode(p, true); return; }
+    const b = e.target.closest('[data-ph]'); if (!b) return;
+    if (b.dataset.ph === 'done') photoMode(p, false);
+    else if (b.dataset.ph === 'clean') { st.photoClean = !st.photoClean; photoMode(p, true); }
+    else if (b.dataset.ph === 'save') savePhoto(p);
+  };
+}
+async function savePhoto(p) {
+  const st = p.hq, src = $('#hq-c', p.body), c = document.createElement('canvas'); c.width = src.width; c.height = src.height;
+  const g = c.getContext('2d'), f = PHOTO_FX.find(x => x[0] === (st.photoFx || 'none'))[2]; if (f) g.filter = f; g.drawImage(src, 0, 0); g.filter = 'none';
+  const s = c.width / 400; g.font = `700 ${11 * s}px -apple-system, system-ui, sans-serif`; g.fillStyle = 'rgba(0,0,0,.35)'; const label = `🥭 Mango HQ · ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`; const tw = g.measureText(label).width;
+  g.fillRect(c.width - tw - 22 * s, c.height - 30 * s, tw + 14 * s, 20 * s); g.fillStyle = '#fff'; g.fillText(label, c.width - tw - 15 * s, c.height - 16 * s);
+  const blob = await new Promise(r => c.toBlob(r, 'image/png')); if (!blob) return toast("Couldn't make the photo", { kind: 'err' });
+  const file = new File([blob], `mango-hq-${Date.now()}.png`, { type: 'image/png' });
+  try { if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title: 'Mango HQ' }); return; } } catch (e) { if (e.name === 'AbortError') return; }
+  const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000); toast('Photo saved');
+}
+
+// ---------- the day timelapse ----------
+PAGES.hq.replay = function (p) {
+  const st = p.hq, evs = (st.data?.events || []).slice().reverse().filter(e => e.ts > Date.now() - 36 * 3600e3);
+  if (!evs.length) { toast('Nothing to replay yet', { kind: 'info', sub: 'Once your bots make decisions, you can replay the day here.' }); return; }
+  clearTimeout(st.replayT); let i = 0; st.tl = { speed: 1, paused: false };
+  let bar = $('#hq-tl', p.body); if (!bar) { bar = document.createElement('div'); bar.id = 'hq-tl'; bar.className = 'hq-tl'; $('#hq', p.body).appendChild(bar); }
+  const t0 = evs[0].ts, t1 = evs[evs.length - 1].ts;
+  const draw = () => { const e = evs[Math.min(i, evs.length - 1)]; bar.innerHTML = `<div class="tl-clock"><b>${new Date(e.ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</b><span>${new Date(e.ts).toLocaleDateString('en-US', { weekday: 'short' })} · ${i}/${evs.length}</span></div><div class="tl-track"><i style="width:${t1 > t0 ? (e.ts - t0) / (t1 - t0) * 100 : 100}%"></i></div><div class="tl-btns"><button data-tl="pause">${st.tl.paused ? '▶' : '❚❚'}</button><button data-tl="speed">${st.tl.speed}×</button><button data-tl="stop">✕</button></div>`; };
+  bar.onclick = e => { const b = e.target.closest('[data-tl]'); if (!b) return; if (b.dataset.tl === 'pause') { st.tl.paused = !st.tl.paused; if (!st.tl.paused) tick(); } else if (b.dataset.tl === 'speed') st.tl.speed = st.tl.speed === 1 ? 2 : st.tl.speed === 2 ? 4 : 1; else { clearTimeout(st.replayT); bar.remove(); return; } draw(); };
+  const tick = () => {
+    if (!document.body.contains(p.el)) return; if (st.tl.paused) return;
+    if (i >= evs.length) { draw(); setTimeout(() => bar.remove(), 2500); toast('Timelapse finished', { kind: 'info', ms: 1400 }); return; }
+    const e = evs[i++], k = 1 / st.tl.speed;
+    if (e.kind === 'decision') { this.onEvent(p, { kind: 'phase', phase: 'news', botId: e.botId }); setTimeout(() => this.onEvent(p, { kind: 'phase', phase: 'trade', botId: e.botId }), 1200 * k); setTimeout(() => this.onEvent(p, { kind: 'decision', botId: e.botId, title: e.title }), 1800 * k); setTimeout(() => this.onEvent(p, { kind: 'phase', phase: 'done', botId: e.botId }), 2600 * k); }
+    else this.onEvent(p, { kind: e.kind, botId: e.botId, title: e.title, body: e.body, sym: e.sym, side: e.side || (/^Bought|Buy /.test(e.title) ? 'buy' : 'sell'), pnl: e.pnl ?? (/\(\+/.test(e.title) ? 1 : null), qty: e.qty, price: e.price });
+    draw(); st.replayT = setTimeout(tick, 2200 * k);
+  };
+  draw(); tick();
+  p.cleanups.push(() => clearTimeout(st.replayT));
+};
+
+// ---------- hooks into the HQ page ----------
+{
+  const H = PAGES.hq, _mount = H.mount, _load = H.load, _frame = H.frame, _drawPeople = H.drawPeople, _select = H.select, _place = H.placeOverlay;
+  H.mount = function (p, args) {
+    _mount.call(this, p, args);
+    const box = $('#hq', p.body);
+    box.insertAdjacentHTML('beforeend', '<div class="hq-event hidden" id="hq-event"></div><div class="hq-wx hidden" id="hq-wx"></div>');
+    const tools = $('.hq-tools', p.body); tools?.insertAdjacentHTML('afterbegin', `<button class="icon-btn" id="hq-cam" aria-label="Photo mode">${icon('image')}</button>`);
+    $('#hq-cam', p.body)?.addEventListener('click', () => photoMode(p, !p.hq.photo));
+  };
+  H.load = async function (p, quiet) { const r = await _load.call(this, p, quiet); if (!p.hq._cer) { p.hq._cer = true; ceremonies(p); } else ceremonies(p); return r; };
+  H.frame = function (p, dt) { stepExtras(p, dt); visitors(p, dt); _frame.call(this, p, dt); if (p.hq.iso?.w) { runEvents(p, dt); drawWeather(p, dt); } };
+  H.drawPeople = function (p) {
+    const st = p.hq, ex = st.extra || [];
+    // the visitors and the hopping party-goers go through the same depth-sorted drawing as everyone else
+    if (!ex.length) { _drawPeople.call(this, p); for (const a of st.agents.values()) a.hop = 0; return; }
+    const ag = st.agents, merged = new Map(ag); for (const a of ex) merged.set('x' + a.id, a); st.agents = merged;
+    try { _drawPeople.call(this, p); } finally { st.agents = ag; for (const a of ag.values()) a.hop = 0; }
+  };
+  H.placeOverlay = function (p) {
+    _place.call(this, p);
+    const st = p.hq; for (const a of st.agents.values()) { const el = st.tags?.get(a.id), lv = a.bot?.level; if (el && lv && el.dataset.lv !== String(lv)) { el.dataset.lv = lv; el._w = 0; } }
+    $('#hq', p.body)?.classList.toggle('photo-clean', !!st.photoClean);
+  };
+  H.select = function (p, a) {
+    _select.call(this, p, a);
+    const b = a?.bot, card = $('#hq-card', p.body); if (!b?.level || !card) return;
+    const gear = gearOf(b.level), next = GEAR.find(([n]) => n > b.level);
+    card.insertAdjacentHTML('beforeend', `<div class="hq-lv"><div class="between"><b>Level ${b.level}</b><span class="t-cap">${b.lvInto} / ${b.lvNeed} XP</span></div><div class="meter"><i style="width:${Math.round(b.lvInto / b.lvNeed * 100)}%;background:var(--ac)"></i></div><p class="t-foot">${gear.length ? `Wearing ${gear.join(', ')}.` : 'No gear yet.'}${next ? ` ${next[1].replace(/^./, c => c.toUpperCase())} at level ${next[0]}.` : ' Fully kitted out.'} XP comes from trades, winning sales, days on the job and profit.</p></div>`);
+  };
+}
+// the theme sheet gets switches for all of this
+const _hqTheme = ACT.hqTheme;
+ACT.hqTheme = function (...args) {
+  const r = _hqTheme.apply(this, args);
+  setTimeout(() => {
+    const sh = [...document.querySelectorAll('.sheet')].pop(), body = sh?.querySelector('.sheet-body'); if (!body || body.querySelector('.hq-life')) return;
+    const L = LIFE.get(), row = (k, t, s) => `<div class="cell"><div class="main"><div class="title">${t}</div><div class="sub">${s}</div></div>${sw(L[k], `data-life="${k}"`)}</div>`;
+    body.insertAdjacentHTML('beforeend', `<div class="section-h hq-life"><h2>Life in HQ</h2></div><div class="group">${row('events', 'Market events', 'Crash alarm, win parties and earnings day')}${row('weather', 'Weather and seasons', 'Rain or snow when the market falls, sun when it rises')}${row('visitors', 'Visitors', 'The mail carrier, the auditor, reporters and more drop by')}</div>`);
+    body.querySelectorAll('[data-life]').forEach(el => el.addEventListener('click', () => { el.classList.toggle('on'); LIFE.set(el.dataset.life, el.classList.contains('on')); }));
+  }, 30);
+  return r;
 };
 
 // ===================================================================

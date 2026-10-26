@@ -5641,11 +5641,16 @@ GET('/api/hq', auth, async () => {
   const held = [...new Set(cards.flatMap(c => c.holding || []))].slice(0, 16);
   const tick = ['SPY', 'QQQ', 'BTC', ...held].filter((s, i, a) => a.indexOf(s) === i).map(s => { const q = prices.get(s); return q?.p ? { sym: s, p: q.p, ch: q.prev ? (q.p / q.prev - 1) * 100 : 0 } : null; }).filter(Boolean);
   const trades = +(await row("select count(*) n from bot_log where kind='trade' and ts > $1", [new Date(etToUtc(...etDate().split('-').map(Number), 0, 0))])).n;
+  // levels: experience from trades, winning sales, days on the job and profit
+  const tc = new Map((await rows("select wid, count(*) filter (where side in ('buy','sell')) n, count(*) filter (where side='sell' and pnl > 0) w from trd group by wid")).map(r => [r.wid, r]));
+  const xpOf = (c, b) => { const t = tc.get(b.wid), days = Math.max(0, (Date.now() - tsMs(b.created)) / 864e5); return Math.round((+t?.n || 0) * 4 + (+t?.w || 0) * 10 + days * 2 + Math.max(0, c.ret || 0) * 5); };
+  const lvOf = xp => { let lv = 1, need = 40; while (xp >= need && lv < 30) { xp -= need; lv++; need = Math.round(need * 1.25); } return { lv, into: xp, need }; };
+  let earnToday = []; if (FINNHUB_KEY) { try { const cal = await Promise.race([earningsCal(), sleep(1500).then(() => ({}))]); earnToday = held.filter(sym => cal[sym]?.date === etDate()); } catch (e) {} }
   return {
-    bots: cards.map(c => ({ id: c.id, name: c.name, strategy: c.strategy, status: c.status, activity: c.activity, holding: c.holding, value: c.value, ret: c.ret, day: c.day, spark: c.spark, broker: !!c.wallet?.broker, auto: !!STRATEGIES[c.strategy]?.auto, deciding: running.has(c.id), next: c.next, tryouts: STRATEGIES[c.strategy]?.auto ? (jsonOr(list.find(x => x.id === c.id)?.state, {})._board || []).map(t => ({ k: t.k, label: t.label, alloc: t.alloc, eligible: t.eligible })) : null })),
+    bots: cards.map(c => ({ id: c.id, name: c.name, strategy: c.strategy, status: c.status, activity: c.activity, holding: c.holding, value: c.value, ret: c.ret, day: c.day, spark: c.spark, broker: !!c.wallet?.broker, auto: !!STRATEGIES[c.strategy]?.auto, deciding: running.has(c.id), next: c.next, created: tsMs(list.find(x => x.id === c.id)?.created), xp: xpOf(c, list.find(x => x.id === c.id)), ...(() => { const L = lvOf(xpOf(c, list.find(x => x.id === c.id))); return { level: L.lv, lvInto: L.into, lvNeed: L.need }; })(), tryouts: STRATEGIES[c.strategy]?.auto ? (jsonOr(list.find(x => x.id === c.id)?.state, {})._board || []).map(t => ({ k: t.k, label: t.label, alloc: t.alloc, eligible: t.eligible })) : null })),
     events, council, members: councilMembers(), night: { ...nightJson(), crew: nightCrewOn() }, names: await getCouncilNames(), tick, trades,
     market: { ...market(), spy: spy?.prev ? (spy.p / spy.prev - 1) * 100 : null, btc: btc?.prev ? (btc.p / btc.prev - 1) * 100 : null },
-    vault: { total: totalPL, day }, alarm: { halt: !!S.realHalt, killed: cards.filter(c => c.status === 'killed').map(c => c.name), brake: cards.filter(c => c.activity?.k === 'brake').map(c => c.name), cooldown: cards.filter(c => c.activity?.k === 'cooldown').map(c => c.name) },
+    vault: { total: totalPL, day }, earnToday, alarm: { halt: !!S.realHalt, killed: cards.filter(c => c.status === 'killed').map(c => c.name), brake: cards.filter(c => c.activity?.k === 'brake').map(c => c.name), cooldown: cards.filter(c => c.activity?.k === 'cooldown').map(c => c.name) },
   };
 });
 
@@ -6418,7 +6423,7 @@ const ICONS = {};
 const icon = (name, fn) => ICONS[name] || (ICONS[name] = fn());
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD646"/><stop offset=".5" stop-color="#FFA028"/><stop offset="1" stop-color="#FA5256"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="#1E1430"/><ellipse cx="31" cy="36" rx="18" ry="22" transform="rotate(30 31 36)" fill="url(#g)"/><path d="M20 41l6.5-6 5 3.5 9.5-10" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37 28.5h4.5V33" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="45" cy="11.5" rx="9" ry="4.6" transform="rotate(-24 45 11.5)" fill="#3BD68A"/></svg>`;
 let BUILD = 'dev', INDEX = null, INDEX_GZ = null;
-const APP_VERSION = '2.18.0'; // stamped by build.sh from package.json
+const APP_VERSION = '2.19.0'; // stamped by build.sh from package.json
 function loadIndex() {
   const file = path.join(__dirname, 'index.html');
   let html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<!doctype html><title>Mango</title><p>index.html is missing next to server.js.</p>';
