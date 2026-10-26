@@ -94,6 +94,9 @@ It needs **Node 20+** and a **Postgres** database. The database tables are creat
 | `VAPID_EMAIL` | optional | Contact address for push notifications (`mailto:...`) |
 | `MANGO_STANDBY` | optional | Set to `1` on a backup copy only (see below) |
 | `PUBLIC_URL` | optional | The standby copy's own address, if the host doesn't provide one (Render does) |
+| `GITHUB_BACKUP_TOKEN`, `GITHUB_BACKUP_REPO` | optional | Nightly offsite backup to a **private** GitHub repo (`owner/name`). Use a fine-grained token with Contents read and write on that one repo only. |
+| `STANDBY_URL` | optional | On the main server: the standby's address, so the main keeps it awake |
+| `MAIN_URL` | optional | On the standby: the main server's address, so the standby watches it and notifies you if it goes down |
 | `PORT` | set by host | The port to listen on |
 
 Keep secrets in your host's variables. Never put them in the code or commit them to the repo.

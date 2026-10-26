@@ -977,6 +977,14 @@ button.tile:active { transform: scale(.98); }
 .div-d { width: 34px; display: flex; flex-direction: column; align-items: center; line-height: 1.1; margin-right: 4px; } .div-d b { font-size: 17px; } .div-d span { font-size: 11px; color: var(--mu); }
 .steps { margin: 4px 0 0; padding-left: 22px; line-height: 1.5; } .steps li { margin-bottom: 8px; }
 .sig-list .cell { min-height: 46px; }
+/* safety */
+.gate-ic { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; } .gate-ic svg { width: 16px; height: 16px; }
+.gate-ic.ok { color: var(--up); background: color-mix(in srgb, var(--up) 15%, transparent); } .gate-ic.no { color: var(--dn); background: color-mix(in srgb, var(--dn) 15%, transparent); }
+.twin-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; } .twin-row > div { display: flex; flex-direction: column; gap: 2px; } .twin-row .k { font-size: 12px; color: var(--mu); } .twin-row b { font-size: 22px; }
+.chart-wrap.short { height: 140px; }
+.panic-card .panic-ic { color: #fff; background: var(--dn); border-radius: 12px; }
+.panic-card .cell:first-child .title { color: var(--dn); font-weight: 750; }
+.cost-row { grid-template-columns: 120px 1fr 50px; }
 
 /* ---------- Paper / Alpaca sides ---------- */
 .space-sw { display: inline-flex; gap: 4px; padding: 4px; border-radius: 14px; background: var(--card); box-shadow: var(--hi); margin: 2px 0 10px; }
@@ -1295,7 +1303,7 @@ button.tile:active { transform: scale(.98); }
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '2.17.0';
+const BUILD = '__BUILD__', APP_VERSION = '2.18.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -7515,6 +7523,132 @@ ACT.widgetSetup = async () => {
 };
 
 // ===================================================================
+// Real-money safety and costs: the promotion gate in the move-to-Alpaca sheet, the real-vs-paper
+// twin on Alpaca bots, the panic button (and its Shortcut), offsite backups, the uptime monitor
+// and the cost dashboard.
+// ===================================================================
+
+// ---------- the promotion gate ----------
+function gateHtml(g) {
+  if (!g) return '';
+  const hard = g.on && g.live;
+  return `<div class="section-h"><h2>${g.pass ? 'Ready for real money' : hard ? 'Not ready for real money yet' : 'Real-money checklist'}</h2></div>
+    <div class="group gate">${g.checks.map(c => `<div class="cell"><div class="lead gate-ic ${c.ok ? 'ok' : 'no'}">${icon(c.ok ? 'check' : 'x')}</div><div class="main"><div class="title">${h(c.label)}</div><div class="sub">${h(c.have)}</div></div></div>`).join('')}</div>
+    <p class="note">${!g.on ? 'The gate is off in Settings, so these are only advice.' : g.live ? (g.pass ? 'It passed every rule you set for real money.' : 'With real money, a bot has to pass every rule first. Change the rules in Settings → Real-money rules.') : 'This is an Alpaca paper account, so these are advice only. With real money they are required.'}</p>`;
+}
+const _promote = ACT.promote;
+ACT.promote = async el => {
+  const id = +(el.dataset.id || curBot()?.id); if (!id) return;
+  await _promote(el);
+  const g = await api(`bots/${id}/gate`).catch(() => null); if (!g) return;
+  const sh = [...document.querySelectorAll('.sheet')].pop(), body = sh?.querySelector('.sheet-body'); if (!body || !$('#pr-b', body)) return;
+  body.insertAdjacentHTML('afterbegin', gateHtml(g));
+  if (g.on && g.live && !g.pass) { const b = sh.querySelector('#pr-do'); if (b) { b.disabled = true; b.textContent = 'Not ready for real money'; } }
+};
+
+// ---------- real vs paper twin (Alpaca bot pages) ----------
+async function twinCard(p) {
+  const b = p.d; if (!b.broker) return;
+  const box = $('#bot-twin', p.body); if (!box) return;
+  const t = await api(`bots/${b.id}/twin`).catch(() => null); if (!t) { box.innerHTML = ''; return; }
+  if (t.gone) { box.innerHTML = `<div class="section-h"><h2>Real vs paper</h2></div><div class="card"><p class="t-foot" style="margin:0">Its paper twin (${h(t.name)}) was deleted, so there's nothing to compare.</p></div>`; return; }
+  const days = Math.max(0, Math.round((Date.now() - t.since) / 864e5));
+  box.innerHTML = `<div class="section-h"><h2>Real vs paper</h2><button class="more" data-act="go" data-to="bot/${t.paperId}">Paper twin ${icon('right')}</button></div>
+    <div class="card twin"><div class="twin-row"><div><span class="k">${b.live ? 'Real money' : 'Alpaca'}</span><b class="n ${cls(t.real.ret)}">${pct(t.real.ret * 100)}</b><span class="t-cap">${t.real.trades} trades · ${money(t.real.fees)} fees</span></div><div><span class="k">Paper twin</span><b class="n ${cls(t.paper.ret)}">${pct(t.paper.ret * 100)}</b><span class="t-cap">${t.paper.trades} trades · ${money(t.paper.fees)} fees</span></div></div>
+      ${t.real.idx.length > 1 ? `<div class="chart-wrap short" id="twin-chart"></div>
+      <div class="bt-legend"><span><i class="ln"></i>${b.live ? 'Real' : 'Alpaca'}</span><span><i class="ln spy-ln"></i>Paper twin</span></div>` : ''}
+      <p class="t-foot" style="margin:8px 0 0">Over ${days} day${days === 1 ? '' : 's'} the ${b.live ? 'real' : 'Alpaca'} bot is ${Math.abs(t.gap * 100) < 0.05 ? 'level with' : `${pct0(Math.abs(t.gap) * 100, 2)} ${t.gap >= 0 ? 'ahead of' : 'behind'}`} its paper twin.${t.slip != null ? ` On ${t.matched} matching trade${t.matched === 1 ? '' : 's'}, real fills came in ${pct0(Math.abs(t.slip) * 100, 2)} ${t.slip > 0 ? 'worse' : 'better'} on average.` : ''} Some gap is normal: real orders pay the spread and can fill later.</p></div>`;
+  if (t.real.idx.length > 1) { const c = new Chart($('#twin-chart', box), { fmtTime: t => fmtDate(t) }); c.set({ type: 'line', points: t.real.idx, bench: t.paper.idx, padTop: 14, padX: 8, color: t.gap >= 0 ? 'up' : 'dn' }); p.twinChart?.destroy?.(); p.twinChart = c; }
+}
+const _botDraw = PAGES.bot.draw;
+PAGES.bot.draw = function (p) {
+  _botDraw.call(this, p);
+  if (p.d.broker) { const anchor = $('.range-bar', p.body); if (anchor) { anchor.insertAdjacentHTML('afterend', '<div id="bot-twin"></div>'); twinCard(p); } }
+};
+
+// ---------- the panic button ----------
+function panicCard() {
+  return `<div class="group mt16 panic-card"><button class="cell" data-act="panicNow"><div class="lead panic-ic">${icon('x')}</div><div class="main"><div class="title">Panic button</div><div class="sub">Pause every bot, stop Alpaca trading and cancel its open orders. One tap.</div></div></button>
+    <button class="cell" data-act="panicShortcut"><div class="lead">${icon('bolt')}</div><div class="main"><div class="title">Panic from a Shortcut</div><div class="sub">A Home Screen button or "Hey Siri, Mango panic"</div></div>${icon('right', 'chev')}</button></div>`;
+}
+ACT.panicNow = async () => {
+  const broker = !!App.S?.broker?.on;
+  const s = sheet({ title: 'Stop everything?', html: `<p class="dialog-msg">Every bot pauses${broker ? ', Alpaca trading stops (no new buys) and every open Alpaca order is cancelled' : ''}. Nothing is bought. You resume bots one at a time${broker ? ', and Alpaca in Alpaca controls' : ''}.</p>
+    ${broker ? `<div class="group"><div class="cell"><div class="main"><div class="title">Also sell everything at Alpaca</div><div class="sub">Market orders for every Alpaca position</div></div>${sw(false, 'id="pn-fl"')}</div></div>` : ''}
+    <div class="btns mt16"><button class="btn btn-quiet" data-x="0">Cancel</button><button class="btn btn-sell" data-x="1">${icon('x')}Stop everything</button></div>`,
+    mount: s => s.body.addEventListener('click', async e => {
+      const t = e.target.closest('.switch'); if (t) { t.classList.toggle('on'); return; }
+      const b = e.target.closest('[data-x]'); if (!b) return; if (b.dataset.x === '0') return s.close();
+      busy(b, true);
+      try { const r = await post('panic', { flatten: $('#pn-fl', s.body)?.classList.contains('on') }); s.close(); toast('Everything is stopped', { kind: 'info', sub: `${r.paused} bot${r.paused === 1 ? '' : 's'} paused${r.alpaca ? ', Alpaca halted' : ''}${r.closed ? ', Alpaca positions sold' : ''}.` }); await loadState({ quiet: true }); VIEWS.bots?.load?.(); } catch (err) { busy(b, false); toastErr(err); }
+    }) });
+  void s;
+};
+ACT.panicShortcut = async () => {
+  let t; try { t = (await api('panic-link')).token; } catch (e) { return toastErr(e); }
+  const s = sheet({ title: 'Panic from a Shortcut', tall: true, html: '' });
+  const draw = () => s.html(`<p class="t-foot" style="margin:0 2px">This secret link stops everything when a Shortcut sends it a POST request. It can only pause and halt, never buy or sell, but keep it private anyway.</p>
+    <div class="group mt12"><button class="cell" data-copy="${h(location.origin)}/api/panic/${h(t)}"><div class="main"><div class="title">Copy the panic link</div><div class="sub ellip">${h(location.host)}/api/panic/••••</div></div>${icon('copy', 'chev')}</button></div>
+    <div class="section-h"><h2>Set it up</h2></div><ol class="steps">
+      <li>In <b>Shortcuts</b>, tap <b>+</b> and add <b>Get Contents of URL</b>. Paste the link.</li>
+      <li>Tap the arrow next to the action, set <b>Method</b> to <b>POST</b>. (It ignores anything else, so a link preview can't set it off.)</li>
+      <li>Add <b>Show Result</b>, and name the shortcut "Mango panic". Now you can tap it from the Home Screen, or say "Hey Siri, Mango panic".</li></ol>
+    <button class="btn btn-danger btn-block mt16" data-x="renew">${icon('refresh')}Make a new link</button>`);
+  draw();
+  s.body.addEventListener('click', async e => {
+    const c = e.target.closest('[data-copy]'); if (c) { try { await navigator.clipboard.writeText(c.dataset.copy); toast('Copied'); } catch (err) { await askText({ title: 'Copy this link', value: c.dataset.copy, ok: 'Done' }); } return; }
+    if (e.target.closest('[data-x="renew"]')) { t = (await post('panic-link', {})).token; draw(); toast('New link made', { sub: 'Paste it into your Shortcut again.' }); }
+  });
+};
+const _realDraw = PAGES.real.draw;
+PAGES.real.draw = function (p) { _realDraw.call(this, p); const s = $('.section-h', p.body); if (p.d?.on && p.d?.wid && s) s.insertAdjacentHTML('beforebegin', panicCard()); };
+
+// ---------- Settings: real-money rules, uptime, offsite backup, costs ----------
+function promoCard() {
+  const on = SET().promoGate !== false;
+  return `<div class="group mt16"><div class="cell"><div class="lead">${icon('lock')}</div><div class="main"><div class="title">Real-money rules</div><div class="sub">A paper bot must pass these before it can move to real money. Switching this off needs Face ID.</div></div>${sw(on, 'data-act="setBool" data-k="promoGate"')}</div>
+    ${on ? `${rowNum('promoMinDays', 'Days on paper', 'At least', 'd', { w: 90 })}${rowNum('promoMinTrades', 'Closed trades', 'At least', '', { w: 90 })}${rowNum('promoMaxDD', 'Worst drop under', 'From its high', '%', { w: 90 })}${rowToggle('promoBeatSpy', 'Must be beating the S&P 500', 'Since the day it started')}` : ''}</div>`;
+}
+function opsCard() {
+  setTimeout(async () => {
+    const el = $('#ops-box'); if (!el) return;
+    const [u, o] = await Promise.all([api('uptime').catch(() => null), api('offsite').catch(() => null)]);
+    const up = !u?.watching ? (u?.role === 'standby' ? 'Add MAIN_URL on this standby to watch the main server.' : 'Add STANDBY_URL on this server (and MAIN_URL on the standby) so the standby watches this one and texts you if it goes down.')
+      : u.role === 'standby' ? `Watching the main server: ${u.state === 'up' ? 'up' : u.state === 'down' ? 'DOWN' : 'checking'}${u.last ? `, checked ${timeAgo(u.last.ts)}` : ''}. You get a notification after 3 failed checks (about 9 minutes).` : `Keeping the standby awake so it can watch this server${u.last ? `: last ping ${u.last.ok ? 'worked' : 'failed'} ${timeAgo(u.last.ts)}` : ''}.`;
+    const off = !o?.on ? 'Add GITHUB_BACKUP_TOKEN and GITHUB_BACKUP_REPO (a private repo) to send a backup there every night.' : o.last ? (o.last.ok ? `Last sent ${timeAgo(o.last.ts)} to ${h(o.repo)} (${Math.round(o.last.size / 1024)} KB). Keeps ${SET().offsiteKeep || 14} days.` : `Last try failed ${timeAgo(o.last.ts)}: ${h(o.last.err)}`) : `Sends to ${h(o.repo)} every night after 4 AM.`;
+    el.innerHTML = `<div class="cell"><div class="lead">${icon('bolt')}</div><div class="main"><div class="title">Uptime monitor</div><div class="sub ${u?.state === 'down' ? 'dn' : ''}">${h(up)}</div></div></div>
+      <div class="cell"><div class="lead">${icon('database')}</div><div class="main"><div class="title">Offsite backup</div><div class="sub" id="off-sub">${off}</div></div>${o?.on ? '<button class="btn btn-quiet btn-sm" data-act="offsiteNow">Back up</button>' : ''}</div>
+      ${rowLink('dollar', 'What this costs', 'AI calls and an estimate for the server', 'costs')}`;
+  }, 30);
+  return `<div class="group mt16" id="ops-box"><div class="cell"><div class="main t-foot">Checking…</div></div></div>`;
+}
+ACT.offsiteNow = async el => { busy(el, true); try { const r = await post('offsite', {}); toast('Backed up to GitHub', { sub: `${Math.round(r.size / 1024)} KB` }); const s = $('#off-sub'); if (s) s.textContent = `Last sent just now (${Math.round(r.size / 1024)} KB).`; } catch (e) { toastErr(e); } busy(el, false); };
+
+// ---------- cost dashboard ----------
+const AI_FEATURE = { ai: 'Analyst votes', hawk: 'News Hawk', guard: 'Risk Officer', chart: 'Chartist', owl: 'Night Owl', brief: 'Morning brief', letter: 'Friday letter', chat: 'Bot chat', postmortem: 'Lessons', explain: 'Explain the news', review: 'Monthly review', test: 'Test calls' };
+PAGES.costs = {
+  mount(p) {
+    p.title('Costs', true);
+    p.load = async () => {
+      try {
+        const c = await api('costs'), a = c.ai, s = c.host, dp = x => ({ dp: x < 1 ? 3 : 2 });
+        const max = Math.max(1, ...a.by.map(x => x.n));
+        p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">What this costs</h1><p class="t-sub" style="margin:0 2px">The AI numbers are real (counted on every call). The server numbers are estimates from what this server is using right now.</p>
+          <div class="section-h"><h2>AI (Claude)</h2><span class="t-foot">${h(a.model)}</span></div>
+          ${a.key ? `<div class="tiles"><div class="tile"><div class="k">Today</div><div class="v">${money(a.today.cost, dp(a.today.cost))}</div><div class="s">${a.today.calls} call${a.today.calls === 1 ? '' : 's'} of ${a.cap}</div></div><div class="tile"><div class="k">This month</div><div class="v">${money(a.month.cost, dp(a.month.cost))}</div><div class="s">heading for ${money(a.month.projected, dp(a.month.projected))}</div></div></div>
+          <div class="card mt12">${a.by.length ? a.by.map(x => `<div class="wd-row cost-row"><span>${h(AI_FEATURE[x.k] || x.k)}</span><div class="wd-bar"><i class="up" style="width:${x.n / max * 100}%;background:var(--ac)"></i></div><b class="n">${x.n}</b></div>`).join('') : '<p class="t-foot" style="margin:0">No calls yet today.</p>'}</div>
+          <p class="note">About ${money(a.perCall, { dp: 5 })} a call. Even if every one of your ${a.cap} daily calls were used, a month would cost about ${money(a.capCost, dp(a.capCost))}.</p>` : '<div class="card"><p class="t-foot" style="margin:0">No ANTHROPIC_API_KEY, so the AI costs nothing.</p></div>'}
+          <div class="section-h"><h2>Server (estimate)</h2></div>
+          <div class="tiles"><div class="tile"><div class="k">Usage this month</div><div class="v">${money(s.usage)}</div><div class="s">${(s.ramGB * 1024).toFixed(0)} MB memory · ${(s.vcpu * 100).toFixed(1)}% of a CPU</div></div><div class="tile"><div class="k">Likely bill</div><div class="v">${money(s.bill)}</div><div class="s">${s.usage <= s.credit ? `inside the plan's ${money(s.credit)} of included usage` : 'plan plus extra usage'}</div></div></div>
+          <p class="note">Based on Railway's Hobby plan: ${money(s.plan)} a month including ${money(s.credit)} of usage, with memory at about $10 per GB a month and CPU at about $20 per vCPU a month. Your Railway dashboard has the exact bill. The database (Supabase free) and push notifications cost nothing.</p>`;
+      } catch (e) { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; }
+    };
+    p.body.innerHTML = '<div class="sk sk-block mt16"></div>'; p.load();
+  },
+  refresh(p) { p.load && p.load(); },
+};
+
+// ===================================================================
 // Settings
 // ===================================================================
 function applyLook(s) {
@@ -7563,7 +7697,7 @@ PAGES.settings = {
   root() {
     const S = App.S;
     return `<div class="set-hero"><svg viewBox="0 0 120 120" class="av"><use href="#mango-mark"/></svg><div><div class="t-title">Mango <span class="set-ver">v${h(APP_VERSION)}</span></div><div class="t-foot">Logged in as ${h(S.user || 'you')} · ${(S.wallets || []).filter(w => !w.archived).length} wallet${(S.wallets || []).length === 1 ? '' : 's'}</div></div></div>
-      ${standbyCard()}${guardsCard()}${briefsCard()}${widgetCard()}${councilCard()}${nightCard()}${analystCard()}
+      ${standbyCard()}${panicCard()}${guardsCard()}${promoCard()}${briefsCard()}${widgetCard()}${opsCard()}${councilCard()}${nightCard()}${analystCard()}
       <div class="group mt16">${Object.entries(SECTIONS).map(([k, v]) => rowLink(v.icon, v.title, v.sub, 'settings/' + k)).join('')}</div>
       <div class="group mt16">${rowLink('wallet', 'Wallets', 'Create, rename, reset, move cash', 'wallets')}${rowToggle('hideBalances', 'Hide balances', 'Blur dollar amounts. Press and hold to peek.')}</div>
       <div class="group mt16">${rowLink('lock', 'Face ID and backups', 'Log in with Face ID, protect real money, save your data', 'security')}</div>

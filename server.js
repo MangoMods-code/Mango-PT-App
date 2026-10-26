@@ -310,7 +310,7 @@ const DEF = {
   confirmStyle: 'hold', confirmBuy: false, confirmSell: true, cashAPY: 0, startBalance: 10000,
   // notifications
   pushAlerts: true, pushOrders: true, notifySummary: true, notifyMoves: true, moveThreshold: 5,
-  notifyAchv: true, notifyGames: true, pushBots: true, botWeekly: true, pushReal: true, realDailyLossPct: 3, realHalt: false, standbyActive: false, standbyActiveAt: 0, councilWeighted: true, vetoAll: true, briefOn: true, briefAt: '08:45', letterOn: true, aiPostmortem: true, aiChat: true, aiExplain: true, moodSwitch: true, corrGuard: true, corrMax: 0.9, sharedRisk: true, maxSymPct: 30, maxSectorPct: 50, maxCryptoPct: 50, autoBench: false, autoTune: true, aiVeto: true, aiReview: true, aiSizeUp: true, nightOn: true, nightRuns: 2, aiOn: true, aiSize: true, aiDebate: true, aiHawk: true, aiGuard: true, aiChart: true, aiDailyMax: 120, faceReal: true, autoBackup: true, quietStart: '', quietEnd: '',
+  notifyAchv: true, notifyGames: true, pushBots: true, botWeekly: true, pushReal: true, realDailyLossPct: 3, realHalt: false, standbyActive: false, standbyActiveAt: 0, councilWeighted: true, vetoAll: true, promoGate: true, promoMinDays: 60, promoMinTrades: 10, promoBeatSpy: true, promoMaxDD: 15, panicAt: 0, offsiteOn: true, offsiteKeep: 14, briefOn: true, briefAt: '08:45', letterOn: true, aiPostmortem: true, aiChat: true, aiExplain: true, moodSwitch: true, corrGuard: true, corrMax: 0.9, sharedRisk: true, maxSymPct: 30, maxSectorPct: 50, maxCryptoPct: 50, autoBench: false, autoTune: true, aiVeto: true, aiReview: true, aiSizeUp: true, nightOn: true, nightRuns: 2, aiOn: true, aiSize: true, aiDebate: true, aiHawk: true, aiGuard: true, aiChart: true, aiDailyMax: 120, faceReal: true, autoBackup: true, quietStart: '', quietEnd: '',
   // look and feel
   hideBalances: false, showCents: true, compactNums: false, defaultRange: '1D', defaultChart: 'Candles',
   theme: 'mango', accent: 'mango', plColors: 'classic', roundedNums: true, reduceMotion: false, celebrate: true,
@@ -322,7 +322,7 @@ const DEF = {
   f_divs: true, f_ext: true, f_movers: true, f_insights: true, f_taxes: true, f_statements: true, f_bots: true, f_buzz: true,
 };
 const LIMITS = {
-  maxSymPct: [5, 100], maxSectorPct: [10, 100], maxCryptoPct: [0, 100], corrMax: [0.5, 1], nightRuns: [1, 3], aiDailyMax: [0, 500],
+  promoMinDays: [0, 365], promoMinTrades: [0, 200], promoMaxDD: [1, 90], offsiteKeep: [3, 60], maxSymPct: [5, 100], maxSectorPct: [10, 100], maxCryptoPct: [0, 100], corrMax: [0.5, 1], nightRuns: [1, 3], aiDailyMax: [0, 500],
   realDailyLossPct: [0, 50],
   feeFlat: [0, 1000], feePct: [0, 10], slippage: [0, 5], maxPos: [0, 100], reservePct: [0, 100], autoSL: [0, 90], autoTP: [0, 1000],
   defaultBuy: [0, 1e9], cashAPY: [0, 100], startBalance: [100, 1e9], moveThreshold: [1, 50], defaultWallet: [1, 1e9],
@@ -5240,6 +5240,7 @@ POST('/api/bots/:id/promote', auth, async req => {
   const budget = num(b.budget), cap = num(b.liveCap);
   if (!(budget > 0)) fail('Give it a budget: the most money it can use on Alpaca.');
   if (BROKER.env === 'live') { if (b.confirm !== 'REAL MONEY') fail('Type REAL MONEY to move this bot to real money.'); if (!(cap > 0)) fail('Set a real-money cap.'); }
+  if (BROKER.env === 'live' && S.promoGate !== false) { const g = await promoGate(src); if (!g.pass) fail(`It hasn't earned real money yet: ${g.checks.filter(c => !c.ok).map(c => `${c.label.replace(/^./, x => x.toLowerCase())} (${c.have})`).join('; ')}. Keep it on paper, or change the rules in Settings.`); }
   const others = (await rows("select * from bots where wid=$1 and status<>'killed'", [w.id])).map(botJson);
   const overlap = others.flatMap(o => o.syms.filter(s => bot.syms.includes(s)));
   if (overlap.length) fail(`Another Alpaca bot already trades ${[...new Set(overlap)].join(', ')}. Each bot needs its own symbols on one account.`);
@@ -5366,6 +5367,7 @@ function needsStep(req) {
   if (/^\/api\/passkey\//.test(p) || p === '/api/login' || p === '/api/real/kill') return false; // the kill switch never waits
   if (p.startsWith('/api/passkeys/') || p === '/api/backup/restore' || p === '/api/password' || p === '/api/logout-all' || p === '/api/import' || p === '/api/real/resume' || p === '/api/broker/link' || /^\/api\/bots\/\d+\/promote$/.test(p)) return true;
   if (p === '/api/settings' && (req.body?.faceReal === false || req.body?.faceReal === 'false')) return true;
+  if (p === '/api/settings' && (req.body?.promoGate === false || req.body?.promoGate === 'false')) return true; // switching off the real-money gate
   if (/^\/api\/bots\/\d+$/.test(p) && req.method === 'PATCH' && req.body?.mandate?.allowLive) return true;
   if (w?.broker && ['/api/trade', '/api/order', '/api/limit'].includes(p) && req.method === 'POST') return true;
   if (w?.broker && /^\/api\/order\/[^/]+$/.test(p) && req.method === 'PATCH') return true;
@@ -6065,6 +6067,151 @@ ${(bz?.items || []).filter(x => x.src === 'news' || x.title).slice(0, 12).map(x 
   const out = { ts: Date.now(), sym, text: r.text, ai: true }; explainCache.set(sym, out); if (explainCache.size > 200) explainCache.delete(explainCache.keys().next().value);
   return out;
 });
+// ===================================================================
+// Real-money safety and running costs: the promotion gate, the real-vs-paper twin, the panic button
+// (also from a Shortcut), nightly offsite backups to a private GitHub repo, the uptime monitor
+// between the main server and the standby, and the cost dashboard.
+// ===================================================================
+
+// ---------- the promotion gate: a paper bot earns its way to real money ----------
+async function promoGate(b) {
+  const bot = botJson(b), card = await botCard(b), days = Math.round((Date.now() - bot.created) / 864e5);
+  const sells = await rows("select pnl from trd where wid=$1 and side='sell' and pnl is not null and ts >= $2", [b.wid, new Date(bot.created)]);
+  let spy = null; try { const s = await dailyBars('SPY'), i = lastIndexOnOrBefore(s.d, etDate(bot.created)); const s0 = jsonOr(b.state, {})._spy0 || (i >= 0 ? s.c[i] : null); if (s0) spy = (priceOf('SPY') || s.c[s.c.length - 1]) / s0 - 1; } catch (e) {}
+  const ret = card.ret / 100, dd = Math.abs(Math.min(0, card.dd || 0)) * 100;
+  const checks = [
+    { k: 'days', label: `At least ${S.promoMinDays} days on paper`, ok: days >= S.promoMinDays, have: `${days} days` },
+    { k: 'trades', label: `At least ${S.promoMinTrades} closed trades`, ok: sells.length >= S.promoMinTrades, have: `${sells.length} closed` },
+    { k: 'spy', label: 'Ahead of the S&P 500 since it started', ok: spy == null ? false : ret > spy, have: spy == null ? 'no S&P data yet' : `${pct(ret * 100)} vs ${pct(spy * 100)}`, off: !S.promoBeatSpy },
+    { k: 'dd', label: `Worst drop under ${S.promoMaxDD}%`, ok: dd < S.promoMaxDD, have: `${dd.toFixed(1)}%` },
+    { k: 'status', label: 'Not stopped by its own limits', ok: bot.status !== 'killed', have: bot.status },
+  ].filter(c => !c.off);
+  return { on: S.promoGate !== false, live: BROKER?.env === 'live', pass: checks.every(c => c.ok), checks, days, ret, spy };
+}
+GET('/api/bots/:id/gate', auth, async req => { const b = await row('select * from bots where id=$1', [+req.params.id]); if (!b) fail('That bot is gone', 404); return promoGate(b); });
+
+// ---------- real vs paper twin ----------
+GET('/api/bots/:id/twin', auth, async req => {
+  const b = await row('select * from bots where id=$1', [+req.params.id]); if (!b) fail('That bot is gone', 404);
+  const st = jsonOr(b.state, {}), from = st._from; if (!from?.id) return null;
+  const p = await row('select * from bots where id=$1', [from.id]); if (!p) return { gone: true, name: from.name };
+  const since = new Date(tsMs(b.created)), side = async x => {
+    const w = await row('select cash from wallets where id=$1', [x.wid]), pos = await positions(x.wid), now = +w.cash + marketValue(pos);
+    const pts = (await rows('select ts, eq from snap where wid=$1 and ts >= $2 order by ts', [x.wid, since])).map(r => [tsMs(r.ts), +r.eq]);
+    const base = (await row('select eq from snap where wid=$1 and ts <= $2 order by ts desc limit 1', [x.wid, since]))?.eq ?? pts[0]?.[1] ?? now;
+    pts.push([Date.now(), now]);
+    const tr = await rows("select side, pnl, fee, qty, price from trd where wid=$1 and ts >= $2 and side in ('buy','sell')", [x.wid, since]);
+    return { name: x.name, ret: now / +base - 1, trades: tr.length, fees: tr.reduce((t, r) => t + (+r.fee || 0), 0), realized: tr.reduce((t, r) => t + (+r.pnl || 0), 0), idx: downsample(pts.map(([t, v]) => [t, round(100 * v / +base, 3)]), 200) };
+  };
+  const real = await side(b), paper = await side(p);
+  // the same trade on both sides: how much worse did the real fill come in?
+  const rf = await rows("select sym, side, price, ts from trd where wid=$1 and ts >= $2 and side in ('buy','sell') order by id desc limit 40", [b.wid, since]);
+  const slips = [];
+  for (const t of rf) {
+    const m = await row("select price from trd where wid=$1 and sym=$2 and side=$3 and ts between $4::timestamptz - interval '2 hours' and $4::timestamptz + interval '2 hours' order by abs(extract(epoch from ts - $4::timestamptz)) limit 1", [p.wid, t.sym, t.side, t.ts]);
+    if (m) slips.push((t.side === 'buy' ? 1 : -1) * (+t.price / +m.price - 1));
+  }
+  return { since: tsMs(b.created), real, paper, gap: real.ret - paper.ret, slip: slips.length ? slips.reduce((t, x) => t + x, 0) / slips.length : null, matched: slips.length, paperId: p.id };
+});
+
+// ---------- the panic button ----------
+// Stops everything that can trade: every bot paused, the Alpaca kill switch on, open Alpaca orders cancelled.
+// It never buys anything. Selling everything at Alpaca is only possible from inside the app.
+async function panic({ flatten = false, via = 'app' } = {}) {
+  const out = { paused: 0, alpaca: false, cancelled: false, closed: false };
+  out.paused = (await Q("update bots set status='paused' where status='running'")).rowCount;
+  await saveSettings({ realHalt: true, panicAt: Date.now() });
+  if (BROKER) {
+    out.alpaca = true;
+    try { await apca('/v2/orders', { method: 'DELETE' }); out.cancelled = true; } catch (e) { out.cancelErr = e.message; }
+    if (flatten) { try { await apca('/v2/positions?cancel_orders=true', { method: 'DELETE' }); out.closed = true; } catch (e) { out.closeErr = e.message; } }
+    brokerSyncSoon();
+  }
+  broadcast({ t: 'evt', e: 'settings' }); broadcast({ t: 'evt', e: 'bot', id: 0 });
+  await notify('real', '🛑 Panic button pressed', `${out.paused} bot${out.paused === 1 ? '' : 's'} paused${out.alpaca ? `, Alpaca trading stopped${out.cancelled ? ' and open orders cancelled' : ''}${out.closed ? ', every Alpaca position sold' : ''}` : ''}. ${via === 'shortcut' ? 'From your Shortcut. ' : ''}Resume bots one by one, and Alpaca in Alpaca controls.`, { url: '/#/real' });
+  log(`PANIC (${via}): ${JSON.stringify(out)}`);
+  return out;
+}
+POST('/api/panic', auth, async req => panic({ flatten: !!req.body?.flatten }));
+async function panicToken(renew = false) { let t = await kvGet('panic_token').catch(() => null); if (!t || renew) { t = crypto.randomBytes(18).toString('hex'); await kvSet('panic_token', t); } return t; }
+GET('/api/panic-link', auth, async () => ({ token: await panicToken() }));
+POST('/api/panic-link', auth, async () => ({ token: await panicToken(true) }));
+// for a Shortcut: POST only, so a link preview or a stray tap in a browser can't set it off
+POST('/api/panic/:token', async req => {
+  const t = await kvGet('panic_token').catch(() => null), got = String(req.params.token);
+  if (!t || got.length !== t.length || !crypto.timingSafeEqual(Buffer.from(got), Buffer.from(t))) fail('Not found', 404);
+  const r = await panic({ via: 'shortcut' });
+  return { ok: true, message: `Stopped. ${r.paused} bots paused${r.alpaca ? ', Alpaca halted' : ''}.` };
+});
+
+// ---------- offsite backups: one file a night in a private GitHub repo ----------
+const GH_TOKEN = (ENV.GITHUB_BACKUP_TOKEN || '').trim(), GH_REPO = (ENV.GITHUB_BACKUP_REPO || '').trim().replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '');
+let ghStatus = { on: !!(GH_TOKEN && GH_REPO), repo: GH_REPO || null, last: null };
+const gh = async (p, o = {}) => { const r = await fetch('https://api.github.com' + p, { ...o, signal: AbortSignal.timeout(60e3), headers: { authorization: 'Bearer ' + GH_TOKEN, accept: 'application/vnd.github+json', 'user-agent': 'mango-backup', 'x-github-api-version': '2022-11-28', ...(o.body ? { 'content-type': 'application/json' } : {}) } }); const j = await r.json().catch(() => ({})); if (!r.ok && r.status !== 404) throw new Error(j.message || 'GitHub HTTP ' + r.status); return r.status === 404 ? null : j; };
+async function offsiteBackup() {
+  if (!ghStatus.on) fail('Add GITHUB_BACKUP_TOKEN and GITHUB_BACKUP_REPO on your server first.');
+  try {
+    const repo = await gh(`/repos/${GH_REPO}`); if (!repo) throw new Error(`Can't see the repo ${GH_REPO}. Check the name and that the token can access it.`);
+    if (!repo.private) throw new Error(`${GH_REPO} is public. Backups hold your whole account, so they only go to a private repo.`);
+    const gz = await makeBackup(), name = `backups/mango-${etDate()}.json.gz`, old = await gh(`/repos/${GH_REPO}/contents/${name}`);
+    await gh(`/repos/${GH_REPO}/contents/${name}`, { method: 'PUT', body: JSON.stringify({ message: `Mango backup ${etDate()}`, content: gz.toString('base64'), ...(old?.sha ? { sha: old.sha } : {}) }) });
+    const list = (await gh(`/repos/${GH_REPO}/contents/backups`)) || [], keep = Math.max(3, S.offsiteKeep || 14);
+    for (const f of list.filter(f => /^mango-\d{4}-\d\d-\d\d\.json\.gz$/.test(f.name)).sort((a, b) => b.name.localeCompare(a.name)).slice(keep)) await gh(`/repos/${GH_REPO}/contents/${f.path}`, { method: 'DELETE', body: JSON.stringify({ message: 'Remove old backup', sha: f.sha }) }).catch(() => {});
+    ghStatus.last = { ok: true, ts: Date.now(), size: gz.length, name }; await kvSet('gh_backup', JSON.stringify(ghStatus.last));
+    return ghStatus.last;
+  } catch (e) {
+    ghStatus.last = { ok: false, ts: Date.now(), err: String(e.message).slice(0, 200) }; await kvSet('gh_backup', JSON.stringify(ghStatus.last)).catch(() => {});
+    await notify('real', '⚠️ Offsite backup failed', ghStatus.last.err, { url: '/#/settings' }); fail(ghStatus.last.err, 400);
+  }
+}
+async function offsiteJob() {
+  if (!ghStatus.on || STANDBY || S.offsiteOn === false) return;
+  const p = etParts(), today = etDate(); if (p.h < 4 || (await kvGet('job_gh_backup').catch(() => null)) === today) return;
+  await kvSet('job_gh_backup', today); await offsiteBackup().catch(e => warn('offsite backup', e.message));
+}
+GET('/api/offsite', auth, async () => { if (!ghStatus.last) ghStatus.last = jsonOr(await kvGet('gh_backup').catch(() => null), null); return ghStatus; });
+POST('/api/offsite', auth, async () => offsiteBackup());
+
+// ---------- uptime monitor: the main server keeps the standby awake, the standby watches the main ----------
+const MAIN_URL = (ENV.MAIN_URL || '').trim().replace(/\/$/, ''), STANDBY_URL = (ENV.STANDBY_URL || '').trim().replace(/\/$/, '');
+let uptime = { role: STANDBY ? 'standby' : 'main', watching: STANDBY ? MAIN_URL || null : STANDBY_URL || null, state: 'unknown', fails: 0, last: null, since: null, downAt: null };
+async function uptimeJob() {
+  if (!STANDBY) { // main: ping the standby so a host that sleeps stays awake to watch us
+    if (!STANDBY_URL) return;
+    try { const r = await fetch(STANDBY_URL + '/api/health', { signal: AbortSignal.timeout(20e3) }); uptime.last = { ok: r.ok, ts: Date.now() }; uptime.state = r.ok ? 'up' : 'down'; } catch (e) { uptime.last = { ok: false, ts: Date.now(), err: e.message }; uptime.state = 'down'; }
+    return;
+  }
+  if (!MAIN_URL) return;
+  let ok = false, err = null; try { const r = await fetch(MAIN_URL + '/api/health', { signal: AbortSignal.timeout(20e3) }); ok = r.ok; if (!ok) err = 'HTTP ' + r.status; } catch (e) { err = e.message; }
+  uptime.last = { ok, ts: Date.now(), err };
+  if (ok) {
+    if (uptime.state === 'down') await notify('real', '✅ Main server is back', `It was down for about ${Math.max(1, Math.round((Date.now() - uptime.downAt) / 60e3))} minutes.${S.standbyActive ? ' The standby is still ON: switch it off once you have restored a fresh backup on the main server.' : ''}`, { url: '/#/settings' });
+    uptime.fails = 0; if (uptime.state !== 'up') uptime.since = Date.now(); uptime.state = 'up'; return;
+  }
+  uptime.fails++;
+  if (uptime.fails >= 3 && uptime.state !== 'down') {
+    uptime.state = 'down'; uptime.downAt = Date.now(); uptime.since = Date.now();
+    await notify('real', '🚨 Main server looks down', `Your standby couldn't reach it 3 times in a row (${String(err || '').slice(0, 80)}). Open the standby to switch it on if it stays down.`, { url: (SELF_URL || '') + '/#/settings' });
+  }
+  if (uptime.state === 'down' && SELF_URL) fetch(SELF_URL + '/api/health', { signal: AbortSignal.timeout(15e3) }).catch(() => {}); // keep ourselves awake while the main is down
+}
+GET('/api/uptime', auth, () => uptime);
+
+// ---------- cost dashboard ----------
+let cpu0 = { t: Date.now(), u: process.cpuUsage() }, cpuAvg = null;
+setInterval(() => { const now = Date.now(), u = process.cpuUsage(), used = (u.user + u.system - cpu0.u.user - cpu0.u.system) / 1e3 / (now - cpu0.t); cpuAvg = cpuAvg == null ? used : cpuAvg * 0.8 + used * 0.2; cpu0 = { t: now, u }; }, 5 * 60e3).unref?.();
+GET('/api/costs', auth, async () => {
+  const u = await aiUse(), d = etParts(), dim = new Date(Date.UTC(d.y, d.m, 0)).getUTCDate();
+  const perCall = u.calls ? aiCost(u.inT, u.outT) / u.calls : aiCost(450, 70), month = aiCost(u.mIn, u.mOut);
+  const ramGB = process.memoryUsage().rss / 1073741824, vcpu = cpuAvg ?? (process.cpuUsage().user + process.cpuUsage().system) / 1e3 / (Date.now() - BOOT);
+  const RAM = num(ENV.COST_RAM_GB_MONTH, 10), CPU = num(ENV.COST_VCPU_MONTH, 20), plan = num(ENV.COST_PLAN_MONTH, 5), credit = num(ENV.COST_PLAN_CREDIT, 5);
+  const host = { ramGB: round(ramGB, 3), vcpu: round(vcpu, 4), ram: ramGB * RAM, cpu: vcpu * CPU, plan, credit };
+  host.usage = host.ram + host.cpu; host.bill = Math.max(plan, plan + host.usage - credit); // the plan includes some usage; anything past it is billed on top
+  return {
+    ai: { key: !!AI_KEY, model: AI_MODEL, today: { calls: u.calls, cost: aiCost(u.inT, u.outT) }, month: { calls: u.mCalls, cost: month, projected: month / Math.max(1, d.d) * dim }, cap: S.aiDailyMax ?? 120, capCost: (S.aiDailyMax ?? 120) * perCall * dim, perCall, by: Object.entries(u.by || {}).map(([k, n]) => ({ k, n, cost: n * perCall })).sort((a, b) => b.n - a.n) },
+    host, standby: STANDBY, offsite: ghStatus.on, uptime: process.uptime(), estimated: true,
+  };
+});
 
 // =====================================================================
 // Background jobs
@@ -6179,6 +6326,9 @@ function startJobs() {
   every(fast ? 5e3 : 5 * 60e3, () => indAlertJob(), 'chart alerts');
   every(fast ? 10e3 : 30 * 60e3, () => optionsExpiryJob(), 'options expiry');
   every(fast ? 10e3 : 30 * 60e3, () => reviewJob(), 'monthly review');
+  // safety: offsite backup (nightly), uptime watch between main and standby
+  every(fast ? 10e3 : 10 * 60e3, () => offsiteJob(), 'offsite backup');
+  every(fast ? 5e3 : 3 * 60e3, () => uptimeJob(), 'uptime');
   every(3600e3, () => Q("delete from bot_log where ts < now() - interval '2 years'"), 'bot log cleanup');
   every(3600e3, () => Q("delete from settle where settles < now() - interval '7 days'"), 'settlement cleanup');
   if (BROKER && STANDBY) warn('Standby copy has Alpaca keys: orders are blocked while standby is off, but keep real-money keys on one server only.');
@@ -6268,7 +6418,7 @@ const ICONS = {};
 const icon = (name, fn) => ICONS[name] || (ICONS[name] = fn());
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD646"/><stop offset=".5" stop-color="#FFA028"/><stop offset="1" stop-color="#FA5256"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="#1E1430"/><ellipse cx="31" cy="36" rx="18" ry="22" transform="rotate(30 31 36)" fill="url(#g)"/><path d="M20 41l6.5-6 5 3.5 9.5-10" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37 28.5h4.5V33" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="45" cy="11.5" rx="9" ry="4.6" transform="rotate(-24 45 11.5)" fill="#3BD68A"/></svg>`;
 let BUILD = 'dev', INDEX = null, INDEX_GZ = null;
-const APP_VERSION = '2.17.0'; // stamped by build.sh from package.json
+const APP_VERSION = '2.18.0'; // stamped by build.sh from package.json
 function loadIndex() {
   const file = path.join(__dirname, 'index.html');
   let html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<!doctype html><title>Mango</title><p>index.html is missing next to server.js.</p>';
