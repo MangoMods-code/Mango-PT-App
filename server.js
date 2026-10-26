@@ -44,7 +44,8 @@ const routes = [];
 function route(method, pattern, ...handlers) {
   const keys = [];
   const re = new RegExp('^' + pattern.replace(/:(\w+)/g, (_, k) => (keys.push(k), '([^/]+)')) + '/?$');
-  routes.push({ method, re, keys, handlers });
+  // fixed paths win over ones with :params, whatever order the files register them in (/api/bots/board before /api/bots/:id)
+  if (keys.length) routes.push({ method, re, keys, handlers }); else routes.unshift({ method, re, keys, handlers });
 }
 const GET = (p, ...h) => route('GET', p, ...h), POST = (p, ...h) => route('POST', p, ...h);
 const PATCH = (p, ...h) => route('PATCH', p, ...h), DEL = (p, ...h) => route('DELETE', p, ...h);
@@ -4315,7 +4316,7 @@ async function botReport(b, spy) {
   const back = await row("select eq from snap where wid=$1 and ts <= now() - interval '60 days' order by ts desc limit 1", [b.wid]);
   const days = Math.round((Date.now() - bot.created) / 864e5);
   let vs60 = null;
-  if (back && spy) { const i = lastIndexOnOrBefore(spy.d, etDate(Date.now() - 60 * 864e5)), s0 = i >= 0 ? spy.c[i] : null, s1 = priceOf('SPY') || spy.c[spy.c.length - 1]; if (s0) vs60 = (value / +back.eq - 1) - (s1 / s0 - 1); }
+  if (back && spy) { const i = lastIndexOnOrBefore(spy.d, etDate(Date.now() - 60 * 864e5)), s0 = i >= 0 ? spy.c[i] : null, s1 = priceOf('SPY') || spy.c[spy.c.length - 1]; if (s0) { const pf60 = await flowPerf(b.wid, Date.now() - 60 * 864e5, value); vs60 = pf60.ret - (s1 / s0 - 1); } }
   const benched = days >= 60 && vs60 != null && vs60 < -0.03;
   return { avgWin: wins.length ? wins.reduce((t, x) => t + x, 0) / wins.length : null, avgLoss: losses.length ? losses.reduce((t, x) => t + x, 0) / losses.length : null, payoff: wins.length && losses.length ? (wins.reduce((t, x) => t + x, 0) / wins.length) / Math.abs(losses.reduce((t, x) => t + x, 0) / losses.length) : null, vs60, benched, days };
 }
@@ -4455,6 +4456,27 @@ STRATEGIES.earnings = {
     return out;
   },
 };
+// A wallet's return that ignores money moved in or out (deposits, withdrawals, weekly adds): each stretch between
+// snapshots is judged on what the money already there did, then the stretches are chained (time-weighted return).
+async function flowPerf(wid, fromTs, value, startEq = null) {
+  const from = new Date(fromTs);
+  const snaps = (await rows('select ts, eq from snap where wid=$1 and ts >= $2 order by ts', [wid, from])).map(r => [tsMs(r.ts), +r.eq]);
+  const flows = (await rows("select ts, price from trd where wid=$1 and side='cash' and ts >= $2 order by ts", [wid, from])).map(r => [tsMs(r.ts), +r.price]);
+  // the money at the start: what was there before the first flow and snapshot after the start
+  let e0 = startEq;
+  if (!(e0 > 0)) { const before = await row('select eq from snap where wid=$1 and ts <= $2 order by ts desc limit 1', [wid, from]); e0 = before ? +before.eq : snaps.length ? snaps[0][1] - flows.filter(f => f[0] <= snaps[0][0]).reduce((t, f) => t + f[1], 0) : value - flows.reduce((t, f) => t + f[1], 0); }
+  const pts = [...snaps, [Date.now(), value]];
+  let idx = 1, peak = 1, dd = 0, t0 = +from, prev = e0, fi = 0;
+  const curve = [];
+  for (const [t, e] of pts) {
+    let f = 0; while (fi < flows.length && flows[fi][0] <= t) { if (flows[fi][0] > t0 || t0 === +from) f += flows[fi][1]; fi++; }
+    if (prev > 0) { const r = (e - f) / prev; if (Number.isFinite(r) && r > 0) idx *= r; }
+    peak = Math.max(peak, idx); dd = Math.min(dd, idx / peak - 1); curve.push([t, idx]);
+    prev = e; t0 = t;
+  }
+  const added = flows.reduce((t, f) => t + f[1], 0);
+  return { ret: idx - 1, maxDD: dd, start: e0, added, invested: e0 + added, profit: value - e0 - added, curve };
+}
 // ===================================================================
 // Practice tools: smart chart alerts, the monthly review of the trade journal, weekly challenges,
 // the what-if machine, options practice (Black-Scholes estimates), the dividend calendar and the
@@ -5309,7 +5331,8 @@ async function botCard(b) {
   const snaps = (await rows("select ts, eq from snap where wid=$1 and ts > now() - interval '30 days' order by ts", [b.wid])).map(r => [tsMs(r.ts), +r.eq]);
   const pos = await positions(b.wid), value = +w.cash + marketValue(pos);
   const mine = pos.filter(p => bot.syms.includes(p.sym));
-  const out = { ...bot, wallet: { id: w.id, name: w.name, emoji: w.emoji, color: w.color, profile: w.profile, archived: w.archived, broker: w.broker || null }, value, start: +w.start_bal, ret: (value / +w.start_bal - 1) * 100, day: dayChange(pos),
+  const st0 = jsonOr(b.state, {}), perf = await flowPerf(b.wid, bot.created, value, st0._start0 || null).catch(() => null);
+  const out = { ...bot, wallet: { id: w.id, name: w.name, emoji: w.emoji, color: w.color, profile: w.profile, archived: w.archived, broker: w.broker || null }, value, start: +w.start_bal, ret: perf ? perf.ret * 100 : (value / +w.start_bal - 1) * 100, added: perf?.added || 0, profit: perf ? perf.profit : value - +w.start_bal, day: dayChange(pos),
     holding: mine.map(p => p.sym), next: nextRunOf(bot), health: healthOf(bot, jsonOr(b.state, {}), { lastError: await row("select ts, title, body from bot_log where bot_id=$1 and kind='error' order by id desc limit 1", [b.id]).then(r => r && { ts: tsMs(r.ts), title: r.title, body: r.body }) }), invested: mine.reduce((t, p) => t + p.qty * (priceOf(p.sym) || p.avg), 0), cash: +w.cash, dd: bot.peak ? value / bot.peak - 1 : 0, spark: downsamplePts(snaps.concat([[Date.now(), value]]), 32).map(x => round(x[1], 2)) };
   // plain-words status
   const lastR = await row("select * from bot_log where bot_id=$1 and kind='decision' order by id desc limit 1", [b.id]);
@@ -5319,27 +5342,6 @@ async function botCard(b) {
 GET('/api/bots', auth, async () => {
   const list = await rows('select * from bots order by id');
   return { bots: await Promise.all(list.map(botCard)), on: S.f_bots !== false };
-});
-GET('/api/bots/board', auth, async () => {
-  const list = await rows('select * from bots order by id'), out = [];
-  let spy = null; try { spy = await dailyBars('SPY'); } catch (e) {}
-  const spyAt = d => { if (!spy) return null; const i = lastIndexOnOrBefore(spy.d, d); return i >= 0 ? spy.c[i] : spy.c[0]; };
-  const spyNow = priceOf('SPY') || spy?.c[spy.c.length - 1];
-  for (const b of list) {
-    const bot = botJson(b), w = await row('select * from wallets where id=$1', [b.wid]); if (!w) continue;
-    const since = new Date(bot.created), sinceD = etDate(bot.created);
-    const pos = await positions(b.wid), value = +w.cash + marketValue(pos);
-    const first = await row('select eq from snap where wid=$1 and ts >= $2 order by ts limit 1', [b.wid, since]);
-    const start = jsonOr(b.state, {})._start0 || (etDate(tsMs(w.created)) === sinceD ? +w.start_bal : first ? +first.eq : +w.start_bal);
-    const snaps = (await rows('select eq from snap where wid=$1 and ts >= $2 order by ts', [b.wid, since])).map(r => +r.eq).concat(value);
-    let peak = -Infinity, dd = 0; for (const v of snaps) { peak = Math.max(peak, v); dd = Math.min(dd, v / peak - 1); }
-    const sells = await rows("select pnl from trd where wid=$1 and side='sell' and pnl is not null and ts >= $2", [b.wid, since]);
-    const wins = sells.filter(x => +x.pnl > 0).length, trades = +(await row("select count(*) n from bot_log where bot_id=$1 and kind='trade'", [b.id])).n;
-    const st0 = jsonOr(b.state, {}), s0 = st0._spy0 || spyAt(sinceD), spyRet = s0 && spyNow ? spyNow / s0 - 1 : null;
-    const rep = await botReport(b, spy).catch(() => null);
-    out.push({ ...(rep || {}), tune: jsonOr(b.state, {})._tune?.better ? true : false, id: b.id, broker: !!w.broker, name: bot.name, strategy: bot.strategy, status: bot.status, since: bot.created, days: Math.max(0, Math.round((Date.now() - bot.created) / 864e5)), start, value, ret: start ? value / start - 1 : 0, spy: spyRet, vs: spyRet == null ? null : (start ? value / start - 1 : 0) - spyRet, maxDD: dd, trades, closed: sells.length, win: sells.length ? wins / sells.length : null, realized: sells.reduce((t, x) => t + +x.pnl, 0) });
-  }
-  return out.sort((a, c) => c.ret - a.ret);
 });
 GET('/api/bots/:id', auth, async req => {
   const b = await row('select * from bots where id=$1', [+req.params.id]); if (!b) fail('That bot is gone', 404);
@@ -6599,6 +6601,101 @@ POST('/api/backtest/compare', auth, async req => {
   btCache.set(key, { t: Date.now(), v });
   return v;
 });
+// ===================================================================
+// The bot leaderboard: fair returns (deposits don't count), every period, a 0-100 score that
+// rewards beating the S&P 500 steadily and doesn't let a lucky first week top the table,
+// rank changes since yesterday, streaks, badges, sparklines, and a by-strategy view.
+// ===================================================================
+const BOARD_PERIODS = [['all', null], ['30d', 30], ['7d', 7], ['1d', 1]];
+// one bot's numbers from its daily fair-return index ([date, idx], idx starts at 1)
+function boardMetrics(days, spyOn, spy0, created) {
+  const n = days.length, last = days[n - 1], first = days[0];
+  const at = d => { let v = first; for (const x of days) { if (x[0] <= d) v = x; else break; } return v; };
+  const per = {};
+  for (const [k, nd] of BOARD_PERIODS) {
+    let base, sBase;
+    if (nd == null) { base = [first[0], 1]; sBase = spy0; }
+    else if (nd === 1) { base = n > 1 ? days[n - 2] : [first[0], 1]; sBase = n > 1 ? spyOn(base[0]) : spy0; }
+    else { const bd = etDate(Date.parse(last[0] + 'T16:00:00-04:00') - nd * 864e5); if (bd < first[0]) { base = [first[0], 1]; sBase = spy0; } else { base = at(bd); sBase = spyOn(base[0]); } }
+    const ret = base[1] > 0 ? last[1] / base[1] - 1 : 0, sNow = spyOn(last[0]), sr = sBase && sNow ? sNow / sBase - 1 : null;
+    per[k] = { ret, spy: sr, vs: sr == null ? null : ret - sr, short: nd != null && days.length > 1 && base[0] === first[0] && nd > 1 };
+  }
+  // day by day: against the S&P on the same days
+  const rets = [], beat = [];
+  for (let i = 1; i < n; i++) {
+    const r = days[i][1] / days[i - 1][1] - 1, s0 = spyOn(days[i - 1][0]), s1 = spyOn(days[i][0]); rets.push(r);
+    if (s0 && s1) beat.push(r > s1 / s0 - 1 ? 1 : 0);
+  }
+  const mean = rets.length ? rets.reduce((t, x) => t + x, 0) / rets.length : 0;
+  const sd = rets.length > 1 ? Math.sqrt(rets.reduce((t, x) => t + (x - mean) ** 2, 0) / (rets.length - 1)) : 0;
+  const vol = sd * Math.sqrt(252), sharpe = rets.length >= 5 && sd > 1e-6 ? mean / sd * Math.sqrt(252) : null;
+  let peak = 1, maxDD = 0; for (const [, v] of days) { peak = Math.max(peak, v); maxDD = Math.min(maxDD, v / peak - 1); }
+  const offPeak = last[1] / peak - 1, beatPct = beat.length ? beat.reduce((t, x) => t + x, 0) / beat.length : null;
+  let streak = 0; for (let i = rets.length - 1; i >= 0; i--) { const up = rets[i] > 0; if (!streak) streak = up ? 1 : rets[i] < 0 ? -1 : 0; else if (up && streak > 0) streak++; else if (!up && rets[i] < 0 && streak < 0) streak--; else break; if (!streak) break; }
+  const age = Math.max(1, (Date.now() - created) / 864e5), years = age / 365.25;
+  // the score: excess over the S&P (per year once it has some history), risk-adjusted, drops, and how often it beat the market,
+  // pulled toward the middle until the bot has a few weeks of record
+  const ex = per.all.vs ?? per.all.ret, exYr = years > 0.25 ? ex / Math.sqrt(years * 4) : ex;
+  const parts = { excess: Math.tanh(exYr / 0.05), risk: sharpe == null ? 0 : Math.tanh(sharpe / 2), drop: -Math.tanh(Math.abs(maxDD) / 0.12), steady: beatPct == null ? 0 : (beatPct - 0.5) * 2 };
+  const conf = age / (age + 21), raw = 0.45 * parts.excess + 0.25 * parts.risk + 0.15 * (parts.drop + 0.3) + 0.15 * parts.steady;
+  const score = Math.round(Math.max(1, Math.min(99, 50 + 50 * raw * conf)));
+  return { per, vol, sharpe, maxDD, offPeak, beatPct, streak, score, conf, parts, rets: rets.length, age };
+}
+async function boardData() {
+  const list = await rows('select * from bots order by id'), out = [];
+  let spy = null; try { spy = await dailyBars('SPY'); } catch (e) {}
+  const today = etDate(), spyNow = priceOf('SPY') || spy?.c[spy.c.length - 1];
+  const spyOn = d => { if (d >= today && spyNow) return spyNow; if (!spy) return null; const i = lastIndexOnOrBefore(spy.d, d); return i >= 0 ? spy.c[i] : spy.c[0]; };
+  for (const b of list) {
+    const bot = botJson(b), w = await row('select * from wallets where id=$1', [b.wid]); if (!w) continue;
+    const since = new Date(bot.created), sinceD = etDate(bot.created), st0 = jsonOr(b.state, {});
+    const pos = await positions(b.wid), value = +w.cash + marketValue(pos);
+    const first = await row('select eq from snap where wid=$1 and ts >= $2 order by ts limit 1', [b.wid, since]);
+    const perf = await flowPerf(b.wid, since, value, st0._start0 || (etDate(tsMs(w.created)) === sinceD ? null : first ? +first.eq : null));
+    // the fair-return index at each day's close (the last snapshot of each New York day), starting at 1 on day one
+    const byDay = new Map([[sinceD, 1]]); for (const [t, v] of perf.curve) byDay.set(etDate(t), v);
+    const days = [...byDay.entries()].sort((a, c) => a[0].localeCompare(c[0]));
+    const spy0 = st0._spy0 || spyOn(sinceD);
+    const mx = boardMetrics(days, spyOn, spy0, bot.created);
+    // yesterday's score, for the rank arrows
+    const prevDays = days.filter(x => x[0] < today), mxPrev = prevDays.length >= 1 && days.length > prevDays.length ? boardMetrics(prevDays, d => d >= today ? null : spyOn(d), spy0, bot.created - 864e5) : null;
+    const sells = await rows("select pnl from trd where wid=$1 and side='sell' and pnl is not null and ts >= $2", [b.wid, since]);
+    const wins = sells.filter(x => +x.pnl > 0).length, trades = +(await row("select count(*) n from bot_log where bot_id=$1 and kind='trade'", [b.id])).n;
+    const rep = await botReport(b, spy).catch(() => null);
+    // sparkline: up to 40 daily points, bot and the S&P from the same day
+    const pick = days.length > 40 ? days.filter((_, i) => i % Math.ceil(days.length / 40) === 0 || i === days.length - 1) : days;
+    const s0 = spy0 || spyOn(pick[0][0]), spark = pick.map(([d, v]) => [d, +v.toFixed(5), s0 ? +((spyOn(d) || s0) / s0).toFixed(5) : null]);
+    out.push({
+      id: b.id, name: bot.name, strategy: bot.strategy, sname: STRATEGIES[bot.strategy]?.short || bot.strategy, status: bot.status, broker: !!w.broker, since: bot.created,
+      days: Math.max(0, Math.round((Date.now() - bot.created) / 864e5)), value, start: perf.start, added: perf.added, profit: perf.profit,
+      ret: mx.per.all.ret, spy: mx.per.all.spy, vs: mx.per.all.vs, per: mx.per, maxDD: mx.maxDD, offPeak: mx.offPeak, vol: mx.vol, sharpe: mx.sharpe, beatPct: mx.beatPct, streak: mx.streak,
+      score: mx.score, scorePrev: mxPrev?.score ?? null, conf: mx.conf, parts: mx.parts,
+      trades, closed: sells.length, win: sells.length ? wins / sells.length : null, payoff: rep?.payoff ?? null, benched: !!rep?.benched, tune: !!st0._tune?.better, spark,
+    });
+  }
+  // ranks by score now and yesterday
+  const rankBy = (arr, k) => { const r = {}; [...arr].filter(x => x[k] != null).sort((a, c) => c[k] - a[k] || c.ret - a.ret).forEach((x, i) => { r[x.id] = i + 1; }); return r; };
+  for (const space of [false, true]) {
+    const grp = out.filter(x => x.broker === space), now = rankBy(grp, 'score'), prev = rankBy(grp, 'scorePrev');
+    for (const x of grp) { x.rank = now[x.id]; x.move = prev[x.id] && grp.filter(y => y.scorePrev != null).length === grp.length ? prev[x.id] - now[x.id] : 0; }
+    // badges: one standout per kind, among bots with enough record to mean something
+    const seasoned = grp.filter(x => x.days >= 5 && x.spark.length >= 4);
+    const best = (arr, f, min) => { let top = null; for (const x of arr) { const v = f(x); if (v == null || (min != null && v <= min)) continue; if (!top || v > top.v) top = { x, v }; } return top?.x; };
+    const give = (x, k) => { if (x) (x.badges ||= []).push(k); };
+    give(best(seasoned, x => x.per['7d'].vs, 0.002), 'hot');
+    give(best(seasoned.filter(x => x.vol > 0 && x.ret > 0), x => -x.vol), 'steady');
+    give(best(seasoned.filter(x => x.beatPct != null && x.spark.length >= 8), x => x.beatPct, 0.5), 'consistent');
+    give(best(seasoned, x => x.streak, 2), 'streak');
+    give(best(seasoned.filter(x => x.offPeak > -0.002 && x.maxDD < -0.03), x => -x.maxDD), 'comeback');
+    for (const x of grp) { if (x.days < 14) give(x, 'new'); if (x.benched) give(x, 'benched'); }
+  }
+  // by strategy: the average of its bots
+  const strat = {};
+  for (const x of out) { const s = strat[`${x.broker ? 1 : 0}:${x.strategy}`] ||= { strategy: x.strategy, name: STRATEGIES[x.strategy]?.name || x.strategy, broker: x.broker, n: 0, score: 0, ret: 0, vs: 0, profit: 0, best: null }; s.n++; s.score += x.score; s.ret += x.ret; s.vs += x.vs ?? 0; s.profit += x.profit; if (!s.best || x.score > s.best.score) s.best = { id: x.id, name: x.name, score: x.score }; }
+  const strategies = Object.values(strat).map(s => ({ ...s, score: Math.round(s.score / s.n), ret: s.ret / s.n, vs: s.vs / s.n })).sort((a, c) => c.score - a.score);
+  return { bots: out.sort((a, c) => (a.rank || 99) - (c.rank || 99)), strategies, spyNow, asOf: Date.now() };
+}
+GET('/api/bots/board', auth, () => boardData());
 
 // =====================================================================
 // Background jobs
@@ -6806,7 +6903,7 @@ const ICONS = {};
 const icon = (name, fn) => ICONS[name] || (ICONS[name] = fn());
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD646"/><stop offset=".5" stop-color="#FFA028"/><stop offset="1" stop-color="#FA5256"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="#1E1430"/><ellipse cx="31" cy="36" rx="18" ry="22" transform="rotate(30 31 36)" fill="url(#g)"/><path d="M20 41l6.5-6 5 3.5 9.5-10" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37 28.5h4.5V33" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="45" cy="11.5" rx="9" ry="4.6" transform="rotate(-24 45 11.5)" fill="#3BD68A"/></svg>`;
 let BUILD = 'dev', INDEX = null, INDEX_GZ = null;
-const APP_VERSION = '3.5.0'; // stamped by build.sh from package.json
+const APP_VERSION = '3.6.0'; // stamped by build.sh from package.json
 function loadIndex() {
   const file = path.join(__dirname, 'index.html');
   let html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<!doctype html><title>Mango</title><p>index.html is missing next to server.js.</p>';

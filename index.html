@@ -871,11 +871,6 @@ button.tile:active { transform: scale(.98); }
 .plan-risk span { display: inline-flex; align-items: center; gap: 5px; }
 .plan-risk svg { width: 14px; height: 14px; }
 .bot-meta .tag svg { width: 12px; height: 12px; }
-.lb-row { align-items: center; }
-.lb-n { width: 22px; flex: none; font-family: var(--font-num); font-weight: 750; color: var(--mu); text-align: center; }
-.lb-bars { display: flex; flex-direction: column; gap: 3px; margin: 6px 0 5px; }
-.lb-bar { display: block; height: 5px; border-radius: 3px; min-width: 2px; }
-.lb-bar.up { background: var(--up); } .lb-bar.dn { background: var(--dn); } .lb-bar.spy { background: var(--mu2); }
 .bt-legend .ln.spy-ln { background: var(--mu2); }
 
 /* strategy colors, sparklines, rename */
@@ -890,8 +885,6 @@ button.tile:active { transform: scale(.98); }
 .bot-name { display: inline-flex; align-items: center; gap: 8px; text-align: left; max-width: 100%; }
 .bot-name svg { width: 16px; height: 16px; color: var(--mu); flex: none; }
 .bot-name:active { opacity: .7; }
-.lb-top { background: radial-gradient(120% 140% at 0 50%, color-mix(in srgb, var(--ac) 12%, transparent), transparent 60%); }
-.lb-top .lb-n { font-size: 18px; }
 .bot-meta .tag { flex: none; white-space: nowrap; }
 .bot-meta .next-cap { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -1032,6 +1025,94 @@ button.tile:active { transform: scale(.98); }
 .cmp-t { font-weight: 650; }
 .cmp-k { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 13px; margin: 2px 0; font-variant-numeric: tabular-nums; }
 .cmp-go { flex: none; padding: 6px 12px; min-height: 0; }
+.lb-row { align-items: center; }
+.lb-n { width: 22px; flex: none; font-family: var(--font-num); font-weight: 750; color: var(--mu); text-align: center; }
+
+/* ---------- leaderboard ---------- */
+.lb-sum { display: flex; gap: 14px; align-items: center; padding: 16px; }
+.lb-sum-big { flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; width: 68px; height: 68px; border-radius: 20px; background: color-mix(in srgb, var(--up) 13%, transparent); }
+.lb-sum-big b { font-family: var(--font-display); font-size: 30px; line-height: 1; color: var(--up); }
+.lb-sum-big span { font-size: 12px; color: var(--mu); margin-top: 2px; }
+.lb-sum-h { font-weight: 650; line-height: 1.3; }
+.lb-sum-k { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font-size: 13px; color: var(--mu); }
+.lb-sum-k b { color: var(--tx); font-variant-numeric: tabular-nums; }
+.lb-sum-k b.up { color: var(--up); } .lb-sum-k b.dn { color: var(--dn); }
+.lb-ctl .seg { width: 100%; }
+.lb-ctl2 { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.lb-ctl2 .seg { flex: none; width: auto; }
+.lb-sorts { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; flex: 1; min-width: 0; }
+.lb-sorts::-webkit-scrollbar { display: none; }
+.lb-sorts .chip { height: 30px; font-size: 13px; padding: 0 11px; }
+
+/* podium */
+.lb-podium { display: grid; grid-template-columns: 1fr 1.15fr 1fr; gap: 8px; align-items: end; }
+.lb-pod { --hue: var(--ac); position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 6px 0; border-radius: var(--r-lg) var(--r-lg) 0 0; background: linear-gradient(180deg, color-mix(in srgb, var(--hue) 16%, var(--card)), var(--card)); box-shadow: var(--hi); overflow: hidden; min-width: 0; }
+.lb-pod .lb-medal { font-size: 22px; line-height: 1; }
+.lb-pod.p1 .lb-medal { font-size: 28px; }
+.lb-pn { font-weight: 650; font-size: 14px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px; }
+.lb-pod .n { font-weight: 700; font-size: 14px; font-variant-numeric: tabular-nums; }
+.lb-step { display: block; width: 100%; height: 14px; margin-top: 8px; background: color-mix(in srgb, var(--hue) 30%, transparent); }
+.lb-pod.p1 .lb-step { height: 34px; } .lb-pod.p2 .lb-step { height: 22px; }
+
+/* score ring */
+.lb-ring { position: relative; flex: none; display: grid; place-items: center; }
+.lb-ring svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+.lb-ring .rg-bg { fill: none; stroke: var(--card3); stroke-width: 4; }
+.lb-ring .rg-fg { fill: none; stroke-width: 4; stroke-linecap: round; transition: stroke-dasharray .6s; }
+.lb-ring b { position: relative; font-family: var(--font-num); font-weight: 800; font-size: 15px; }
+.lb-pod.p1 .lb-ring b { font-size: 19px; }
+
+/* rows */
+.lb-list { display: flex; flex-direction: column; gap: 8px; }
+.lb-card { --hue: var(--ac); border-radius: var(--r-lg); background: var(--card); box-shadow: var(--hi); overflow: hidden; cursor: pointer; transition: box-shadow .2s; }
+.lb-card.first { box-shadow: var(--hi), inset 0 0 0 1.5px color-mix(in srgb, var(--hue) 70%, transparent); }
+.lb-card.open { box-shadow: var(--hi), inset 0 0 0 1.5px var(--hue); }
+.lb-main { display: flex; align-items: center; gap: 10px; padding: 12px; }
+.lb-rank { flex: none; width: 26px; display: flex; flex-direction: column; align-items: center; font-family: var(--font-num); font-weight: 800; font-size: 17px; color: var(--tx2); line-height: 1.1; }
+.lb-mv { font-size: 10.5px; font-weight: 700; color: var(--mu2); margin-top: 2px; }
+.lb-mv.up { color: var(--up); } .lb-mv.dn { color: var(--dn); }
+.lb-ic { flex: none; width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center; color: var(--hue); background: color-mix(in srgb, var(--hue) 14%, transparent); }
+.lb-ic svg { width: 18px; height: 18px; }
+.lb-who { flex: 1; min-width: 0; }
+.lb-name { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lb-new { color: var(--ac); font-size: 12px; font-weight: 600; }
+.lb-tags { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 3px; align-items: center; }
+.lb-chip { font-size: 11.5px; font-weight: 650; padding: 1px 7px; border-radius: 6px; color: var(--hue); background: color-mix(in srgb, var(--hue) 13%, transparent); }
+.lb-chip.off { color: var(--mu); background: var(--card2); }
+.lb-streak { font-size: 11.5px; font-weight: 650; }
+.lb-streak.up { color: var(--up); } .lb-streak.dn { color: var(--dn); }
+.lb-badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.lb-badge { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 999px; background: var(--card2); color: var(--tx2); white-space: nowrap; }
+.lb-badge.b-benched { color: var(--dn); }
+.lb-spark { flex: none; width: 64px; height: 30px; overflow: visible; }
+.lb-spark polyline { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.lb-spark .sp-bot { stroke-width: 2; } .lb-spark .sp-bot.up { stroke: var(--up); } .lb-spark .sp-bot.dn { stroke: var(--dn); }
+.lb-spark .sp-spy, .lb-spark .sp-flat { stroke: var(--mu2); stroke-width: 1.3; stroke-dasharray: 2.5 2.5; }
+.lb-right { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; min-width: 74px; }
+.lb-right > b { font-size: 16px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.lb-right .t-cap { font-size: 11.5px; }
+.lb-score { font-size: 11px; font-weight: 700; color: var(--mu); }
+.lb-score::before { content: 'score '; font-weight: 500; }
+@media (max-width: 360px) { .lb-spark { display: none; } }
+
+/* opened row */
+.lb-more { padding: 0 12px 12px; animation: lbOpen .22s ease-out; }
+@keyframes lbOpen { from { opacity: 0; transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { .lb-more { animation: none; } }
+.lb-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; border-radius: 14px; overflow: hidden; background: var(--line); }
+.lb-stat { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 9px 11px; background: var(--card2); font-size: 13px; }
+.lb-stat span { color: var(--mu); }
+.lb-stat b { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lb-stat small { font-size: 11px; }
+.lb-stat .up, .lb-stat small.up { color: var(--up); } .lb-stat .dn, .lb-stat small.dn { color: var(--dn); }
+.lb-parts { margin-top: 12px; display: flex; flex-direction: column; gap: 7px; }
+.lb-part { display: grid; grid-template-columns: 132px 1fr; align-items: center; gap: 10px; font-size: 13px; color: var(--tx2); }
+.lb-part i { position: relative; height: 8px; border-radius: 4px; background: var(--card3); overflow: hidden; }
+.lb-part i::after { content: ''; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--mu2); }
+.lb-part em { position: absolute; top: 0; bottom: 0; border-radius: 4px; }
+.lb-part em.up { background: var(--up); } .lb-part em.dn { background: var(--dn); }
+.lb-name.wrap { white-space: normal; }
+.lb-pod .lb-step { background: color-mix(in srgb, var(--hue) 22%, var(--card2)); }
 
 /* ---------- Paper / Alpaca sides ---------- */
 .space-sw { display: inline-flex; gap: 4px; padding: 4px; border-radius: 14px; background: var(--card); box-shadow: var(--hi); margin: 2px 0 10px; }
@@ -1371,7 +1452,7 @@ button.tile:active { transform: scale(.98); }
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '3.5.0';
+const BUILD = '__BUILD__', APP_VERSION = '3.6.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -4549,23 +4630,6 @@ ACT.botHealth = () => {
 };
 
 // ---------- leaderboard ----------
-PAGES.botboard = {
-  mount(p) {
-    p.title('Leaderboard', true);
-    p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Leaderboard</h1><p class="t-sub" style="margin:0 2px">Every bot since it started, against simply holding the S&P 500 over the same days.</p><div id="lb"><div class="sk sk-block mt16"></div></div>`;
-    api('bots/board').then(all => {
-      const list = all.filter(x => isRealSpace() ? x.broker : !x.broker);
-      const max = Math.max(0.0001, ...list.map(x => Math.abs(x.ret)), ...list.map(x => Math.abs(x.spy || 0)));
-      $('#lb', p.body).innerHTML = list.length ? `<div class="group mt16">${list.map((x, i) => `<button class="cell lb-row ${i === 0 && x.ret > 0 ? 'lb-top' : ''}" data-act="go" data-to="bot/${x.id}"><span class="lb-n">${i === 0 && x.ret > 0 ? '👑' : i + 1}</span><div class="main"><div class="title">${h(x.name)}${x.status !== 'running' ? ` <span class="t-cap">${x.status === 'paused' ? 'paused' : 'stopped'}</span>` : ''}${x.benched ? ' <span class="bench-badge">Benched</span>' : ''}${x.tune ? ' <span class="t-cap" style="color:var(--ac)">new settings</span>' : ''}</div>
-        <div class="lb-bars"><span class="lb-bar ${x.ret >= 0 ? 'up' : 'dn'}" style="width:${Math.abs(x.ret) / max * 100}%"></span>${x.spy != null ? `<span class="lb-bar spy" style="width:${Math.abs(x.spy) / max * 100}%"></span>` : ''}</div>
-        <div class="sub">${x.days} day${x.days === 1 ? '' : 's'} · ${x.trades} trade${x.trades === 1 ? '' : 's'}${x.win != null ? ` · ${Math.round(x.win * 100)}% wins` : ''}${x.payoff != null ? ` · payoff ${x.payoff.toFixed(1)}×` : ''} · biggest drop ${pct0(Math.abs(x.maxDD) * 100, 1)}</div></div>
-        <div class="trail col" style="align-items:flex-end"><b class="n ${cls(x.ret)}">${pct(x.ret * 100)}</b>${x.vs != null ? `<span class="t-cap n ${cls(x.vs)}">${x.vs >= 0 ? 'beats' : 'trails'} S&P by ${pct0(Math.abs(x.vs) * 100, 1)}</span>` : ''}</div></button>`).join('')}</div>
-        <div class="bt-legend"><span><i class="ln"></i>Bot</span><span><i class="ln spy-ln"></i>S&P 500 over the same days</span></div>
-        <p class="note">Early results are mostly luck: give a bot a few months before judging it. Returns count everything in its wallet, including cash. Benched means it trailed the S&P 500 by more than 3% over the last 60 days.</p><div class="group mt16">${menuCell('star', 'Tournaments', 'Let variations of a strategy compete on real prices', 'tournaments')}</div>` : `<div class="group mt16"><div class="empty"><p>No bots yet.</p></div></div>`;
-    }).catch(e => { $('#lb', p.body).innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; });
-  },
-};
-
 ACT.botRename = async () => {
   const p = curBot(); if (!p) return;
   const name = await askText({ title: 'Rename bot', label: 'Name', value: p.d.name, ok: 'Rename', msg: p.d.wallet?.name === p.d.name ? 'Its wallet gets the same new name.' : '' });
@@ -8272,6 +8336,26 @@ PAGES.costs = {
 // Newest first. Each release: version, date, a one-line headline and grouped notes.
 // ===================================================================
 const CHANGELOG = [
+  { v: '3.6.0', d: '2026-10-26', title: 'Leaderboard 2', groups: [
+    ['Fair returns', [
+      'Adding money to a bot\'s wallet (or the weekly add) was counted as a gain, and taking money out as a loss. Now each stretch between deposits is judged only on what the money already there did (a time-weighted return), so a bot that got $1,000 extra no longer looks like it doubled.',
+      'The bot page return, "beats S&P", biggest drop and the 60-day benching check all use the same fair number.',
+    ]],
+    ['A real score', [
+      'Every bot gets a score from 1 to 99, where 50 means "same as holding the S&P 500". It counts beating the S&P (45%), return for the risk (25%), small drops (15%) and how often it beats the market (15%).',
+      'New bots are pulled toward 50 until they have a few weeks of record, so a lucky first week can\'t top the table. After a few months it\'s judged per year, so old bots aren\'t favored for being old.',
+      '"How the score works" explains it, and each bot shows what its score is made of.',
+    ]],
+    ['The new leaderboard', [
+      'A podium for the top 3, and a summary of how many bots beat the S&P 500 with their total profit and how much you added.',
+      'Periods: all time, 30 days, 7 days and today. Sort by score, return, vs S&P or smallest drop.',
+      'Arrows show how many places each bot moved since yesterday. Up and down streaks.',
+      'A sparkline per bot against the S&P 500 over the same days.',
+      'Badges: 🔥 hot this week, 🧘 steadiest, 🎯 most consistent, ⚡ on a streak, 🦅 comeback, 🌱 new, 🪑 benched.',
+      'Tap a bot to open its full stats: profit, 30 and 7-day returns, biggest drop, how far off its best, yearly swings, Sharpe, days beating the S&P, winning sells, trades, money added and the score breakdown.',
+      'A Strategies view ranks each strategy by the average of its bots.',
+    ]],
+  ] },
   { v: '3.5.0', d: '2026-10-26', title: 'Trading checkup and strategy showdown', groups: [
     ['Trading checkup', [
       'A new button on every bot page: "Trading checkup". It reads the bot\'s last 30 decisions and tells you in plain words whether it\'s trading normally, waiting for its setup, or being held back.',
@@ -8448,6 +8532,111 @@ ACT.labCompare = async btn => {
     });
   } catch (e) { sh.body.innerHTML = `<div class="callout warn">${icon('info')}<div>${h(e.message)}</div></div>`; }
 };
+
+// ===================================================================
+// The leaderboard: a fair score for every bot, podium, periods, sorting, rank arrows, streaks,
+// badges, sparklines against the S&P 500, a tap-to-open breakdown, and a by-strategy view.
+// ===================================================================
+const LB_PERIODS = [['all', 'All time'], ['30d', '30 days'], ['7d', '7 days'], ['1d', 'Today']];
+const LB_SORTS = [['score', 'Score'], ['ret', 'Return'], ['vs', 'vs S&P'], ['dd', 'Smallest drop']];
+const LB_BADGE = {
+  hot: ['🔥', 'Hot this week', 'Beat the S&P 500 by the most over the last 7 days'],
+  steady: ['🧘', 'Steadiest', 'The smallest daily swings of the bots that are up'],
+  consistent: ['🎯', 'Most consistent', 'Beat the S&P 500 on the most days'],
+  streak: ['⚡', 'On a streak', 'The most up days in a row right now'],
+  comeback: ['🦅', 'Comeback', 'Back at its best after a real drop'],
+  new: ['🌱', 'New', 'Under 2 weeks old: the score barely counts yet'],
+  benched: ['🪑', 'Benched', 'Trailed the S&P 500 by more than 3% over 60 days'],
+};
+const lbPer = (x, per) => x.per?.[per] || { ret: x.ret, spy: x.spy, vs: x.vs };
+function lbSpark(pts, w = 84, hgt = 30) {
+  if (!pts || pts.length < 2) return `<svg class="lb-spark" viewBox="0 0 ${w} ${hgt}"><line x1="0" y1="${hgt / 2}" x2="${w}" y2="${hgt / 2}" class="sp-flat"/></svg>`;
+  const vals = pts.flatMap(p => [p[1], p[2]].filter(v => v != null)), lo = Math.min(...vals), hi = Math.max(...vals), r = hi - lo || 1e-6;
+  const xy = k => pts.map((p, i) => p[k] == null ? null : `${(i / (pts.length - 1) * w).toFixed(1)},${(hgt - 3 - (p[k] - lo) / r * (hgt - 6)).toFixed(1)}`).filter(Boolean).join(' ');
+  const up = pts[pts.length - 1][1] >= pts[0][1];
+  return `<svg class="lb-spark" viewBox="0 0 ${w} ${hgt}" aria-hidden="true"><polyline points="${xy(2)}" class="sp-spy"/><polyline points="${xy(1)}" class="sp-bot ${up ? 'up' : 'dn'}"/></svg>`;
+}
+const lbRing = (score, size = 44) => { const c = 2 * Math.PI * 18, f = Math.max(0.02, score / 100), hue = score >= 65 ? 'var(--up)' : score >= 45 ? 'var(--ac)' : 'var(--dn)'; return `<span class="lb-ring" style="width:${size}px;height:${size}px"><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="18" class="rg-bg"/><circle cx="22" cy="22" r="18" class="rg-fg" style="stroke:${hue};stroke-dasharray:${(f * c).toFixed(1)} ${c.toFixed(1)}"/></svg><b>${score}</b></span>`; };
+const lbMove = m => m > 0 ? `<span class="lb-mv up">▲${m}</span>` : m < 0 ? `<span class="lb-mv dn">▼${-m}</span>` : '<span class="lb-mv">–</span>';
+function lbSorted(list, sort, per) {
+  const k = { score: x => x.score, ret: x => lbPer(x, per).ret, vs: x => lbPer(x, per).vs ?? -9, dd: x => x.maxDD }[sort] || (x => x.score);
+  return [...list].sort((a, b) => k(b) - k(a) || b.score - a.score);
+}
+PAGES.botboard = {
+  mount(p) {
+    p.title('Leaderboard', true);
+    p.per = store.get('lbPer') || 'all'; p.sort = store.get('lbSort') || 'score'; p.view = store.get('lbView') || 'bots'; p.open = null;
+    p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Leaderboard</h1><p class="t-sub" style="margin:0 2px">Every bot against simply holding the S&P 500 over the same days. Money you add or take out never counts as a gain.</p><div id="lb"><div class="sk sk-block mt16" style="height:120px"></div><div class="sk sk-block mt12" style="height:300px"></div></div>`;
+    this.load(p);
+  },
+  async load(p) {
+    try { p.d = await api('bots/board'); this.draw(p); }
+    catch (e) { $('#lb', p.body).innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; }
+  },
+  draw(p) {
+    const real = isRealSpace(), all = p.d.bots.filter(x => !!x.broker === real), per = p.per, sort = p.sort;
+    const el = $('#lb', p.body);
+    if (!all.length) { el.innerHTML = `<div class="group mt16"><div class="empty"><p>No bots yet. Make one and it shows up here after its first day.</p></div></div>${menuCell('star', 'Tournaments', 'Let variations of a strategy compete on real prices', 'tournaments')}`; return; }
+    const beat = all.filter(x => (lbPer(x, per).vs ?? -1) > 0).length, profit = all.reduce((t, x) => t + x.profit, 0), added = all.reduce((t, x) => t + (x.added || 0), 0);
+    const perLabel = LB_PERIODS.find(x => x[0] === per)[1].toLowerCase(), list = lbSorted(all, sort, per);
+    const hot = all.filter(x => x.badges?.includes('hot'))[0];
+    const head = `<div class="card lb-sum mt16"><div class="lb-sum-big"><b>${beat}</b><span>of ${all.length}</span></div><div class="lb-sum-t"><div class="lb-sum-h">bot${all.length === 1 ? '' : 's'} beat${beat === 1 && all.length === 1 ? 's' : ''} the S&P 500 ${per === 'all' ? 'since they started' : per === '1d' ? 'today' : `over ${perLabel}`}</div>
+        <div class="lb-sum-k"><span>Profit <b class="${cls(profit)}">${money(profit)}</b></span>${Math.abs(added) > 0.5 ? `<span>${added > 0 ? 'Added' : 'Taken out'} <b>${money(Math.abs(added))}</b></span>` : ''}${hot ? `<span>🔥 <b>${h(hot.name)}</b></span>` : ''}</div></div></div>
+      <div class="lb-ctl mt12">${seg('lb-per', LB_PERIODS, per, 'seg-sm')}</div>
+      <div class="lb-ctl2">${seg('lb-view', [['bots', 'Bots'], ['strat', 'Strategies']], p.view, 'seg-sm')}${p.view === 'bots' ? `<div class="lb-sorts">${LB_SORTS.map(([k, l]) => `<button class="chip ${k === sort ? 'on' : ''}" data-lbsort="${k}">${l}</button>`).join('')}</div>` : ''}</div>`;
+    let body;
+    if (p.view === 'strat') {
+      const ss = p.d.strategies.filter(s => !!s.broker === real);
+      body = `<div class="lb-list mt12">${ss.map((s, i) => `<div class="lb-card" style="--hue:${hueOf(s.strategy)}"><div class="lb-main"><span class="lb-rank">${i + 1}</span><span class="lb-ic">${icon(STRAT_ICON[s.strategy] || 'bot')}</span>
+          <div class="lb-who"><div class="lb-name wrap">${h(s.name)}</div><div class="t-foot">${s.n} bot${s.n === 1 ? '' : 's'}${s.n > 1 ? ` · best ${h(s.best?.name || '')}` : ''}</div><div class="t-foot n ${cls(s.profit)}">${money(s.profit)}</div></div>
+          <div class="lb-right"><b class="n ${cls(s.ret)}">${pct(s.ret * 100)}</b><span class="t-cap n ${cls(s.vs)}">${s.vs >= 0 ? 'beats' : 'trails'} S&P by ${pct0(Math.abs(s.vs) * 100, 1)}</span></div>${lbRing(s.score, 38)}</div></div>`).join('')}</div>
+        <p class="note">The average of each strategy's bots since they started, all-time score. A strategy with one lucky bot isn't proven: look for ones where several bots do well.</p>`;
+    } else {
+      const podium = sort === 'score' && list.length >= 3 ? list.slice(0, 3) : null;
+      body = `${podium ? `<div class="lb-podium mt16">${[1, 0, 2].map(i => { const x = podium[i], r = lbPer(x, per); return `<button class="lb-pod p${i + 1}" data-lbopen="${x.id}" style="--hue:${hueOf(x.strategy)}"><span class="lb-medal">${['🥇', '🥈', '🥉'][i]}</span>${lbRing(x.score, i ? 46 : 58)}<span class="lb-pn">${h(x.name)}</span><span class="n ${cls(r.ret)}">${pct(r.ret * 100, 1)}</span><span class="lb-step"></span></button>`; }).join('')}</div>` : ''}
+        <div class="lb-list mt12">${list.map((x, i) => this.row(x, i, per, p.open === x.id, sort)).join('')}</div>
+        <div class="bt-legend"><span><i class="ln"></i>Bot</span><span><i class="ln spy-ln"></i>S&P 500, same days</span></div>
+        <button class="btn btn-quiet btn-block mt12" data-act="lbHow">${icon('info')}How the score works</button>`;
+    }
+    el.innerHTML = head + body + `<div class="group mt16">${menuCell('star', 'Tournaments', 'Let variations of a strategy compete on real prices', 'tournaments')}</div>`;
+    raf(() => placeThumbs(el));
+    onSeg(el, 'lb-per', v => { p.per = v; store.set('lbPer', v); this.draw(p); });
+    onSeg(el, 'lb-view', v => { p.view = v; store.set('lbView', v); this.draw(p); });
+    el.onclick = e => {
+      const s = e.target.closest('[data-lbsort]'); if (s) { p.sort = s.dataset.lbsort; store.set('lbSort', p.sort); this.draw(p); return; }
+      const o = e.target.closest('[data-lbopen]'); if (o && !e.target.closest('[data-act]')) { const id = +o.dataset.lbopen; p.open = p.open === id ? null : id; this.draw(p); if (p.open) raf(() => $(`.lb-card[data-lbopen="${id}"]`, el)?.scrollIntoView({ block: 'nearest', behavior: reduced() ? 'auto' : 'smooth' })); }
+    };
+  },
+  row(x, i, per, open, sort) {
+    const r = lbPer(x, per), rank = i + 1;
+    const badges = (x.badges || []).map(b => LB_BADGE[b] ? `<span class="lb-badge b-${b}" title="${h(LB_BADGE[b][2])}">${LB_BADGE[b][0]} ${LB_BADGE[b][1]}</span>` : '').join('');
+    const streak = Math.abs(x.streak) >= 2 ? `<span class="lb-streak ${x.streak > 0 ? 'up' : 'dn'}">${Math.abs(x.streak)} ${x.streak > 0 ? 'up' : 'down'} days</span>` : '';
+    const stat = (k, v, c = '') => `<div class="lb-stat"><span>${k}</span><b class="n ${c}">${v}</b></div>`;
+    const bar = (k, v) => { const w = Math.round(Math.abs(v) * 50); return `<div class="lb-part"><span>${k}</span><i><em class="${v >= 0 ? 'up' : 'dn'}" style="${v >= 0 ? 'left:50%' : `right:50%`};width:${w}%"></em></i></div>`; };
+    return `<div class="lb-card ${open ? 'open' : ''} ${rank === 1 ? 'first' : ''}" data-lbopen="${x.id}" style="--hue:${hueOf(x.strategy)}">
+      <div class="lb-main"><span class="lb-rank">${rank}${sort === 'score' ? lbMove(x.move) : ''}</span>
+        <div class="lb-who"><div class="lb-name">${h(x.name)}${x.tune ? ' <span class="lb-new">new settings</span>' : ''}</div>
+          <div class="lb-tags"><span class="lb-chip">${h(x.sname)}</span>${x.status !== 'running' ? `<span class="lb-chip off">${h(x.status)}</span>` : ''}${streak}</div>
+          ${badges ? `<div class="lb-badges">${badges}</div>` : ''}</div>
+        ${lbSpark(x.spark)}
+        <div class="lb-right"><b class="n ${cls(r.ret)}">${pct(r.ret * 100)}</b>${r.vs != null ? `<span class="t-cap n ${cls(r.vs)}">${r.vs >= 0 ? 'beats' : 'trails'} S&P ${pct0(Math.abs(r.vs) * 100, 1)}</span>` : ''}<span class="lb-score">${x.score}</span></div></div>
+      ${open ? `<div class="lb-more">
+        <div class="lb-stats">${stat('Score', `${x.score}${x.scorePrev != null && x.scorePrev !== x.score ? ` <small class="${x.score > x.scorePrev ? 'up' : 'dn'}">${x.score > x.scorePrev ? '+' : ''}${x.score - x.scorePrev}</small>` : ''}`)}${stat('Profit', money(x.profit), cls(x.profit))}${stat('Since start', pct(x.ret * 100), cls(x.ret))}${stat('S&P same days', x.spy == null ? '–' : pct(x.spy * 100), cls(x.spy))}
+          ${stat('30 days', pct(lbPer(x, '30d').ret * 100), cls(lbPer(x, '30d').ret))}${stat('7 days', pct(lbPer(x, '7d').ret * 100), cls(lbPer(x, '7d').ret))}${stat('Biggest drop', pct0(Math.abs(x.maxDD) * 100, 1))}${stat('Off its best', x.offPeak > -0.0005 ? 'At its best' : pct0(Math.abs(x.offPeak) * 100, 1))}
+          ${stat('Swings a year', x.vol ? pct0(x.vol * 100, 1) : '–')}${stat('Sharpe', x.sharpe == null ? '–' : x.sharpe.toFixed(2))}${stat('Days beating S&P', x.beatPct == null ? '–' : Math.round(x.beatPct * 100) + '%')}${stat('Winning sells', x.win == null ? '–' : `${Math.round(x.win * 100)}% of ${x.closed}`)}
+          ${stat('Trades', x.trades)}${stat('Age', `${x.days} day${x.days === 1 ? '' : 's'}`)}${Math.abs(x.added) > 0.5 ? stat(x.added > 0 ? 'Added' : 'Taken out', money(Math.abs(x.added))) : ''}${stat('Wallet now', money(x.value))}</div>
+        <div class="lb-parts"><div class="t-foot">What makes up the score${x.conf < 0.6 ? ` (only ${Math.round(x.conf * 100)}% counted so far: it's new)` : ''}</div>${bar('Beating the S&P', x.parts.excess)}${bar('Return for the risk', x.parts.risk)}${bar('Small drops', x.parts.drop + 0.3)}${bar('Beats it often', x.parts.steady)}</div>
+        <button class="btn btn-primary btn-block mt12" data-act="go" data-to="bot/${x.id}">${icon('bot')}Open ${h(x.name)}</button></div>` : ''}</div>`;
+  },
+};
+const STRAT_ICON = { trend: 'trail', momentum: 'zap', rsi2: 'arrowDn', breakout: 'bolt', hold: 'layers', dual: 'swap', lowvol: 'shield', drift: 'bolt', tom: 'calendar', snapback: 'refresh', earnings: 'chart', autopilot: 'sparkle' };
+ACT.lbHow = () => sheet({ title: 'How the score works', tall: true, html: `<p class="dialog-msg">Every bot gets a score from 1 to 99. 50 means "no better or worse than just holding the S&P 500". It's built from four things, all measured on fair returns (money you add or take out is never counted):</p>
+  <div class="group"><div class="cell"><div class="main"><div class="title">Beating the S&P 500 (45%)</div><div class="sub">How far ahead of or behind the S&P 500 it is since it started, over the same days. After a few months it's judged per year, so an old bot isn't favored just for being old.</div></div></div>
+  <div class="cell"><div class="main"><div class="title">Return for the risk (25%)</div><div class="sub">The Sharpe ratio: return per unit of daily swing. Smooth gains score higher than the same gains with wild swings.</div></div></div>
+  <div class="cell"><div class="main"><div class="title">Small drops (15%)</div><div class="sub">The biggest fall from a high. A 12% drop costs most of this part.</div></div></div>
+  <div class="cell"><div class="main"><div class="title">Beats it often (15%)</div><div class="sub">The share of days it did better than the S&P 500.</div></div></div></div>
+  <p class="dialog-msg">New bots are pulled toward 50: after 1 week about a quarter of the score counts, after 3 weeks half, after 2 months three quarters. A lucky first week can't top the table.</p>
+  <p class="dialog-msg">The arrows show how many places a bot moved since yesterday's close. Badges go to one bot each: hottest week, steadiest, most consistent, longest streak, best comeback.</p>` });
 
 // ===================================================================
 // Settings
