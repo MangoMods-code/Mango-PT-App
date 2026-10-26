@@ -308,7 +308,7 @@ const DEF = {
   confirmStyle: 'hold', confirmBuy: false, confirmSell: true, cashAPY: 0, startBalance: 10000,
   // notifications
   pushAlerts: true, pushOrders: true, notifySummary: true, notifyMoves: true, moveThreshold: 5,
-  notifyAchv: true, notifyGames: true, pushBots: true, botWeekly: true, pushReal: true, realDailyLossPct: 3, realHalt: false, standbyActive: false, standbyActiveAt: 0, councilWeighted: true, vetoAll: true, moodSwitch: true, corrGuard: true, corrMax: 0.9, sharedRisk: true, maxSymPct: 30, maxSectorPct: 50, maxCryptoPct: 50, autoBench: false, autoTune: true, aiVeto: true, aiReview: true, aiSizeUp: true, nightOn: true, nightRuns: 2, aiOn: true, aiSize: true, aiDebate: true, aiHawk: true, aiGuard: true, aiChart: true, aiDailyMax: 120, faceReal: true, autoBackup: true, quietStart: '', quietEnd: '',
+  notifyAchv: true, notifyGames: true, pushBots: true, botWeekly: true, pushReal: true, realDailyLossPct: 3, realHalt: false, standbyActive: false, standbyActiveAt: 0, councilWeighted: true, vetoAll: true, briefOn: true, briefAt: '08:45', letterOn: true, aiPostmortem: true, aiChat: true, aiExplain: true, moodSwitch: true, corrGuard: true, corrMax: 0.9, sharedRisk: true, maxSymPct: 30, maxSectorPct: 50, maxCryptoPct: 50, autoBench: false, autoTune: true, aiVeto: true, aiReview: true, aiSizeUp: true, nightOn: true, nightRuns: 2, aiOn: true, aiSize: true, aiDebate: true, aiHawk: true, aiGuard: true, aiChart: true, aiDailyMax: 120, faceReal: true, autoBackup: true, quietStart: '', quietEnd: '',
   // look and feel
   hideBalances: false, showCents: true, compactNums: false, defaultRange: '1D', defaultChart: 'Candles',
   theme: 'mango', accent: 'mango', plColors: 'classic', roundedNums: true, reduceMotion: false, celebrate: true,
@@ -329,7 +329,7 @@ const CHOICES = {
   closedTrading: ['fill', 'queue', 'block'], confirmStyle: ['hold', 'tap', 'none'], defaultRange: ['1D', '1W', '1M', '3M', '1Y', 'ALL', '5Y'],
   defaultChart: ['Candles', 'Line'], theme: ['mango', 'midnight', 'light', 'auto'], accent: ['mango', 'leaf', 'sky', 'grape', 'rose'],
   plColors: ['classic', 'colorblind', 'reversed'], defaultTab: ['portfolio', 'market', 'bots', 'activity', 'games'],
-  posMetric: ['day', 'total', 'value', 'pl'], posSort: ['value', 'day', 'total', 'name'],
+  briefAt: ['07:30', '08:45', '09:15'], posMetric: ['day', 'total', 'value', 'pl'], posSort: ['value', 'day', 'total', 'name'],
 };
 let S = { ...DEF };
 async function loadSettings() {
@@ -1935,7 +1935,7 @@ async function initPush() {
     VAPID_PUB = pub; pushOn = true;
   } catch (e) { warn('push setup', e.message); }
 }
-const PUSH_SETTING = { alert: 'pushAlerts', order: 'pushOrders', summary: 'notifySummary', move: 'notifyMoves', achv: 'notifyAchv', game: 'notifyGames', bot: 'pushBots', real: 'pushReal' };
+const PUSH_SETTING = { alert: 'pushAlerts', order: 'pushOrders', summary: 'notifySummary', move: 'notifyMoves', achv: 'notifyAchv', game: 'notifyGames', bot: 'pushBots', real: 'pushReal', brief: 'briefOn', letter: 'letterOn' };
 function quietNow() {
   if (!S.quietStart || !S.quietEnd) return false;
   const p = etParts(), m = p.h * 60 + p.mi, [a, b] = [S.quietStart, S.quietEnd].map(x => { const [h, mi] = x.split(':').map(Number); return h * 60 + mi; });
@@ -5607,6 +5607,223 @@ POST('/api/analyst/test', auth, async () => {
   return v.c === 'ai' ? { ok: true, ms: Date.now() - t0, model: AI_MODEL, reply: v.line } : { ok: false, msg: (await aiUse()).lastError?.msg || v.line, model: AI_MODEL };
 });
 GET('/api/analyst', auth, async () => { const u = await aiUse(); return { key: !!AI_KEY, on: S.aiOn !== false, sizing: S.aiSize !== false, debate: S.aiDebate !== false, bench: AI_BENCH.map(m => ({ k: m.k, name: m.name, role: m.role, on: S[m.set] !== false })), model: AI_MODEL, dailyMax: S.aiDailyMax ?? 120, today: { calls: u.calls, cost: aiCost(u.inT, u.outT), errors: u.errors, by: u.by || {} }, month: { calls: u.mCalls, cost: aiCost(u.mIn, u.mOut) }, lastError: u.lastError || null }; });
+// ===================================================================
+// More AI: the morning brief, Ask the Council, the weekly letter from the chair, chatting with a bot,
+// post-mortems on losing trades and the news explainer. Everything shares the daily AI cap, and
+// everything that can has a plain rule-based version when there's no key (or the cap is hit).
+// ===================================================================
+const TEXT_RULE = 'Reply in plain text only: no markdown, no headings, no bullet symbols, no emoji unless asked.';
+// one free-text call. Returns { ok, text } or { ok: false, msg }. Counts toward the same daily cap as the Council.
+async function aiText(k, system, messages, { max = 400, force = false } = {}) {
+  if (!AI_KEY) return { ok: false, msg: 'No ANTHROPIC_API_KEY on the server.' };
+  if (S.aiOn === false && !force) return { ok: false, msg: 'AI members are switched off in Settings.' };
+  const u = await aiUse(); if (u.calls >= (S.aiDailyMax ?? 120)) return { ok: false, msg: 'Today\'s AI limit is used up. It resets at midnight New York time.' };
+  u.calls++; u.mCalls++; u.by[k] = (u.by[k] || 0) + 1;
+  const msgs = typeof messages === 'string' ? [{ role: 'user', content: messages }] : messages;
+  try {
+    const r = await fetch(AI_BASE + '/v1/messages', { method: 'POST', signal: AbortSignal.timeout(30e3), headers: { 'content-type': 'application/json', 'x-api-key': AI_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: AI_MODEL, max_tokens: max, system: system + '\n' + TEXT_RULE, messages: msgs }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j?.error?.message || 'HTTP ' + r.status);
+    u.inT += j.usage?.input_tokens || 0; u.outT += j.usage?.output_tokens || 0; u.mIn += j.usage?.input_tokens || 0; u.mOut += j.usage?.output_tokens || 0;
+    const text = (j.content || []).map(x => x.text || '').join('').replace(/\*\*|^#+\s*/gm, '').trim();
+    if (!text) throw new Error('empty answer');
+    return { ok: true, text };
+  } catch (e) { u.errors++; warn('ai', k + ': ' + e.message); u.lastError = { ts: Date.now(), msg: String(e.message).slice(0, 160) }; return { ok: false, msg: "Couldn't reach the AI: " + String(e.message).slice(0, 100) }; }
+  finally { kvSet('ai_usage', JSON.stringify(u)).catch(() => {}); }
+}
+const aiReadyFor = flag => analystReady() && S[flag] !== false;
+const memberName = async k => { const n = await getCouncilNames().catch(() => null); return n?.all?.[k] || (k === 'chair' ? 'Big Mango' : nameOf(k)); };
+const prevClose = s => prices.get(s)?.prev || null;
+const pctS = x => x == null || !Number.isFinite(x) ? 'n/a' : `${x >= 0 ? '+' : ''}${(x * 100).toFixed(1)}%`;
+const usd = x => '$' + (+x || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
+
+// ---------- facts about the paper side, shared by the brief and the letter ----------
+async function botsFacts(sinceMs) {
+  const out = [];
+  for (const b of await rows("select b.*, w.broker from bots b join wallets w on w.id=b.wid where b.status <> 'killed' order by b.id")) {
+    if (b.broker) continue;
+    const bot = botJson(b), w = await row('select cash from wallets where id=$1', [b.wid]); if (!w) continue;
+    const pos = await positions(b.wid), value = +w.cash + marketValue(pos);
+    const back = await row('select eq from snap where wid=$1 and ts <= $2 order by ts desc limit 1', [b.wid, new Date(sinceMs)]);
+    const tr = await rows('select sym, side, pnl from trd where wid=$1 and ts >= $2 order by id', [b.wid, new Date(sinceMs)]);
+    const last = await row("select title from bot_log where bot_id=$1 and kind='decision' order by id desc limit 1", [b.id]);
+    out.push({ id: b.id, name: bot.name, strategy: STRATEGIES[bot.strategy]?.name || bot.strategy, status: bot.status, value, ret: back ? value / +back.eq - 1 : null,
+      holds: pos.map(p => p.sym), buys: tr.filter(t => t.side === 'buy').map(t => t.sym), sells: tr.filter(t => t.side === 'sell').map(t => ({ sym: t.sym, pnl: +t.pnl || 0 })), last: last?.title?.replace(/^(Daily decision|Manual run): /, '') || null });
+  }
+  return out;
+}
+async function marketFacts() {
+  const L = [];
+  for (const s of ['SPY', 'QQQ', 'BTC']) {
+    const b = await dailyBars(s).catch(() => null); if (!b) continue;
+    const i = b.c.length - 1, md = s !== 'QQQ' ? moodOf(b, s === 'BTC' ? 'Bitcoin' : 'The S&P 500') : null;
+    L.push(`${s}: ${f1(priceOf(s) || b.c[i], 2)}, 1 day ${pctS(IND.ret(b.c, 1, i))}, 1 week ${pctS(IND.ret(b.c, 5, i))}, 1 month ${pctS(IND.ret(b.c, 21, i))}${md ? `, mood ${md.k}` : ''}`);
+  }
+  return L;
+}
+const holdSyms = async () => [...new Set((await rows("select distinct p.sym from pos p join wallets w on w.id=p.wid where w.broker is null and not w.archived").catch(() => [])).map(r => r.sym))];
+
+// ---------- the morning brief ----------
+async function morningBrief({ manual = false } = {}) {
+  const today = etDate(), bots = await botsFacts(Date.now() - 864e5), mkt = await marketFacts();
+  const held = (await holdSyms()).slice(0, 30), earn = [];
+  for (const s of held.filter(x => !isCrypto(x))) { const bz = await Promise.race([buzzFor(s), sleep(8000).then(() => null)]).catch(() => null); const up = bz?.upcoming?.find(u => u.k === 'earnings'); if (up && up.tradingDays <= 1) earn.push(`${s} ${up.tradingDays === 0 ? 'today' : 'tomorrow'}`); }
+  const movers = held.map(s => { const p = priceOf(s), pv = prevClose(s); return p && pv ? { s, ch: p / pv - 1 } : null; }).filter(Boolean).sort((a, b) => Math.abs(b.ch) - Math.abs(a.ch)).slice(0, 3);
+  const facts = [`Date: ${today} (${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][new Date(today + 'T12:00').getDay()]})`, 'Markets:', ...mkt.map(x => '- ' + x),
+    `Earnings for things we hold: ${earn.join(', ') || 'none today or tomorrow'}`, `Biggest overnight moves in holdings: ${movers.map(m => `${m.s} ${pctS(m.ch)}`).join(', ') || 'none'}`,
+    'Bots (name, strategy, last day, what they hold, latest decision):', ...bots.map(b => `- ${b.name} (${b.strategy}, ${b.status}): ${pctS(b.ret)}, holds ${b.holds.join(', ') || 'cash'}${b.last ? `; last: ${b.last}` : ''}`)].join('\n');
+  let text = null, ai = false;
+  if (aiReadyFor('briefOn')) {
+    const r = await aiText('brief', `You write a short morning brief for someone learning to trade with paper-money bots. Using only the facts given, write 4 to 6 short lines, each on its own line: first the market mood in one line, then what matters today (earnings, big moves in what they hold), then one line on the bots worth watching, and finish with one line on what to keep an eye on. Plain, friendly, specific, with numbers. Never give financial advice or tell them to buy or sell.`, facts, { max: 320 });
+    if (r.ok) { text = r.text; ai = true; }
+  }
+  if (!text) { // the rule-based brief
+    const spy = mkt.find(x => x.startsWith('SPY')), best = bots.filter(b => b.ret != null).sort((a, b) => b.ret - a.ret)[0];
+    text = [spy ? `Market: ${spy.replace(/^SPY: /, 'S&P 500 ')}.` : 'Market data is still loading.', earn.length ? `Earnings: ${earn.join(', ')}.` : 'No earnings today for anything you hold.', movers.length ? `Biggest moves in your holdings: ${movers.map(m => `${m.s} ${pctS(m.ch)}`).join(', ')}.` : '', best ? `Best bot yesterday: ${best.name} ${pctS(best.ret)}.` : bots.length ? '' : 'No bots running yet.'].filter(Boolean).join('\n');
+  }
+  const brief = { ts: Date.now(), day: today, text, ai };
+  await kvSet('brief', JSON.stringify(brief));
+  if (!manual) await notify('brief', '☀️ Morning brief', text.split('\n')[0].slice(0, 180), { url: '/#/brief', tag: 'brief-' + today });
+  return brief;
+}
+async function briefJob() {
+  if (S.briefOn === false) return;
+  const p = etParts(), hm = String(p.h).padStart(2, '0') + ':' + String(p.mi).padStart(2, '0'), today = etDate();
+  if (!isTradingDay(p.y, p.m, p.d) || hm < (S.briefAt || '08:45') || hm > '11:00') return;
+  if ((await kvGet('brief_day').catch(() => null)) === today) return;
+  await kvSet('brief_day', today); await morningBrief();
+}
+GET('/api/brief', auth, async () => jsonOr(await kvGet('brief').catch(() => null), null));
+POST('/api/brief', auth, async () => morningBrief({ manual: true }));
+
+// ---------- Ask the Council about any ticker ----------
+const askCache = new Map();
+POST('/api/council/ask', auth, async req => {
+  const sym = cleanSym(req.body?.sym); if (!sym) fail('Which symbol?');
+  const side = req.body?.side === 'sell' ? 'sell' : 'buy', key = `${sym}|${side}|${etDate()}`;
+  if (askCache.has(key) && Date.now() - askCache.get(key).ts < 30 * 60e3) return { ...askCache.get(key), cached: true };
+  const b = await dailyBars(sym).catch(() => null); if (!b || b.c.length < 30) fail(`Not enough price history for ${sym}.`);
+  const spy = await dailyBars('SPY').catch(() => null), bench = spy ? IND.ret(spy.c, 63, spy.c.length - 1) : null;
+  const bz = S.f_buzz !== false ? await Promise.race([buzzFor(sym), sleep(12000).then(() => null)]).catch(() => null) : null, up = bz?.upcoming?.find(u => u.k === 'earnings') || null;
+  const votes = councilVotes(sym, b, { buzz: bz, earnings: up, weight: 0.1, benchRet63: bench });
+  const ais = await aiRound(sym, b, { side, target: 0.1 }, bz, up, { strategy: 'a question from the owner (no bot is trading this; judge it on its merits)', bench, have: 0, positions: 0, maxPos: 25, stops: true }, votes).catch(() => []);
+  votes.push(...ais);
+  const s = { votes, yes: votes.filter(v => v.vote === 'yes').length, no: votes.filter(v => v.vote === 'no').length };
+  Object.assign(s, weighVotes(votes, situation(b, bz, up), await councilRecord()));
+  const t = tallyText(s), lean = leansNo(s) ? 'no' : (s.wy ?? s.yes) > (s.wn ?? s.no) ? 'yes' : 'split';
+  const chair = `${await memberName('chair')}: ${lean === 'yes' ? `The Council would back a ${side} of ${sym}, ${t}.` : lean === 'no' ? `The Council would not ${side} ${sym} today, ${t}.` : `The Council is split on ${sym}, ${t}.`}`;
+  const out = { ts: Date.now(), sym, side, votes: votes.map(v => ({ k: v.k, vote: v.vote, conf: v.conf, line: v.line, w: v.w, wr: v.wr, c: v.c, vs: v.vs, arg: v.arg })), yes: s.yes, no: s.no, wy: s.wy, wn: s.wn, lean, chair, price: priceOf(sym) || b.c[b.c.length - 1] };
+  askCache.set(key, out); if (askCache.size > 100) askCache.delete(askCache.keys().next().value);
+  return out;
+});
+
+// ---------- the weekly letter from the chair ----------
+async function weeklyLetter({ manual = false } = {}) {
+  const since = Date.now() - 7 * 864e5, bots = await botsFacts(since), mkt = await marketFacts(), chair = await memberName('chair');
+  const settled = await rows("select votes, right_, result, sym from council where settled and ts >= now() - interval '14 days'").catch(() => []);
+  const score = {}; for (const r of settled) for (const [k, ok] of Object.entries(jsonOr(r.right_, {}) || {})) { const m = score[k] ||= { n: 0, r: 0 }; m.n++; if (ok) m.r++; }
+  const calls = (await Promise.all(Object.entries(score).filter(([, m]) => m.n >= 3).map(async ([k, m]) => ({ k, name: await memberName(k), acc: m.r / m.n, n: m.n })))).sort((a, b) => b.acc - a.acc);
+  const sells = bots.flatMap(b => b.sells.map(s => ({ ...s, bot: b.name }))), best = sells.sort((a, b) => b.pnl - a.pnl)[0], worst = sells[sells.length - 1];
+  const ranked = bots.filter(b => b.ret != null).sort((a, b) => b.ret - a.ret);
+  const facts = ['Markets this week:', ...mkt.map(x => '- ' + x), 'Bots this week (return, trades):', ...[...ranked, ...bots.filter(b => b.ret == null)].map(b => `- ${b.name} (${b.strategy}): ${pctS(b.ret)}, ${b.buys.length} buys, ${b.sells.length} sells, holds ${b.holds.join(', ') || 'cash'}`),
+    best ? `Best closed trade: ${best.bot} on ${best.sym}, ${usd(best.pnl)}` : 'No closed trades.', worst && worst !== best ? `Worst closed trade: ${worst.bot} on ${worst.sym}, ${usd(worst.pnl)}` : '',
+    calls.length ? `Council members who called it best (last 2 weeks, graded a week after each vote): ${calls.slice(0, 3).map(c => `${c.name} ${Math.round(c.acc * 100)}% of ${c.n}`).join(', ')}; worst: ${calls.slice(-2).map(c => `${c.name} ${Math.round(c.acc * 100)}%`).join(', ')}` : 'Too few graded Council votes this week.'].filter(Boolean).join('\n');
+  let text = null, ai = false;
+  if (aiReadyFor('letterOn')) {
+    const r = await aiText('letter', `You are ${chair}, the chair (the king) of a council of trading bots in a playful game called Mango HQ. Write this week's letter to the owner, in character: warm, a bit regal and funny, but every claim must come from the facts given. 120 to 180 words, in 3 short paragraphs: how the week went for the kingdom (markets and the bots, with numbers), who in the court earned praise or a scolding (best and worst bot, Council members who called it), and what the court will watch next week. Sign it with your name. Never give financial advice.`, facts, { max: 450 });
+    if (r.ok) { text = r.text; ai = true; }
+  }
+  if (!text) text = [`To the owner, from ${chair}.`, ranked.length ? `This week ${ranked[0].name} led the court at ${pctS(ranked[0].ret)}${ranked.length > 1 ? ` and ${ranked[ranked.length - 1].name} trailed at ${pctS(ranked[ranked.length - 1].ret)}` : ''}.` : bots.length ? `${bots.length} bot${bots.length === 1 ? ' is' : 's are'} at work, too new to rank yet.` : 'The court had no bots at work this week.', calls.length ? `${calls[0].name} called it best, right ${Math.round(calls[0].acc * 100)}% of the time.` : '', mkt[0] ? `The realm: ${mkt[0].replace(/^SPY: /, 'S&P 500 ')}.` : '', `— ${chair}`].filter(Boolean).join('\n\n');
+  const letter = { id: Date.now(), ts: Date.now(), week: etDate(), from: chair, text, ai };
+  const list = jsonOr(await kvGet('letters').catch(() => null), []) || []; list.unshift(letter); await kvSet('letters', JSON.stringify(list.slice(0, 20)));
+  if (!manual) await notify('letter', `👑 A letter from ${chair}`, text.replace(/\s+/g, ' ').slice(0, 160), { url: '/#/letters', tag: 'letter-' + letter.week });
+  return letter;
+}
+async function letterJob() {
+  if (S.letterOn === false) return;
+  const p = etParts(), today = etDate(); if (new Date(today + 'T12:00').getDay() !== 5 || p.h < 17) return; // Friday after 5 PM ET
+  if ((await kvGet('letter_day').catch(() => null)) === today) return;
+  await kvSet('letter_day', today); await weeklyLetter();
+}
+GET('/api/letters', auth, async () => jsonOr(await kvGet('letters').catch(() => null), []) || []);
+POST('/api/letters', auth, async () => weeklyLetter({ manual: true }));
+
+// ---------- chat with a bot ----------
+const PERSONA = { trend: 'calm and patient, a surfer who rides waves', momentum: 'restless and competitive, always chasing the strongest runner', rsi2: 'a bargain hunter who loves a dip', breakout: 'excitable, lives for new highs', hold: 'sleepy and unbothered', dual: 'a careful planner', lowvol: 'cautious and sensible', drift: 'a news junkie', tom: 'a creature of habit who loves the calendar', snapback: 'a contrarian who bets on bounces', earnings: 'an earnings-season nerd', autopilot: 'a manager running a team of strategies' };
+POST('/api/bots/:id/chat', auth, async req => {
+  const b = await row('select * from bots where id=$1', [+req.params.id]); if (!b) fail('That bot is gone', 404);
+  if (!AI_KEY) fail('Chat needs an ANTHROPIC_API_KEY on the server.');
+  if (S.aiChat === false) fail('Chat is switched off in Settings.');
+  const msg = clean(req.body?.msg, 500); if (!msg) fail('Say something first.');
+  const bot = botJson(b), st = STRATEGIES[bot.strategy] || {}, w = await row('select cash from wallets where id=$1', [b.wid]), pos = await positions(b.wid), value = +w.cash + marketValue(pos);
+  const last = await row("select * from bot_log where bot_id=$1 and kind='decision' order by id desc limit 1", [b.id]), rowsW = jsonOr(last?.data, {})?.rows || [];
+  const log = (await rows('select kind, title, body, ts from bot_log where bot_id=$1 order by id desc limit 12', [b.id])).map(l => `- ${etDate(tsMs(l.ts))} ${l.kind}: ${l.title}${l.body ? ' — ' + String(l.body).split('\n')[0].slice(0, 120) : ''}`).join('\n');
+  const tr = (await rows('select ts, sym, side, qty, price, pnl from trd where wid=$1 order by id desc limit 10', [b.wid])).map(t => `- ${etDate(tsMs(t.ts))} ${t.side} ${t.sym} at ${f1(+t.price, 2)}${t.pnl != null ? ` (P/L ${usd(+t.pnl)})` : ''}`).join('\n');
+  const m = { ...MANDATE_DEF, ...bot.mandate };
+  const facts = `Your name: ${bot.name}. Strategy: ${st.name || bot.strategy} — ${String(st.desc || '').slice(0, 400)}
+Settings: ${JSON.stringify(bot.params)}. Trades: ${bot.syms.join(', ')}. Status: ${bot.status}.
+Limits: max ${m.maxPosPct}% per position, max ${m.maxTradesDay} trades a day, stops ${m.stops ? 'on' : 'off'}, drawdown stop ${m.maxDDPct}%, take half profit at +${m.takeProfitPct}%, time stop ${m.timeStopDays} days.
+Wallet: ${usd(value)} (cash ${usd(w.cash)}), started with ${usd(+(await row('select start_bal from wallets where id=$1', [b.wid]))?.start_bal || 0)}.
+Holding: ${pos.map(p => `${p.sym} ${f1(p.qty, 3)} @ ${f1(p.avg, 2)} now ${f1(priceOf(p.sym), 2)} (${pctS((priceOf(p.sym) || p.avg) / p.avg - 1)})`).join('; ') || 'nothing, all cash'}
+Latest decision: ${last?.title || 'none yet'}
+${rowsW.slice(0, 10).map(r => `- ${r.sym}: ${r.action}. ${(r.note || '')} ${(r.why || []).join(' ')}`.slice(0, 300)).join('\n')}
+Recent trades:\n${tr || '- none'}
+Journal:\n${log || '- empty'}`;
+  const hist = (Array.isArray(req.body?.history) ? req.body.history : []).slice(-8).map(x => ({ role: x.role === 'bot' ? 'assistant' : 'user', content: clean(x.text, 600) })).filter(x => x.content);
+  while (hist.length && hist[0].role !== 'user') hist.shift();
+  const r = await aiText('chat', `You are ${bot.name}, a paper-trading bot in the Mango app, talking with your owner. Personality: ${PERSONA[bot.strategy] || 'friendly and straightforward'}. Stay in character but be genuinely useful: explain your decisions, your rules and your holdings using only the facts below, and say plainly when you don't know. Keep answers to 1 to 4 short sentences. You cannot place trades or change settings from this chat; if asked, tell them which button in the app does it (Decide now, Pause, Change, Sell everything). Never give financial advice about real money.\n\nFacts about you:\n${facts}`, [...hist, { role: 'user', content: msg }], { max: 300 });
+  if (!r.ok) fail(r.msg);
+  return { text: r.text };
+});
+
+// ---------- post-mortems on losing trades ----------
+async function postmortemJob() {
+  if (S.aiPostmortem === false) return;
+  const lastId = +(await kvGet('pm_last').catch(() => 0) || 0);
+  const list = await rows("select t.*, b.id as bot_id, b.name as bot_name, b.strategy from trd t join bots b on b.wid=t.wid where t.side='sell' and t.pnl < 0 and t.id > $1 and t.ts > now() - interval '3 days' order by t.id limit 3", [lastId]).catch(() => []);
+  for (const t of list) {
+    await kvSet('pm_last', String(t.id));
+    const buy = await row("select * from trd where wid=$1 and sym=$2 and side='buy' and id < $3 order by id desc limit 1", [t.wid, t.sym, t.id]);
+    const cv = buy ? await row("select * from council where bot_id=$1 and sym=$2 and ts <= $3::timestamptz + interval '1 hour' and ts >= $3::timestamptz - interval '3 days' order by id desc limit 1", [t.bot_id, t.sym, buy.ts]) : null;
+    const votes = jsonOr(cv?.votes, []), lossPct = buy ? +t.price / +buy.price - 1 : null, days = buy ? Math.max(1, Math.round((tsMs(t.ts) - tsMs(buy.ts)) / 864e5)) : null;
+    const b = await dailyBars(t.sym).catch(() => null); let path = '';
+    if (b && buy) { const i0 = lastIndexOnOrBefore(b.d, etDate(tsMs(buy.ts))), i1 = lastIndexOnOrBefore(b.d, etDate(tsMs(t.ts))); if (i0 >= 0 && i1 > i0) { let hi = 0, lo = Infinity; for (let k = i0; k <= i1; k++) { hi = Math.max(hi, b.h[k]); lo = Math.min(lo, b.l[k]); } path = `While held, high ${f1(hi, 2)} (${pctS(hi / +buy.price - 1)}), low ${f1(lo, 2)} (${pctS(lo / +buy.price - 1)}).`; } }
+    const spy = await dailyBars('SPY').catch(() => null); let mk = '';
+    if (spy && buy) { const i0 = lastIndexOnOrBefore(spy.d, etDate(tsMs(buy.ts))), i1 = lastIndexOnOrBefore(spy.d, etDate(tsMs(t.ts))); if (i0 >= 0 && i1 >= i0) mk = `S&P 500 over the same days: ${pctS(spy.c[i1] / spy.c[i0] - 1)}.`; }
+    const facts = `Bot ${t.bot_name} (${STRATEGIES[t.strategy]?.name || t.strategy}) lost ${usd(Math.abs(+t.pnl))} on ${t.sym}${lossPct != null ? ` (${pctS(lossPct)})` : ''}${days ? ` over ${days} day(s)` : ''}.
+Bought${buy ? ` at ${f1(+buy.price, 2)} on ${etDate(tsMs(buy.ts))}` : ''}. Why it bought: ${clean(buy?.why, 300) || 'n/a'}
+Sold at ${f1(+t.price, 2)} on ${etDate(tsMs(t.ts))}. Why it sold: ${clean(t.why, 300) || 'n/a'}
+${path} ${mk}
+Council vote on the buy: ${votes.length ? votes.filter(v => v.vote !== 'pass').map(v => `${nameOf(v.k)} ${v.vote}: ${clean(v.line, 90)}`).join(' | ') : 'not recorded'}`;
+    let text = null, ai = false;
+    if (aiReadyFor('aiPostmortem')) { const r = await aiText('postmortem', 'You write a short post-mortem on one losing paper trade by an automated bot, for someone learning to trade. Using only the facts, in 2 or 3 sentences: what went wrong (bad luck, the whole market fell, a stop that was too tight, a signal that was late, ignored warnings), whether the bot followed its own rules, and one lesson. If the Council members who voted no were right, say who. Be honest: sometimes a loss is just the normal cost of a sound strategy.', facts, { max: 220 }); if (r.ok) { text = r.text; ai = true; } }
+    if (!text) { const noes = votes.filter(v => v.vote === 'no').map(v => nameOf(v.k)); text = `Lost ${lossPct != null ? (Math.abs(lossPct) * 100).toFixed(1) + '%' : usd(Math.abs(+t.pnl))}${days ? ` in ${days} day${days === 1 ? '' : 's'}` : ''}. ${mk ? mk + ' ' : ''}${noes.length ? `${noes.join(', ')} voted no on the buy and turned out right.` : 'Nobody on the Council saw it coming.'}`; }
+    await botLog(t.bot_id, 'lesson', `Lesson from ${t.sym}: lost ${usd(Math.abs(+t.pnl))}`, text, { ai, trade: t.id }, t.sym);
+  }
+}
+
+// ---------- the news explainer ----------
+const explainCache = new Map();
+GET('/api/explain/:sym', auth, async req => {
+  const sym = cleanSym(req.params.sym); if (!sym) fail('Which symbol?');
+  const hit = explainCache.get(sym); if (hit && Date.now() - hit.ts < 60 * 60e3 && !req.query.fresh) return hit;
+  const bz = await Promise.race([buzzFor(sym), sleep(15000).then(() => null)]).catch(() => null);
+  const p = priceOf(sym), pv = prevClose(sym), b = await dailyBars(sym).catch(() => null), i = b ? b.c.length - 1 : -1;
+  const facts = `${sym}${isCrypto(sym) ? ' (crypto)' : ''}: price ${f1(p, 2)}, today ${p && pv ? pctS(p / pv - 1) : 'n/a'}, 1 week ${b ? pctS(IND.ret(b.c, 5, i)) : 'n/a'}, 1 month ${b ? pctS(IND.ret(b.c, 21, i)) : 'n/a'}.
+News mood ${bz ? f1(bz.sentiment, 2) : 'n/a'} across ${bz?.count || 0} items this week${bz?.flags?.length ? `; flags ${bz.flags.join(', ')}` : ''}.${bz?.upcoming?.length ? ` Coming up: ${bz.upcoming.map(u => `${u.k} in ${u.tradingDays ?? '?'} trading days`).join(', ')}.` : ''}
+Headlines, newest first:
+${(bz?.items || []).filter(x => x.src === 'news' || x.title).slice(0, 12).map(x => `- ${new Date(x.t).toISOString().slice(0, 10)} ${String(x.title).slice(0, 160)}`).join('\n') || '- none'}`;
+  if (!(bz?.count > 0)) return { ts: Date.now(), sym, text: `There's almost no news on ${sym} this week, so any move is probably the wider market or normal noise.`, ai: false };
+  if (!aiReadyFor('aiExplain')) {
+    const top = (bz.items || []).filter(x => x.src === 'news').slice(0, 3).map(x => x.title);
+    return { ts: Date.now(), sym, ai: false, text: `${buzzLine(bz)}.${top.length ? ` Top stories: ${top.join('; ')}.` : ''}` };
+  }
+  const r = await aiText('explain', 'You explain, in plain English for a beginner, what the news says about one stock or coin and whether it explains the price move. Use only the facts. 3 or 4 short sentences: the main story, whether the move fits the news (or looks like the wider market or noise), and anything coming up worth knowing. If the headlines are thin or contradictory, say so. No advice to buy or sell.', facts, { max: 260 });
+  if (!r.ok) fail(r.msg);
+  const out = { ts: Date.now(), sym, text: r.text, ai: true }; explainCache.set(sym, out); if (explainCache.size > 200) explainCache.delete(explainCache.keys().next().value);
+  return out;
+});
 
 // =====================================================================
 // Background jobs
@@ -5710,9 +5927,13 @@ function startJobs() {
   every(fast ? 5e3 : 10 * 60e3, backupJob, 'backups');
   every(fast ? 5e3 : 30 * 60e3, settleCouncil, 'council');
   // smarter bots: weekly bench check, one re-tune an hour (each bot about monthly), tournaments scored every 6 hours
-  every(fast ? 30e3 : 24 * 3600e3, () => { if (!standbyPaused()) return benchCheck(); }, 'bench'); 
+  every(fast ? 30e3 : 6 * 3600e3, () => { if (!standbyPaused()) return benchCheck(); }, 'bench');
   every(fast ? 600e3 : 3600e3, () => { if (!standbyPaused()) return tuneJob(); }, 'tune');
   every(fast ? 20e3 : 6 * 3600e3, () => { if (!standbyPaused()) return tournamentJob(); }, 'tournaments');
+  // more AI: the morning brief, the Friday letter from the chair, post-mortems on losing trades
+  every(fast ? 5e3 : 60e3, () => { if (!standbyPaused()) return briefJob(); }, 'brief');
+  every(fast ? 5e3 : 5 * 60e3, () => { if (!standbyPaused()) return letterJob(); }, 'letter');
+  every(fast ? 10e3 : 10 * 60e3, () => { if (!standbyPaused()) return postmortemJob(); }, 'post-mortems');
   every(3600e3, () => Q("delete from bot_log where ts < now() - interval '2 years'"), 'bot log cleanup');
   every(3600e3, () => Q("delete from settle where settles < now() - interval '7 days'"), 'settlement cleanup');
   if (BROKER && STANDBY) warn('Standby copy has Alpaca keys: orders are blocked while standby is off, but keep real-money keys on one server only.');
@@ -5802,7 +6023,7 @@ const ICONS = {};
 const icon = (name, fn) => ICONS[name] || (ICONS[name] = fn());
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD646"/><stop offset=".5" stop-color="#FFA028"/><stop offset="1" stop-color="#FA5256"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="#1E1430"/><ellipse cx="31" cy="36" rx="18" ry="22" transform="rotate(30 31 36)" fill="url(#g)"/><path d="M20 41l6.5-6 5 3.5 9.5-10" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37 28.5h4.5V33" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="45" cy="11.5" rx="9" ry="4.6" transform="rotate(-24 45 11.5)" fill="#3BD68A"/></svg>`;
 let BUILD = 'dev', INDEX = null, INDEX_GZ = null;
-const APP_VERSION = '2.15.0'; // stamped by build.sh from package.json
+const APP_VERSION = '2.16.0'; // stamped by build.sh from package.json
 function loadIndex() {
   const file = path.join(__dirname, 'index.html');
   let html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<!doctype html><title>Mango</title><p>index.html is missing next to server.js.</p>';

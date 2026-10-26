@@ -925,6 +925,36 @@ button.tile:active { transform: scale(.98); }
 .rpt-grid b { font-size: 17px; }
 .tune-cell { width: 100%; text-align: left; }
 .tune-card .kv .v b { color: var(--ac); }
+/* morning brief, letters, ask the council, explain, chat */
+.brief-card p, .letter-card p, .explain p { margin: 0 0 10px; line-height: 1.5; font-size: 16px; }
+.brief-card p:last-child, .letter-card p:last-child, .explain p:last-child { margin-bottom: 0; }
+.brief-card p:first-child { font-weight: 650; font-size: 17px; }
+.letter-card { font-family: Georgia, 'Iowan Old Style', serif; background: color-mix(in srgb, #FFD646 7%, var(--card)); }
+.letter-card p { font-size: 16.5px; line-height: 1.6; }
+.letter-card.old { opacity: .8; }
+.letter-d { font-family: var(--font); font-size: 12px; color: var(--mu); margin-bottom: 10px; }
+.ask-verdict { display: flex; align-items: baseline; gap: 10px; padding: 16px; border-radius: var(--r-xl, 20px); background: var(--card); }
+.ask-verdict b { font-size: 34px; font-weight: 800; letter-spacing: -.02em; }
+.ask-verdict span { color: var(--mu); font-family: var(--font-num); }
+.ask-verdict.yes b { color: var(--up); } .ask-verdict.no b { color: var(--dn); } .ask-verdict.split b { color: var(--ac); }
+.ask-chair { margin: 10px 4px 0; color: var(--tx2); line-height: 1.4; }
+.ask-v { align-items: flex-start; }
+.ask-dot { width: 12px; height: 12px; border-radius: 50%; margin: 5px 4px 0 2px; flex: none; }
+.ask-v .sub { white-space: normal; line-height: 1.4; }
+.ask-v .sub i { color: var(--mu); }
+.chat-list { display: flex; flex-direction: column; gap: 8px; padding: 4px 0 12px; }
+.chat-b { max-width: 82%; padding: 10px 13px; border-radius: 18px; line-height: 1.4; font-size: 16px; white-space: pre-wrap; }
+.chat-b.me { align-self: flex-end; background: var(--ac); color: #1A1306; border-bottom-right-radius: 6px; }
+.chat-b.bot { align-self: flex-start; background: color-mix(in srgb, var(--hue) 16%, var(--card2, var(--card))); border-bottom-left-radius: 6px; }
+.chat-b.typing { display: flex; gap: 4px; padding: 14px; }
+.chat-b.typing i { width: 7px; height: 7px; border-radius: 50%; background: var(--mu); animation: chatdot 1s infinite; }
+.chat-b.typing i:nth-child(2) { animation-delay: .15s; } .chat-b.typing i:nth-child(3) { animation-delay: .3s; }
+@keyframes chatdot { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+.chat-hint { color: var(--mu); line-height: 1.45; padding: 8px 2px; }
+.chat-hint .chips { flex-wrap: wrap; }
+.chat-in { display: flex; gap: 8px; width: 100%; }
+.chat-in input { flex: 1; min-width: 0; height: 48px; border-radius: 24px; border: 1px solid var(--line); background: var(--card); color: var(--tx); padding: 0 16px; font-size: 16px; }
+.chat-in .btn { width: 48px; height: 48px; padding: 0; border-radius: 50%; flex: none; }
 
 /* ---------- Paper / Alpaca sides ---------- */
 .space-sw { display: inline-flex; gap: 4px; padding: 4px; border-radius: 14px; background: var(--card); box-shadow: var(--hi); margin: 2px 0 10px; }
@@ -1243,7 +1273,7 @@ button.tile:active { transform: scale(.98); }
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '2.15.0';
+const BUILD = '__BUILD__', APP_VERSION = '2.16.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1360,6 +1390,9 @@ const ICON_PATHS = {
   calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/>',
   swap: '<path d="M7 16V4m0 0L3 8m4-4 4 4M17 8v12m0 0 4-4m-4 4-4-4"/>',
   copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>',
+  crown: '<path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5L3 8Z"/>',
+  send: '<path d="M4 12 20 4l-6 16-3-7-7-1Z"/>',
+  chat: '<path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H10l-5 4v-4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>',
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
@@ -2524,7 +2557,7 @@ PAGES.asset = {
       <div id="a-ohlc" class="t-foot n" style="min-height:18px;margin:8px 2px 0"></div>
       <div id="a-pos"></div><div id="a-orders"></div>
       <div class="section-h"><h2>Key stats</h2></div><div id="a-stats"><div class="sk sk-block" style="height:150px"></div></div>
-      <div id="a-about"></div><div id="a-insights"></div><div id="a-book"></div><div id="a-buzz"></div><div id="a-news"></div><div id="a-hist"></div><div style="height:12px"></div>`;
+      <div id="a-ai">${assetAiCells(sym)}</div><div id="a-about"></div><div id="a-insights"></div><div id="a-book"></div><div id="a-buzz"></div><div id="a-news"></div><div id="a-hist"></div><div style="height:12px"></div>`;
     this.foot(p);
     p.chart = new Chart($('#a-chart', p.body), { onScrub: s => this.onScrub(p, s), fmtTime: t => st.range === '1D' ? fmtTime(t) : st.range === '1W' ? fmtDT(t) : fmtDate(t), baselineInRange: true });
     onSeg(p.body, 'ar', r => { st.range = r; store.set('arange', r); this.loadChart(p); });
@@ -3874,7 +3907,7 @@ VIEWS.bots = {
     }
     if (!real && !bots.some(b => b.strategy === 'autopilot')) html = autoHero() + html;
     if (bots.length) html = hqHero(bots) + html;
-    html += `<div class="section-h"><h2>Tools</h2></div><div class="group">${bots.length ? menuCell('bars', 'Leaderboard', 'Every bot against simply holding the S&P 500', 'botboard') : ''}${menuCell('star', 'Tournaments', 'Variations of one strategy compete; adopt the winner', 'tournaments')}${menuCell('flask', 'Strategy lab', 'Test any strategy on up to 8 years of daily prices, with real fees', 'lab')}${feature('buzz') ? menuCell('radar', 'News radar', 'What headlines and social media say about what you own and watch', 'radar') : ''}</div>`;
+    html += `<div class="section-h"><h2>Tools</h2></div><div class="group">${bots.length ? menuCell('bars', 'Leaderboard', 'Every bot against simply holding the S&P 500', 'botboard') : ''}${menuCell('sun', 'Morning brief', 'The market, earnings and your bots, every trading morning', 'brief')}${menuCell('star', 'Tournaments', 'Variations of one strategy compete; adopt the winner', 'tournaments')}${menuCell('flask', 'Strategy lab', 'Test any strategy on up to 8 years of daily prices, with real fees', 'lab')}${feature('buzz') ? menuCell('radar', 'News radar', 'What headlines and social media say about what you own and watch', 'radar') : ''}</div>`;
     $('#bt-body', this.el).innerHTML = html;
     Live.run();
   },
@@ -3938,7 +3971,7 @@ PAGES.bot = {
       <div class="bot-ctl mt8">
         ${b.status === 'running' ? `<button class="btn btn-quiet" data-act="botStatus" data-s="paused">${icon('pause')}Pause</button>` : `<button class="btn btn-quiet" data-act="botStatus" data-s="running">${icon('play')}${b.status === 'killed' ? 'Restart' : 'Resume'}</button>`}
         <button class="btn btn-danger" id="bot-flat">${icon('x')}Sell everything</button></div>
-      <button class="btn btn-quiet btn-block mt8 hq-watch" data-act="go" data-to="hq/floor/${b.id}">${icon('grid')}Watch it in Mango HQ</button>
+      <button class="btn btn-quiet btn-block mt8 hq-watch" data-act="go" data-to="hq/floor/${b.id}">${icon('grid')}Watch it in Mango HQ</button>${App.S?.analyst?.key && SET().aiChat !== false ? `<button class="btn btn-quiet btn-block mt8" data-act="botChat">${icon('chat')}Chat with ${h(b.name)}</button>` : ''}
       <div class="section-h"><h2>Limits</h2><button class="more" data-act="botEdit">Change ${icon('right')}</button></div>
       <div class="card">
         <div class="meter-row"><span>Drop from its high</span><b class="n">${pct0(dd, 1)}${ddLim ? ` of ${ddLim}%` : ''}</b></div>${ddLim ? `<div class="meter"><i style="width:${clamp(dd / ddLim * 100, 0, 100)}%;background:${dd / ddLim > 0.75 ? 'var(--dn)' : dd / ddLim > 0.4 ? 'var(--ac)' : 'var(--up)'}"></i></div>` : ''}
@@ -3981,7 +4014,7 @@ PAGES.bot = {
   },
 };
 const LOG_IC = { decision: 'bot', trade: 'swap', risk: 'shield', error: 'info', info: 'note', report: 'calendar' };
-const logRow = l => `<button class="cell log-${l.kind}" ${l.kind === 'decision' ? `data-act="botDecision" data-id="${l.id}"` : l.kind === 'report' ? `data-act="botReport" data-id="${l.id}"` : l.sym ? `data-act="asset" data-sym="${h(l.sym)}"` : ''}><div class="lead">${l.sym && l.kind === 'trade' ? logo(l.sym, 'logo-sm') : icon(LOG_IC[l.kind] || 'note')}</div><div class="main"><div class="title">${h(l.title)}</div><div class="sub ellip">${l.body ? h(l.body.split('\n')[0]) + ' · ' : ''}${timeAgo(l.ts)}</div></div>${l.kind === 'decision' || l.kind === 'report' ? icon('right', 'chev') : ''}</button>`;
+const logRow = l => `<button class="cell log-${l.kind}" ${l.kind === 'decision' ? `data-act="botDecision" data-id="${l.id}"` : l.kind === 'report' ? `data-act="botReport" data-id="${l.id}"` : l.kind === 'lesson' ? `data-act="botLesson" data-id="${l.id}"` : l.sym ? `data-act="asset" data-sym="${h(l.sym)}"` : ''}><div class="lead">${l.sym && l.kind === 'trade' ? logo(l.sym, 'logo-sm') : icon(LOG_IC[l.kind] || 'note')}</div><div class="main"><div class="title">${h(l.title)}</div><div class="sub ellip">${l.body ? h(l.body.split('\n')[0]) + ' · ' : ''}${timeAgo(l.ts)}</div></div>${l.kind === 'decision' || l.kind === 'report' || l.kind === 'lesson' ? icon('right', 'chev') : ''}</button>`;
 const curBot = () => { const t = Router.top(); return t?.page?.name === 'bot' ? t.page : Router.pages().reverse().find(x => x.name === 'bot'); };
 ACT.botDecision = async el => {
   const p = curBot(); let l = p?.d?.log.find(x => x.id === +el.dataset.id) || p?.logAll?.find(x => x.id === +el.dataset.id); if (!l) return;
@@ -7154,6 +7187,115 @@ function guardsCard() {
 }
 
 // ===================================================================
+// More AI on the client: the morning brief and the chair's letters, Ask the Council and Explain the news
+// on any asset, chatting with a bot, and lessons from losing trades in the bot journal.
+// ===================================================================
+const aiOn = () => !!App.S?.analyst?.key && SET().aiOn !== false;
+const paras = t => String(t || '').split(/\n+/).filter(Boolean).map(x => `<p>${h(x)}</p>`).join('');
+
+// ---------- morning brief ----------
+PAGES.brief = {
+  mount(p) {
+    p.title('Morning brief', true);
+    p.load = async () => {
+      try {
+        const b = await api('brief');
+        p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Morning brief</h1><p class="t-sub" style="margin:0 2px">${b ? `${h(fmtDT(b.ts))}${b.ai ? ' · written by the Analyst' : ''}` : `Every trading day at ${h(briefTime())} New York time.`}</p>
+          ${b ? `<div class="card brief-card mt16">${paras(b.text)}</div>` : '<div class="card mt16"><p class="t-foot" style="margin:0">No brief yet. The first one arrives on the next trading morning, or make one now.</p></div>'}
+          <button class="btn btn-quiet btn-block mt16" data-act="briefNow">${icon('refresh')}Write one now</button>
+          <div class="group mt16">${menuCell('crown', `Letters from ${memberName('chair')}`, 'A letter about the week, every Friday after the close', 'letters')}</div>
+          <p class="note">${aiOn() ? 'One AI call a day.' : 'Without an AI key the brief is a plain summary of the numbers.'} Change the time in Settings.</p>`;
+      } catch (e) { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; }
+    };
+    p.body.innerHTML = '<div class="sk sk-block mt16"></div>'; p.load();
+  },
+  refresh(p) { p.load && p.load(); },
+};
+const briefTime = () => ({ '07:30': '7:30 AM', '08:45': '8:45 AM', '09:15': '9:15 AM' })[SET().briefAt || '08:45'];
+ACT.briefNow = async el => { busy(el, true); try { await post('brief', {}); Router.pages().reverse().find(x => x.name === 'brief')?.load(); toast('Brief updated'); } catch (e) { toastErr(e); } busy(el, false); };
+
+// ---------- letters from the chair ----------
+PAGES.letters = {
+  mount(p) {
+    p.title('Letters', true);
+    p.load = async () => {
+      try {
+        const list = await api('letters'), chair = memberName('chair');
+        p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Letters from ${h(chair)}</h1><p class="t-sub" style="margin:0 2px">The chair writes to you every Friday after the close about how the week went.</p>
+          ${list.length ? list.map((l, i) => `<div class="card letter-card mt16 ${i ? 'old' : ''}"><div class="letter-d">${h(fmtDate(l.ts))}</div>${paras(l.text)}</div>`).join('') : '<div class="card mt16"><p class="t-foot" style="margin:0">No letters yet. The first one comes on Friday evening.</p></div>'}
+          <button class="btn btn-quiet btn-block mt16" data-act="letterNow">${icon('note')}Ask for one now</button>`;
+      } catch (e) { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; }
+    };
+    p.body.innerHTML = '<div class="sk sk-block mt16"></div>'; p.load();
+  },
+  refresh(p) { p.load && p.load(); },
+};
+ACT.letterNow = async el => { busy(el, true); try { await post('letters', {}); Router.pages().reverse().find(x => x.name === 'letters')?.load(); } catch (e) { toastErr(e); } busy(el, false); };
+
+// ---------- Ask the Council / Explain the news (asset page) ----------
+function assetAiCells(sym) {
+  return `<div class="group mt16"><button class="cell" data-act="askCouncil" data-sym="${h(sym)}"><div class="lead">${icon('flag')}</div><div class="main"><div class="title">Ask the Council</div><div class="sub">Would they buy ${h(sym)} today? Every member votes, with reasons</div></div>${icon('right', 'chev')}</button>
+    ${feature('news') || feature('buzz') ? `<button class="cell" data-act="explainNews" data-sym="${h(sym)}"><div class="lead">${icon('sparkle')}</div><div class="main"><div class="title">Explain the news</div><div class="sub">${aiOn() && SET().aiExplain !== false ? 'What the headlines say and whether they explain the move' : 'A summary of this week\'s headlines and mood'}</div></div>${icon('right', 'chev')}</button>` : ''}</div>`;
+}
+ACT.askCouncil = async el => {
+  const sym = el.dataset.sym;
+  const s = sheet({ title: `Ask the Council: ${sym}`, tall: true, html: `<div class="ask-wait"><div class="sk sk-block"></div><p class="t-foot">${aiOn() ? 'The AI members are reading the chart and the news…' : 'The members are reading the chart and the news…'}</p></div>` });
+  try {
+    const r = await post('council/ask', { sym });
+    const t = r.wy != null && SET().councilWeighted !== false ? `${r.wy.toFixed(1)}–${r.wn.toFixed(1)}` : `${r.yes}–${r.no}`;
+    s.body.innerHTML = `<div class="ask-verdict ${r.lean}"><b>${r.lean === 'yes' ? 'Yes' : r.lean === 'no' ? 'No' : 'Split'}</b><span>${t}${r.wy != null && SET().councilWeighted !== false ? ' weighted' : ''}</span></div>
+      <p class="ask-chair">${h(r.chair)}</p>
+      <div class="group mt12">${r.votes.map(v => `<div class="cell ask-v"><i class="ask-dot" style="background:${COUNCIL_C[v.k] || '#888'}"></i><div class="main"><div class="title">${h(memberName(v.k))} <span class="tc-v v-${v.vote}">${v.vote === 'yes' ? 'YES' : v.vote === 'no' ? 'NO' : 'pass'}</span>${v.w ? `<span class="t-cap"> ×${v.w}</span>` : ''}</div><div class="sub">${h(v.line)}${v.arg ? `<br><i>To ${h(memberName(v.vs))}: ${h(v.arg)}</i>` : ''}</div></div></div>`).join('')}</div>
+      <p class="note">Nothing is traded. It's the same Council that votes on your bots' trades, judging a small buy today. ${r.cached ? 'Asked in the last 30 minutes, so this is the same answer.' : ''}</p>`;
+  } catch (e) { s.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; }
+};
+ACT.explainNews = async el => {
+  const sym = el.dataset.sym;
+  const s = sheet({ title: `${sym} in the news`, html: `<div class="sk sk-block"></div>` });
+  try { const r = await api('explain/' + encodeURIComponent(sym)); s.body.innerHTML = `<div class="explain">${paras(r.text)}</div><p class="note">${r.ai ? 'Written by the Analyst from this week\'s headlines. It can be wrong; tap the stories to read them.' : 'A plain summary of this week\'s headlines. Add an AI key for a written explanation.'}</p>`; }
+  catch (e) { s.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; }
+};
+
+// ---------- chat with a bot ----------
+ACT.botChat = () => {
+  const p = curBot(); if (!p) return;
+  if (!aiOn()) { toast('Chat needs the AI', { sub: 'Add an ANTHROPIC_API_KEY on your server and switch on AI Council members in Settings.', kind: 'info' }); return; }
+  const key = 'chat:' + p.id; let hist = []; try { hist = JSON.parse(sessionStorage.getItem(key) || '[]'); } catch (e) {}
+  const name = p.d.name, hue = hueOf(p.d.strategy);
+  const bubbles = () => hist.length ? hist.map(m => `<div class="chat-b ${m.role}">${h(m.text)}</div>`).join('') : `<div class="chat-hint">Ask ${h(name)} anything: why it bought something, what it's waiting for, how its rules work.<div class="chips mt12">${['Why did you make your last trade?', 'What are you waiting for?', 'How are you doing?'].map(q => `<button class="chip" data-q="${h(q)}">${h(q)}</button>`).join('')}</div></div>`;
+  const s = sheet({ title: name, tall: true, cls: 'chat-sheet', html: `<div class="chat-list" style="--hue:${hue}">${bubbles()}</div>`, foot: `<form class="chat-in"><input id="chat-t" placeholder="Message ${h(name)}" maxlength="500" autocomplete="off"><button class="btn btn-primary" aria-label="Send">${icon('send')}</button></form>` });
+  const list = $('.chat-list', s.body), draw = () => { list.innerHTML = bubbles(); s.body.scrollTop = 1e6; };
+  const send = async text => {
+    text = text.trim(); if (!text) return;
+    hist.push({ role: 'me', text }); draw(); list.insertAdjacentHTML('beforeend', '<div class="chat-b bot typing"><i></i><i></i><i></i></div>'); s.body.scrollTop = 1e6;
+    try { const r = await post(`bots/${p.id}/chat`, { msg: text, history: hist.slice(0, -1).slice(-8) }); hist.push({ role: 'bot', text: r.text }); }
+    catch (e) { hist.push({ role: 'bot', text: '⚠️ ' + e.message }); }
+    hist = hist.slice(-30); try { sessionStorage.setItem(key, JSON.stringify(hist)); } catch (e) {}
+    draw();
+  };
+  s.body.addEventListener('click', e => { const q = e.target.closest('[data-q]'); if (q) send(q.dataset.q); });
+  $('.chat-in', s.el).addEventListener('submit', e => { e.preventDefault(); const i = $('#chat-t', s.el); const v = i.value; i.value = ''; send(v); });
+  s.body.scrollTop = 1e6;
+};
+
+// ---------- lessons in the journal ----------
+LOG_IC.lesson = 'flag';
+ACT.botLesson = el => {
+  const p = curBot(); const l = p?.d?.log.find(x => x.id === +el.dataset.id) || p?.logAll?.find(x => x.id === +el.dataset.id); if (!l) return;
+  sheet({ title: l.title, html: `<div class="t-foot">${fmtDT(l.ts)}</div><div class="explain mt12">${paras(l.body)}</div><p class="note">${l.data?.ai ? 'Written by the Analyst from the trade, the price path and the Council\'s vote.' : 'A summary of the trade and the Council\'s vote.'} Switch lessons off in Settings.</p>` });
+};
+
+// ---------- Settings: briefs, letters, lessons ----------
+function briefsCard() {
+  return `<div class="group mt16"><div class="cell"><div class="lead">${icon('sun')}</div><div class="main"><div class="title">Morning brief</div><div class="sub">Every trading day: the market, earnings for what you hold, and your bots. ${aiOn() ? 'Written by the Analyst (one AI call).' : 'A plain summary without an AI key.'}</div></div>${sw(SET().briefOn !== false, 'data-act="setBool" data-k="briefOn"')}</div>
+    ${SET().briefOn !== false ? rowSeg('briefAt', 'Brief time (New York)', '', [['07:30', '7:30 AM'], ['08:45', '8:45 AM'], ['09:15', '9:15 AM']]) : ''}
+    ${rowToggle('letterOn', `Friday letter from ${memberName('chair')}`, 'How the week went, who earned praise and who got scolded')}
+    ${rowToggle('aiPostmortem', 'Lessons from losing trades', 'After a bot sells at a loss, a short note in its journal on what went wrong')}
+    ${App.S?.analyst?.key ? `${rowToggle('aiChat', 'Chat with bots', 'Ask a bot about its decisions from its page. One AI call per message')}${rowToggle('aiExplain', 'Explain the news', 'On every stock and coin page. One AI call per stock an hour')}` : ''}
+    ${rowLink('note', 'Read the brief and letters', '', 'brief')}</div>`;
+}
+
+// ===================================================================
 // Settings
 // ===================================================================
 function applyLook(s) {
@@ -7202,7 +7344,7 @@ PAGES.settings = {
   root() {
     const S = App.S;
     return `<div class="set-hero"><svg viewBox="0 0 120 120" class="av"><use href="#mango-mark"/></svg><div><div class="t-title">Mango <span class="set-ver">v${h(APP_VERSION)}</span></div><div class="t-foot">Logged in as ${h(S.user || 'you')} · ${(S.wallets || []).filter(w => !w.archived).length} wallet${(S.wallets || []).length === 1 ? '' : 's'}</div></div></div>
-      ${standbyCard()}${guardsCard()}${councilCard()}${nightCard()}${analystCard()}
+      ${standbyCard()}${guardsCard()}${briefsCard()}${councilCard()}${nightCard()}${analystCard()}
       <div class="group mt16">${Object.entries(SECTIONS).map(([k, v]) => rowLink(v.icon, v.title, v.sub, 'settings/' + k)).join('')}</div>
       <div class="group mt16">${rowLink('wallet', 'Wallets', 'Create, rename, reset, move cash', 'wallets')}${rowToggle('hideBalances', 'Hide balances', 'Blur dollar amounts. Press and hold to peek.')}</div>
       <div class="group mt16">${rowLink('lock', 'Face ID and backups', 'Log in with Face ID, protect real money, save your data', 'security')}</div>

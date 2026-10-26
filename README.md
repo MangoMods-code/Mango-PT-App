@@ -37,6 +37,14 @@ Trade stocks, ETFs and crypto with practice money. You can also put strategies t
 - You can rename every Council member and the chair, with the same names in every world or different names for each one.
 - Day and night follow the market clock. You can drag, fling, pinch to zoom, replay the day, follow a bot, or turn on the auto camera.
 
+**AI extras** (all share the daily AI cap; most have a plain version without a key)
+- **Morning brief** every trading day (7:30, 8:45 or 9:15 AM ET): the market mood, earnings for what you hold, the biggest moves and your bots, as a push notification.
+- **Ask the Council** on any stock or coin page: every member votes on a small buy today, with reasons and weights. Nothing is traded.
+- **Friday letter from the chair**: how the week went, who earned praise and who got scolded, signed by Big Mango (or whatever you named the chair).
+- **Chat with a bot** from its page: it answers from its own holdings, decisions, journal and rules.
+- **Lessons from losing trades**: after a bot sells at a loss, a short post-mortem lands in its journal (what went wrong, which Council members called it).
+- **Explain the news** on any stock or coin page: what the headlines say and whether they explain the move.
+
 **Alpaca (real brokerage)**
 - A separate side of the app for an Alpaca account, paper or live.
 - Safeguards on that side: a kill switch, a daily loss limit, a per-order cap, a real-money cap per bot, and Face ID confirmation for real-money actions.
