@@ -994,6 +994,14 @@ button.tile:active { transform: scale(.98); }
 .wn-gt { font-weight: 700; font-size: 14px; margin-top: 10px; }
 .wn-g ul { margin: 4px 0 0; padding-left: 18px; } .wn-g li { margin: 4px 0; line-height: 1.45; color: var(--tx2, var(--tx)); font-size: 15px; }
 
+.strat-v { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 6px; font-size: 11px; font-weight: 700; vertical-align: 2px; color: var(--hue); background: color-mix(in srgb, var(--hue) 14%, transparent); }
+.ver-card { padding: 14px; }
+.ver-head { display: flex; gap: 12px; align-items: center; }
+.ver-n { flex: none; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; font-weight: 800; font-size: 15px; color: var(--hue, var(--ac)); background: color-mix(in srgb, var(--hue, var(--ac)) 14%, transparent); }
+.ver-t { font-weight: 650; }
+.ver-l { margin: 10px 0 4px; padding-left: 18px; font-size: 13.5px; line-height: 1.45; }
+.ver-l li + li { margin-top: 3px; }
+
 /* ---------- Paper / Alpaca sides ---------- */
 .space-sw { display: inline-flex; gap: 4px; padding: 4px; border-radius: 14px; background: var(--card); box-shadow: var(--hi); margin: 2px 0 10px; }
 .space-sw button { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: 10px; font-size: 14px; font-weight: 650; color: var(--mu); transition: background .2s, color .2s; }
@@ -1332,7 +1340,7 @@ button.tile:active { transform: scale(.98); }
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '3.2.0';
+const BUILD = '__BUILD__', APP_VERSION = '3.3.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -3924,7 +3932,7 @@ ACT.nbSmall = () => {
   PAGES.newbot.draw(p); toast('Small account preset', { sub: 'Check the settings and money, then test it on past prices.' });
 };
 const hueOf = k => STRAT_HUE[k] || '#9C8FBF';
-const STRAT_SYMS = { rsi2: ['SPY', 'QQQ', 'IWM', 'DIA'], tom: ['SPY', 'QQQ', 'IWM'], snapback: ['SPY', 'QQQ', 'IWM', 'DIA', 'XLK', 'XLF'], dual: ['SPY', 'QQQ', 'EFA', 'EEM', 'IEF', 'TLT'], lowvol: ['KO', 'PG', 'JNJ', 'PEP', 'WMT', 'MCD', 'COST', 'MSFT'], momentum: ['SPY', 'QQQ', 'IWM', 'EFA', 'EEM', 'TLT', 'IEF', 'GLD', 'DBC', 'VNQ', 'SGOV'] };
+const STRAT_SYMS = { rsi2: ['SPY', 'QQQ', 'IWM', 'DIA', 'XLK', 'XLF', 'XLV', 'XLE', 'XLY', 'XLI', 'SGOV'], tom: ['SPY', 'QQQ', 'IWM'], snapback: ['SPY', 'QQQ', 'IWM', 'DIA', 'XLK', 'XLF'], dual: ['SPY', 'QQQ', 'EFA', 'EEM', 'IEF', 'TLT'], lowvol: ['KO', 'PG', 'JNJ', 'PEP', 'WMT', 'MCD', 'COST', 'MSFT'], momentum: ['SPY', 'QQQ', 'IWM', 'EFA', 'EEM', 'TLT', 'IEF', 'GLD', 'DBC', 'VNQ', 'SGOV'] };
 const strats = async () => STRATS || (STRATS = await api('strategies'));
 const pctF = (v, dp = 1) => v == null || !Number.isFinite(v) ? '–' : pct(v * 100, dp);
 const pctA = (v, dp = 1) => v == null || !Number.isFinite(v) ? '–' : pct0(Math.abs(v) * 100, dp);
@@ -4082,7 +4090,7 @@ PAGES.bot = {
         ${b.queued.length ? b.queued.map(q => `<div class="cell"><div class="lead">${icon('hourglass')}</div><div class="main"><div class="title">${q.side === 'buy' ? 'Buy' : 'Sell'} ${h(q.sym)} at the open</div><div class="sub">${q.units === 'usd' ? money(q.amt) : q.units === 'pct' ? pct0(q.amt, 0) + ' of the position' : qtyStr(q.sym, q.amt)} · queued</div></div></div>`).join('') : ''}</div>
       <div class="section-h"><h2>Journal</h2><button class="more" data-act="botLogAll">See all ${icon('right')}</button></div>
       <div class="group" id="bot-log">${b.log.slice(0, 12).map(logRow).join('') || '<div class="cell"><div class="main t-foot">Nothing yet.</div></div>'}</div>
-      <div class="section-h"><h2>Rules</h2><button class="more" data-act="botEdit">Change ${icon('right')}</button></div>
+      <div class="section-h"><h2>Rules</h2><button class="more" data-act="botEdit">Change ${icon('right')}</button></div>${st.ver ? verCard({ ...st, key: b.strategy }, b.sv) : ''}
       <div class="card">${(st.params || []).map(x => kv(h(x.label), h(x.choices ? (x.choices.find(c => c[0] === b.params[x.k]) || [, b.params[x.k]])[1] : b.params[x.k]))).join('')}
         ${kv('Trades', st.auto ? `${b.syms.length} stocks, ETFs and coins from its tryouts` : h(b.syms.join(', ')))}
         ${kv('Decides at', `${h(RUN_TIMES.find(x => x[0] === m.runAt)?.[1] || m.runAt)} New York time${b.syms.some(isCrypto) ? ', crypto every day' : ', trading days'}`)}
@@ -4171,7 +4179,7 @@ ACT.botEdit = async () => {
   const b = p.d, st = p.s.strategies[b.strategy];
   const s = sheet({ title: 'Change ' + b.name, tall: true, html: `<label class="field"><span>Name</span><input id="be-name" value="${h(b.name)}" maxlength="30"></label>
       ${st.auto ? '' : `<label class="field"><span>Symbols, separated by commas</span><input id="be-syms" value="${h(b.syms.join(', '))}" autocapitalize="characters"></label>`}
-      ${st.params.length ? `<div class="section-h"><h2>Strategy</h2></div>${paramFields(st.params, b.params, 'be')}` : ''}
+      ${st.params.length ? `<div class="section-h"><h2>Strategy</h2></div>${verCard({ ...st, key: b.strategy }, b.sv)}${paramFields(st.params, b.params, 'be')}` : ''}
       <div class="section-h"><h2>Limits and news</h2></div>${mandateFields(b.mandate, 'be')}
       ${b.live ? `<div class="section-h"><h2>Real money</h2></div><div class="group"><div class="cell"><div class="main"><div class="title">Let it trade real money</div><div class="sub">Off pauses its orders at Alpaca</div></div>${sw(b.mandate.allowLive, 'data-mk="allowLive"')}</div></div><label class="field"><span>Most it can ever have invested ($)</span><input type="number" inputmode="decimal" id="be-m-liveCap" value="${b.mandate.liveCap}"></label>` : ''}`, foot: `<button class="btn btn-primary btn-block btn-lg" id="be-save">Save changes</button>` });
   bindFields(s.body);
@@ -4298,8 +4306,15 @@ PAGES.lab = {
 };
 ACT.labReset = () => { LAB.params = {}; const p = Router.top()?.page; if (p?.name === 'lab') PAGES.lab.draw(p); };
 ACT.labToBot = () => { App.botDraft = { strategy: LAB.strategy, syms: LAB.syms.slice(), params: { ...LAB.params }, uni: LAB.uni }; Router.go('newbot'); };
+// what version a strategy is on and what changed in it; with a bot, also whether that bot has caught up
+function verCard(st, sv) {
+  const v = st?.ver; if (!v) return '';
+  const behind = sv != null && sv < v.v;
+  return `<div class="card ver-card mt12" style="--hue:${hueOf(st.key || '')}"><div class="ver-head"><span class="ver-n">v${v.v}</span><div><div class="ver-t">${h(st.name)}${v.v > 1 ? ` · ${h(v.title)}` : ''}</div><div class="t-foot">${v.v > 1 ? (behind ? `This bot is on v${sv} and upgrades on its next run` : sv != null ? 'This bot is up to date' : 'New bots start on this version') : 'The first version'}</div></div></div>
+    ${v.changes.length ? `<ul class="ver-l">${v.changes.map(c => `<li>${h(c)}</li>`).join('')}</ul>` : ''}${v.history.length > 1 ? `<div class="t-foot">Earlier: ${v.history.slice(0, -1).map(x => `v${x.v} ${h(x.title || '')}`).join(', ')}</div>` : ''}</div>`;
+}
 function stratPick(s, cur, pre) {
-  return `<div class="strat-pick" data-pick="${pre}-strat">${Object.entries(s.strategies).filter(([, x]) => !x.auto).map(([k, x]) => `<button type="button" class="strat ${k === cur ? 'on' : ''}" data-k="${k}" style="--hue:${hueOf(k)}"><span class="strat-ic">${icon(x.icon)}</span><span class="strat-t">${h(x.name)}</span><span class="strat-d">${h(x.desc)}</span><span class="strat-m">${x.rebalance === 'monthly' ? 'Trades monthly' : 'Checks daily'} · ${x.markets === 'stocks' ? 'Best on stocks and ETFs' : 'Stocks and crypto'}</span></button>`).join('')}</div>`;
+  return `<div class="strat-pick" data-pick="${pre}-strat">${Object.entries(s.strategies).filter(([, x]) => !x.auto).map(([k, x]) => `<button type="button" class="strat ${k === cur ? 'on' : ''}" data-k="${k}" style="--hue:${hueOf(k)}"><span class="strat-ic">${icon(x.icon)}</span><span class="strat-t">${h(x.name)}${x.ver ? `<span class="strat-v">v${x.ver.v}</span>` : ''}</span><span class="strat-d">${h(x.desc)}</span><span class="strat-m">${x.rebalance === 'monthly' ? 'Trades monthly' : 'Checks daily'} · ${x.markets === 'stocks' ? 'Best on stocks and ETFs' : 'Stocks and crypto'}</span></button>`).join('')}</div>`;
 }
 function uniPick(s, cur, syms, pre) {
   return `<div class="chips">${Object.entries(s.universes).map(([k, u]) => `<button type="button" class="chip ${k === cur ? 'on' : ''}" data-uni="${k}">${h(u.name)}</button>`).join('')}<button type="button" class="chip ${cur === 'custom' ? 'on' : ''}" data-uni="custom">Your own</button></div>
@@ -4338,7 +4353,7 @@ PAGES.newbot = {
     if (!m.syms) m.syms = (STRAT_SYMS[m.strategy] || s.universes[m.uni].syms).slice();
     const wallets = spaceWallets();
     p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">New bot</h1><p class="t-sub" style="margin:0 2px">Pick how it trades, what it trades and the limits it can never cross. Test it before it touches money.</p>
-      <div class="section-h"><h2>How it trades</h2></div>${stratPick(s, m.strategy, 'nb')}
+      <div class="section-h"><h2>How it trades</h2></div>${stratPick(s, m.strategy, 'nb')}${verCard({ ...st, key: m.strategy })}
       <div class="section-h"><h2>What it trades</h2></div>${uniPick(s, m.uni, m.syms, 'nb')}
       <div class="section-h"><h2>Its money</h2></div>
       ${isRealSpace() ? '' : seg('nb-w', [['new', 'A new wallet'], ['old', 'One of my wallets']], m.wallet ? 'old' : 'new')}
@@ -8223,6 +8238,35 @@ PAGES.costs = {
 // Newest first. Each release: version, date, a one-line headline and grouped notes.
 // ===================================================================
 const CHANGELOG = [
+  { v: '3.3.0', d: '2026-10-26', title: 'Four strategies rebuilt, and version cards', groups: [
+    ['Dip buyer (RSI-2) v2', [
+      'It wasn\'t trading because the shared safety layers blocked every dip: dips always come with bad news, a bad market mood and a council that votes no. Those no longer block it; only serious news (fraud, lawsuits, recalls) stops a buy.',
+      'A second oversold signal: RSI-2 added up over two days. That finds many more good dips than one day under 10.',
+      'Sells on the bounce above the 5-day average, when RSI-2 gets hot (above 70), or after 10 days.',
+      'Trades 10 index and sector ETFs instead of 4 (added to your existing dip bots), and waits in SGOV T-bills between dips, selling them first when a dip comes.',
+    ]],
+    ['Trend follower v2', [
+      'Only buys trends that are also up over the last 6 months, and ranks them by return per unit of swing.',
+      'Looser trailing stop (3.5 ATRs) so normal wobbles don\'t shake it out.',
+      'Take-profit, the 30-day time stop, stop tightening, the market-mood cut and the council veto are off for it. They were selling winners early and keeping cash idle.',
+      'Money not in a trend waits in SGOV, and new money tops up what it holds.',
+    ]],
+    ['Breakout (Turtle) v2', [
+      'Only takes breakouts in a long-term uptrend (above the 200-day average) and on at least 1.2× normal volume, which cuts most false breakouts.',
+      'A trailing stop 4 ATRs below the best close, on top of the 20-day low exit.',
+      '1.5% risk per trade, at most 4 positions, idle money in SGOV, and no take-profit or time stop.',
+    ]],
+    ['Buy and hold v2', [
+      'Really holds now: no stops, vetoes, mood cuts or news filters selling it.',
+      'New money goes to whatever is furthest below its share, and it only rebalances when something drifts more than 5 points from target.',
+      'Shares can be equal, or calmer assets get more.',
+    ]],
+    ['Version cards', [
+      'Each strategy shows its version on the New bot screen, with what changed in it.',
+      'A bot\'s page and its Change sheet show which version it\'s on. Existing bots upgrade themselves on their next run; settings you changed are kept and the journal says what changed.',
+    ]],
+    ['Also', ['Each strategy now picks which shared safety layers it uses (council veto, market mood, news, correlation, take-profit and time stop, stop tightening, daily AI check, stops).', 'Money parked in SGOV or BIL no longer counts toward the shared per-symbol cap across bots.', 'The backtester sells parked T-bills first when a trade needs the money, for every strategy that parks.']],
+  ] },
   { v: '3.2.0', d: '2026-10-26', title: 'Autopilot 2, self-upgrading bots, and this page', groups: [
     ['Autopilot 2', [
       '32 strategy tryouts, up from 21: momentum with T-bills, 3-month sector rotation, trend and breakouts on ETFs, gold and bond trend, dip buying in big stocks, earnings reactions, calm ETFs, crypto momentum, Bitcoin and Ether dips, and holding Bitcoin and Ether.',
