@@ -912,6 +912,19 @@ button.tile:active { transform: scale(.98); }
 .bot-next { display: flex; align-items: center; gap: 6px; margin: 8px 4px 0; }
 .bot-next svg { width: 14px; height: 14px; }
 @media (prefers-reduced-motion: reduce) { .bot-act.pulse > i { animation: none; } }
+/* report card, re-tune, benched */
+.bench-badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 999px; color: var(--dn); background: color-mix(in srgb, var(--dn) 16%, transparent); vertical-align: 2px; }
+.section-h .bench-badge { margin-left: auto; }
+.rpt-card { position: relative; }
+.rpt-grade { position: absolute; top: 14px; right: 14px; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; font-family: var(--font-num); font-weight: 800; font-size: 22px; background: var(--fill, rgba(127,127,127,.12)); color: var(--tx); }
+.rpt-grade.up { color: var(--up); background: color-mix(in srgb, var(--up) 15%, transparent); }
+.rpt-grade.dn { color: var(--dn); background: color-mix(in srgb, var(--dn) 15%, transparent); }
+.rpt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; padding-right: 48px; }
+.rpt-grid > div { display: flex; flex-direction: column; gap: 2px; }
+.rpt-grid .k { font-size: 12px; color: var(--mu); }
+.rpt-grid b { font-size: 17px; }
+.tune-cell { width: 100%; text-align: left; }
+.tune-card .kv .v b { color: var(--ac); }
 
 /* ---------- Paper / Alpaca sides ---------- */
 .space-sw { display: inline-flex; gap: 4px; padding: 4px; border-radius: 14px; background: var(--card); box-shadow: var(--hi); margin: 2px 0 10px; }
@@ -1230,7 +1243,7 @@ button.tile:active { transform: scale(.98); }
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '2.14.2';
+const BUILD = '__BUILD__', APP_VERSION = '2.15.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -3861,7 +3874,7 @@ VIEWS.bots = {
     }
     if (!real && !bots.some(b => b.strategy === 'autopilot')) html = autoHero() + html;
     if (bots.length) html = hqHero(bots) + html;
-    html += `<div class="section-h"><h2>Tools</h2></div><div class="group">${bots.length ? menuCell('bars', 'Leaderboard', 'Every bot against simply holding the S&P 500', 'botboard') : ''}${menuCell('flask', 'Strategy lab', 'Test any strategy on up to 8 years of daily prices, with real fees', 'lab')}${feature('buzz') ? menuCell('radar', 'News radar', 'What headlines and social media say about what you own and watch', 'radar') : ''}</div>`;
+    html += `<div class="section-h"><h2>Tools</h2></div><div class="group">${bots.length ? menuCell('bars', 'Leaderboard', 'Every bot against simply holding the S&P 500', 'botboard') : ''}${menuCell('star', 'Tournaments', 'Variations of one strategy compete; adopt the winner', 'tournaments')}${menuCell('flask', 'Strategy lab', 'Test any strategy on up to 8 years of daily prices, with real fees', 'lab')}${feature('buzz') ? menuCell('radar', 'News radar', 'What headlines and social media say about what you own and watch', 'radar') : ''}</div>`;
     $('#bt-body', this.el).innerHTML = html;
     Live.run();
   },
@@ -3931,6 +3944,7 @@ PAGES.bot = {
         <div class="meter-row"><span>Drop from its high</span><b class="n">${pct0(dd, 1)}${ddLim ? ` of ${ddLim}%` : ''}</b></div>${ddLim ? `<div class="meter"><i style="width:${clamp(dd / ddLim * 100, 0, 100)}%;background:${dd / ddLim > 0.75 ? 'var(--dn)' : dd / ddLim > 0.4 ? 'var(--ac)' : 'var(--up)'}"></i></div>` : ''}
         <div class="meter-row mt12"><span>Today</span><b class="n ${cls(dayPct)}">${pct(dayPct)}${m.dailyLossPct ? ` · stops buying at −${m.dailyLossPct}%` : ''}</b></div>
         <div class="t-foot mt8">${ddLim ? `At a ${ddLim}% drop from its high it stops itself${m.flattenOnKill ? ' and sells what it owns' : ''}.` : 'No drawdown stop.'} At most ${m.maxPosPct}% in one position, ${m.maxTradesDay} trades a day${m.budget > 0 ? `, using up to ${money(m.budget)}` : ''}. ${m.stops ? 'Keeps a stop loss on every position.' : 'No stop losses.'}</div></div>
+      ${reportCard(b)}${tuneCard(b)}
       ${autoSections(b)}
       ${last ? `<div class="section-h"><h2>Latest thinking</h2><span class="t-foot">${timeAgo(last.ts)}</span></div><div class="card think-card"><div class="think-head">${h(last.title.replace(/^(Daily decision|Manual run): /, ''))}</div>${last.body ? `<p class="t-foot think-risk">${h(last.body).replace(/\n/g, '<br>')}</p>` : ''}${last.data?.regime ? `<p class="t-foot think-risk">${icon('chart')} ${h(last.data.regime)}</p>` : ''}${thinkRows(last.data?.rows || [])}</div>` : `<div class="section-h"><h2>Latest thinking</h2></div><div class="card"><p class="t-foot" style="margin:0">${b.lastRun ? '' : 'If you asked for a first decision, it\'s reading the news now and will show up here. '}It hasn't made a decision yet. ${b.status === 'running' ? h(nextRunText(b.next)) + ', or tap Decide now.' : ''}</p></div>`}
       <div class="section-h"><h2>Holding<span class="count">${mine.length}</span></h2></div>
@@ -4055,6 +4069,9 @@ function mandateFields(m, pre) {
   const t = (k, title, sub) => `<div class="cell"><div class="main"><div class="title">${title}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div>${sw(!!m[k], `data-mk="${k}"`)}</div>`;
   return `<div class="pf-grid">${n('maxPosPct', 'Most in one position (%)')}${n('maxTradesDay', 'Most trades a day')}${n('dailyLossPct', 'Stop buying after a daily loss of (%)', '', 0.5)}${n('maxDDPct', 'Stop the bot after a drop of (%)', '', 1)}</div>
     <div class="group mt12">${t('stops', 'Stop loss on every position', 'Uses the strategy\'s stop, checked all day')}${t('flattenOnKill', 'Sell everything if it stops itself', 'When the drop limit is hit')}</div>
+    <div class="section-h"><h2>Exits</h2></div>
+    <div class="pf-grid">${n('takeProfitPct', 'Sell half when up (%)', '0 = never. Once per position')}${n('timeStopDays', 'Sell if flat after (trading days)', '0 = never. Flat means under +3%')}</div>
+    <div class="group mt12">${t('trailTighten', 'Tighten the stop as it wins', 'Break-even at +6%, 7% under the high at +12%, 5% under at +20%')}</div>
     <div class="group mt12">${t('newsFilter', 'Check news and social media before buying', 'Headlines, StockTwits and Reddit')}${t('blockSevere', 'Skip stocks with serious news', 'Fraud, bankruptcy, halts, investigations')}${t('sellOnSevere', 'Sell on serious news', 'Even if the strategy still likes it')}${t('tilt', 'Size by the mood', 'Buy smaller when the mood is negative')}</div>
     <div class="group mt12">${t('councilVeto', 'Council veto', 'If most of the Council in Mango HQ votes no, skip the buy')}</div>
     <div class="pf-grid">${n('earningsDays', 'Skip if earnings are within (trading days)')}${n('minSentiment', 'Skip if the mood is below (−1 to 0)', '', 0.05)}</div>
@@ -4064,7 +4081,7 @@ function mandateFields(m, pre) {
 }
 function readMandate(root, pre) {
   const o = {};
-  for (const k of ['maxPosPct', 'maxTradesDay', 'dailyLossPct', 'maxDDPct', 'earningsDays', 'minSentiment', 'budget']) { const el = $(`#${pre}-m-${k}`, root); if (el) o[k] = num(el.value); }
+  for (const k of ['maxPosPct', 'maxTradesDay', 'dailyLossPct', 'maxDDPct', 'earningsDays', 'minSentiment', 'budget', 'takeProfitPct', 'timeStopDays']) { const el = $(`#${pre}-m-${k}`, root); if (el) o[k] = num(el.value); }
   root.querySelectorAll('[data-mk]').forEach(el => { o[el.dataset.mk] = el.classList.contains('on'); });
   for (const k of ['runAt', 'notify']) { const on = $(`[data-seg="${pre}-m-${k}"] button.on`, root); if (on) o[k] = on.dataset.v; }
   return o;
@@ -4355,12 +4372,12 @@ PAGES.botboard = {
     api('bots/board').then(all => {
       const list = all.filter(x => isRealSpace() ? x.broker : !x.broker);
       const max = Math.max(0.0001, ...list.map(x => Math.abs(x.ret)), ...list.map(x => Math.abs(x.spy || 0)));
-      $('#lb', p.body).innerHTML = list.length ? `<div class="group mt16">${list.map((x, i) => `<button class="cell lb-row ${i === 0 && x.ret > 0 ? 'lb-top' : ''}" data-act="go" data-to="bot/${x.id}"><span class="lb-n">${i === 0 && x.ret > 0 ? '👑' : i + 1}</span><div class="main"><div class="title">${h(x.name)}${x.status !== 'running' ? ` <span class="t-cap">${x.status === 'paused' ? 'paused' : 'stopped'}</span>` : ''}</div>
+      $('#lb', p.body).innerHTML = list.length ? `<div class="group mt16">${list.map((x, i) => `<button class="cell lb-row ${i === 0 && x.ret > 0 ? 'lb-top' : ''}" data-act="go" data-to="bot/${x.id}"><span class="lb-n">${i === 0 && x.ret > 0 ? '👑' : i + 1}</span><div class="main"><div class="title">${h(x.name)}${x.status !== 'running' ? ` <span class="t-cap">${x.status === 'paused' ? 'paused' : 'stopped'}</span>` : ''}${x.benched ? ' <span class="bench-badge">Benched</span>' : ''}${x.tune ? ' <span class="t-cap" style="color:var(--ac)">new settings</span>' : ''}</div>
         <div class="lb-bars"><span class="lb-bar ${x.ret >= 0 ? 'up' : 'dn'}" style="width:${Math.abs(x.ret) / max * 100}%"></span>${x.spy != null ? `<span class="lb-bar spy" style="width:${Math.abs(x.spy) / max * 100}%"></span>` : ''}</div>
-        <div class="sub">${x.days} day${x.days === 1 ? '' : 's'} · ${x.trades} trade${x.trades === 1 ? '' : 's'}${x.win != null ? ` · ${Math.round(x.win * 100)}% wins` : ''} · biggest drop ${pct0(Math.abs(x.maxDD) * 100, 1)}</div></div>
+        <div class="sub">${x.days} day${x.days === 1 ? '' : 's'} · ${x.trades} trade${x.trades === 1 ? '' : 's'}${x.win != null ? ` · ${Math.round(x.win * 100)}% wins` : ''}${x.payoff != null ? ` · payoff ${x.payoff.toFixed(1)}×` : ''} · biggest drop ${pct0(Math.abs(x.maxDD) * 100, 1)}</div></div>
         <div class="trail col" style="align-items:flex-end"><b class="n ${cls(x.ret)}">${pct(x.ret * 100)}</b>${x.vs != null ? `<span class="t-cap n ${cls(x.vs)}">${x.vs >= 0 ? 'beats' : 'trails'} S&P by ${pct0(Math.abs(x.vs) * 100, 1)}</span>` : ''}</div></button>`).join('')}</div>
         <div class="bt-legend"><span><i class="ln"></i>Bot</span><span><i class="ln spy-ln"></i>S&P 500 over the same days</span></div>
-        <p class="note">Early results are mostly luck: give a bot a few months before judging it. Returns count everything in its wallet, including cash.</p>` : `<div class="group mt16"><div class="empty"><p>No bots yet.</p></div></div>`;
+        <p class="note">Early results are mostly luck: give a bot a few months before judging it. Returns count everything in its wallet, including cash. Benched means it trailed the S&P 500 by more than 3% over the last 60 days.</p><div class="group mt16">${menuCell('star', 'Tournaments', 'Let variations of a strategy compete on real prices', 'tournaments')}</div>` : `<div class="group mt16"><div class="empty"><p>No bots yet.</p></div></div>`;
     }).catch(e => { $('#lb', p.body).innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; });
   },
 };
@@ -7029,6 +7046,114 @@ ACT.aiTest = async el => {
 };
 
 // ===================================================================
+// Smarter bots: the report card and re-tune suggestion on the bot page, the bot tournament,
+// and the portfolio guards card in Settings.
+// ===================================================================
+STRAT_HUE.earnings = '#E85D75';
+STRAT_SYMS.earnings = ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'META', 'GOOGL', 'NFLX', 'AVGO', 'CRM', 'ORCL', 'ADBE', 'AMD', 'COST', 'JPM', 'LLY', 'UNH'];
+
+// ---------- report card ----------
+function reportCard(b) {
+  const r = b.report; if (!r) return '';
+  const m = v => v == null ? '–' : money(v, { sign: true });
+  const vs = r.vs60 == null ? `<b class="n">–</b>` : `<b class="n ${cls(r.vs60)}">${r.vs60 >= 0 ? '+' : '−'}${pct0(Math.abs(r.vs60) * 100, 1)}</b>`;
+  const grade = r.vs60 == null ? null : r.vs60 >= 0.03 ? ['A', 'up'] : r.vs60 >= 0 ? ['B', 'up'] : r.vs60 >= -0.03 ? ['C', ''] : ['D', 'dn'];
+  return `<div class="section-h"><h2>Report card</h2>${r.benched ? '<span class="bench-badge">Benched</span>' : ''}</div>
+    <div class="card rpt-card">${grade ? `<div class="rpt-grade ${grade[1]}">${grade[0]}</div>` : ''}
+      <div class="rpt-grid"><div><span class="k">vs S&P 500, 60 days</span>${vs}</div><div><span class="k">Payoff</span><b class="n">${r.payoff == null ? '–' : r.payoff.toFixed(2) + '×'}</b></div><div><span class="k">Average win</span><b class="n up">${m(r.avgWin)}</b></div><div><span class="k">Average loss</span><b class="n dn">${m(r.avgLoss)}</b></div></div>
+      <p class="t-foot" style="margin:10px 0 0">${r.benched ? `It has trailed the S&P 500 by more than 3% over 60 days. ${SET().autoBench ? 'Auto-bench paused it.' : 'Think about pausing it, re-tuning it or trying another strategy.'}` : r.days < 60 ? `Grades start after 60 days (it's on day ${r.days}). Bots that trail the S&P 500 by more than 3% get benched.` : 'A payoff above 1 means its wins are bigger than its losses, so it can be right less than half the time and still make money.'}</p></div>`;
+}
+// ---------- re-tune suggestion ----------
+function tuneCard(b) {
+  if (!b.tunable) return '';
+  const t = b.tune, st = b.strategyInfo || { params: [] }, lab = k => st.params?.find(x => x.k === k)?.label || k;
+  if (t?.better) {
+    const ch = Object.entries(t.params).filter(([k, v]) => b.params[k] !== v);
+    return `<div class="section-h"><h2>Better settings found</h2></div><div class="card tune-card">
+      <p class="t-foot" style="margin:0 0 8px">Re-tested on 3 years. On the last stretch it never saw while tuning, these did better: Sharpe ${t.yours?.sharpe?.toFixed(2) ?? '–'} → <b>${t.best?.sharpe?.toFixed(2) ?? '–'}</b>, return ${pct((t.yours?.ret || 0) * 100)} → <b>${pct((t.best?.ret || 0) * 100)}</b>.</p>
+      ${ch.map(([k, v]) => `<div class="kv"><span class="k">${h(lab(k))}</span><span class="v">${h(String(b.params[k]))} → <b>${h(String(v))}</b></span></div>`).join('')}
+      <div class="btns mt12"><button class="btn btn-quiet" data-act="tuneDismiss">Keep mine</button><button class="btn btn-primary" data-act="tuneApply">Use these</button></div></div>`;
+  }
+  return `<button class="cell card tune-cell mt12" data-act="tuneRun"><div class="lead">${icon('sliders')}</div><div class="main"><div class="title">Look for better settings</div><div class="sub" id="tune-sub">${t?.ts ? `Checked ${timeAgo(t.ts)}: ${t.applied ? 'new settings in use' : 'its settings are still the best'}.` : 'Re-tests its rules on 3 years of prices, scored only on data it didn\'t tune on.'}${SET().autoTune !== false ? ' Runs by itself once a month.' : ''}</div></div>${icon('right', 'chev')}</button>`;
+}
+ACT.tuneRun = async el => {
+  const p = curBot(); if (!p || el.classList.contains('is-busy')) return; busy(el, true);
+  const sub = $('#tune-sub', p.body); if (sub) sub.textContent = 'Testing… this takes up to a minute.';
+  try { const t = await post(`bots/${p.id}/tune`, {}); toast(t.better ? 'Found better settings' : 'Its settings are still the best', { sub: t.better ? 'Review them on this page.' : 'Nothing beat them on the unseen years.' }); p.load(); }
+  catch (e) { toastErr(e); if (sub) sub.textContent = e.message; }
+  busy(el, false);
+};
+ACT.tuneApply = async el => { const p = curBot(); if (!p) return; busy(el, true); try { await post(`bots/${p.id}/tune/apply`, {}); toast('New settings in use'); p.load(); } catch (e) { toastErr(e); busy(el, false); } };
+ACT.tuneDismiss = async () => { const p = curBot(); if (!p) return; try { await post(`bots/${p.id}/tune/dismiss`, {}); p.load(); } catch (e) { toastErr(e); } };
+
+// ---------- tournaments ----------
+PAGES.tournaments = {
+  mount(p) {
+    p.title('Tournaments', true);
+    p.load = async () => {
+      try {
+        const [list, s] = await Promise.all([api('tournaments'), strats()]); p.s = s;
+        p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Tournaments</h1><p class="t-sub" style="margin:0 2px">Up to 20 variations of one strategy trade pretend money from the day they join, on real prices. Every month the bottom of the table is replaced by mutations of the top 3. Adopt a winner as a bot any time.</p>
+          <div class="group mt16">${list.map(t => { const top = t.entrants[0]; return `<button class="cell" data-act="go" data-to="tournament/${t.id}"><div class="lead" style="color:${hueOf(t.strategy)}">${icon('star')}</div><div class="main"><div class="title">${h(t.name)}</div><div class="sub ellip">${t.entrants.length} entrants · round ${t.round + 1} · ${h(t.syms.slice(0, 6).join(', '))}${t.syms.length > 6 ? '…' : ''}</div></div>${top?.ret != null ? `<b class="n ${cls(top.ret)}">${pct(top.ret * 100)}</b>` : ''}${icon('right', 'chev')}</button>`; }).join('') || '<div class="cell"><div class="main t-foot">No tournaments yet.</div></div>'}</div>
+          ${list.length < 5 ? `<button class="btn btn-primary btn-block mt16" data-act="tournNew">${icon('plus')}Start a tournament</button>` : '<p class="note">That\'s the most at once (5). End one to start another.</p>'}`;
+      } catch (e) { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; }
+    };
+    p.body.innerHTML = '<div class="sk sk-block mt16"></div>'; p.load();
+  },
+  refresh(p) { p.load && p.load(); },
+};
+ACT.tournNew = async () => {
+  const s = await strats(), keys = Object.entries(s.strategies).filter(([, x]) => !x.auto && x.params?.length);
+  let key = keys[0][0];
+  const sh = sheet({ title: 'Start a tournament', tall: true, html: `<div class="field"><span>Strategy</span>${seg('tn-strat', keys.map(([k, x]) => [k, x.short || x.name]), key)}</div>
+      <label class="field"><span>Symbols, separated by commas</span><input id="tn-syms" value="${h((STRAT_SYMS[key] || s.universes.megacap.syms).join(', '))}" autocapitalize="characters"></label>
+      <div class="field"><span>Entrants</span>${seg('tn-size', [['8', '8'], ['12', '12'], ['20', '20']], '12')}</div>
+      <p class="t-foot">Entrant 1 uses the default settings; the rest are random variations of it. Nothing real is traded.</p>`, foot: '<button class="btn btn-primary btn-block btn-lg" id="tn-go">Start</button>' });
+  onSeg(sh.body, 'tn-strat', k => { key = k; $('#tn-syms', sh.body).value = (STRAT_SYMS[k] || s.universes.megacap.syms).join(', '); });
+  $('#tn-go', sh.el).addEventListener('click', async e => {
+    busy(e.currentTarget, true);
+    try { const t = await post('tournaments', { strategy: key, syms: symList($('#tn-syms', sh.body).value), size: +($('[data-seg="tn-size"] button.on', sh.body)?.dataset.v || 12) }); sh.close(); toast('Tournament started'); Router.go('tournament/' + t.id); }
+    catch (err) { busy(e.currentTarget, false); toastErr(err); }
+  });
+};
+PAGES.tournament = {
+  mount(p, [id]) {
+    p.id = id; p.title('Tournament', true);
+    p.load = async () => {
+      try {
+        const [list, s] = await Promise.all([api('tournaments'), strats()]), t = list.find(x => x.id === id); p.t = t;
+        if (!t) { p.body.innerHTML = '<div class="empty"><h3>That tournament has ended</h3></div>'; return; }
+        const st = s.strategies[t.strategy] || { params: [] }, def = Object.fromEntries((st.params || []).map(x => [x.k, x.def]));
+        const diff = e => Object.entries(e.params).filter(([k, v]) => def[k] !== v && !(st.params.find(x => x.k === k)?.choices)).map(([k, v]) => `${st.params.find(x => x.k === k)?.label || k} ${v}`).join(' · ') || 'Default settings';
+        p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">${h(t.name)}</h1><p class="t-sub" style="margin:0 2px">Round ${t.round + 1} · ${h(t.syms.join(', '))}${t.scored ? ` · scored ${timeAgo(t.scored)}` : ''}</p>
+          <div class="group mt16">${t.entrants.map((e, i) => `<button class="cell lb-row" data-act="tournAdopt" data-i="${i}"><span class="lb-n">${i === 0 && e.ret > 0 ? '👑' : i + 1}</span><div class="main"><div class="title ellip">${h(diff(e))}</div><div class="sub">Joined ${fmtDate(e.born + 'T12:00')}${e.trades != null ? ` · ${e.trades} trade${e.trades === 1 ? '' : 's'}` : ''}${e.dd != null ? ` · biggest drop ${pct0(Math.abs(e.dd) * 100, 1)}` : ''}</div></div><b class="n ${cls(e.ret || 0)}">${pct((e.ret || 0) * 100)}</b></button>`).join('')}</div>
+          ${Math.max(...t.entrants.map(e => e.days || 0)) <= 10 ? `<div class="callout mt12">${icon('info')}<div>Just started: they've only traded a few days, so most are tied. The table gets interesting after a couple of weeks.</div></div>` : ''}
+          <p class="note">Tap an entrant to adopt it as a real bot with those settings. Early rounds are mostly luck: wait a month or two before trusting the table.</p>
+          <div class="btns mt16"><button class="btn btn-quiet" data-act="tournScore">${icon('refresh')}Score now</button><button class="btn btn-danger" data-act="tournEnd">${icon('trash')}End it</button></div>`;
+      } catch (e) { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; }
+    };
+    p.body.innerHTML = '<div class="sk sk-block mt16"></div>'; p.load();
+  },
+  refresh(p) { p.load && p.load(); },
+};
+const curTourn = () => Router.pages().reverse().find(x => x.name === 'tournament');
+ACT.tournAdopt = async el => { const p = curTourn(), e = p?.t?.entrants[+el.dataset.i]; if (!e) return; App.botDraft = { strategy: p.t.strategy, syms: p.t.syms.slice(), params: { ...e.params }, uni: 'custom' }; Router.go('newbot/' + p.t.strategy); };
+ACT.tournScore = async el => { const p = curTourn(); if (!p) return; busy(el, true); try { await post(`tournaments/${p.id}/score`, {}); p.load(); } catch (e) { toastErr(e); busy(el, false); } };
+ACT.tournEnd = async () => { const p = curTourn(); if (!p) return; if (!await confirmBox({ title: 'End this tournament?', msg: 'The table goes away. Bots you adopted from it keep running.', ok: 'End it', danger: true })) return; try { await post(`tournaments/${p.id}/delete`, {}); history.back(); toast('Tournament ended'); } catch (e) { toastErr(e); } };
+
+// ---------- portfolio guards (Settings) ----------
+function guardsCard() {
+  const on = SET().sharedRisk !== false;
+  return `<div class="group mt16"><div class="cell"><div class="lead">${icon('shield')}</div><div class="main"><div class="title">Portfolio guards</div><div class="sub">Rules every bot follows together, on top of each bot's own limits.</div></div></div>
+    ${rowToggle('moodSwitch', 'Market mood switch', 'In a choppy market new buys are 70% size, in a falling one 40%. Judged from the S&P 500 (and Bitcoin for crypto) against their 50- and 200-day averages')}
+    ${rowToggle('corrGuard', 'Correlation guard', 'A bot won\'t open a position that has moved almost exactly like one it already holds over 60 days')}
+    ${rowToggle('sharedRisk', 'Shared risk caps', 'Limits across all bots together, so two bots can\'t pile into the same stock or sector')}
+    ${on ? `${rowNum('maxSymPct', 'Most in one symbol', 'Of all bots\' money together', '%', { w: 90 })}${rowNum('maxSectorPct', 'Most in one sector', 'Tech, health, energy…', '%', { w: 90 })}${rowNum('maxCryptoPct', 'Most in crypto', 'All coins together', '%', { w: 90 })}` : ''}
+    ${rowToggle('autoBench', 'Auto-bench', 'Pause a bot that trails the S&P 500 by more than 3% over 60 days. Off: you get a notification instead')}
+    ${rowToggle('autoTune', 'Monthly re-tune check', 'Re-tests each bot\'s settings once a month and suggests better ones. It never changes them without you')}</div>`;
+}
+
+// ===================================================================
 // Settings
 // ===================================================================
 function applyLook(s) {
@@ -7077,7 +7202,7 @@ PAGES.settings = {
   root() {
     const S = App.S;
     return `<div class="set-hero"><svg viewBox="0 0 120 120" class="av"><use href="#mango-mark"/></svg><div><div class="t-title">Mango <span class="set-ver">v${h(APP_VERSION)}</span></div><div class="t-foot">Logged in as ${h(S.user || 'you')} · ${(S.wallets || []).filter(w => !w.archived).length} wallet${(S.wallets || []).length === 1 ? '' : 's'}</div></div></div>
-      ${standbyCard()}${councilCard()}${nightCard()}${analystCard()}
+      ${standbyCard()}${guardsCard()}${councilCard()}${nightCard()}${analystCard()}
       <div class="group mt16">${Object.entries(SECTIONS).map(([k, v]) => rowLink(v.icon, v.title, v.sub, 'settings/' + k)).join('')}</div>
       <div class="group mt16">${rowLink('wallet', 'Wallets', 'Create, rename, reset, move cash', 'wallets')}${rowToggle('hideBalances', 'Hide balances', 'Blur dollar amounts. Press and hold to peek.')}</div>
       <div class="group mt16">${rowLink('lock', 'Face ID and backups', 'Log in with Face ID, protect real money, save your data', 'security')}</div>

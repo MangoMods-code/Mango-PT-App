@@ -308,7 +308,7 @@ const DEF = {
   confirmStyle: 'hold', confirmBuy: false, confirmSell: true, cashAPY: 0, startBalance: 10000,
   // notifications
   pushAlerts: true, pushOrders: true, notifySummary: true, notifyMoves: true, moveThreshold: 5,
-  notifyAchv: true, notifyGames: true, pushBots: true, botWeekly: true, pushReal: true, realDailyLossPct: 3, realHalt: false, standbyActive: false, standbyActiveAt: 0, councilWeighted: true, vetoAll: true, aiVeto: true, aiReview: true, aiSizeUp: true, nightOn: true, nightRuns: 2, aiOn: true, aiSize: true, aiDebate: true, aiHawk: true, aiGuard: true, aiChart: true, aiDailyMax: 120, faceReal: true, autoBackup: true, quietStart: '', quietEnd: '',
+  notifyAchv: true, notifyGames: true, pushBots: true, botWeekly: true, pushReal: true, realDailyLossPct: 3, realHalt: false, standbyActive: false, standbyActiveAt: 0, councilWeighted: true, vetoAll: true, moodSwitch: true, corrGuard: true, corrMax: 0.9, sharedRisk: true, maxSymPct: 30, maxSectorPct: 50, maxCryptoPct: 50, autoBench: false, autoTune: true, aiVeto: true, aiReview: true, aiSizeUp: true, nightOn: true, nightRuns: 2, aiOn: true, aiSize: true, aiDebate: true, aiHawk: true, aiGuard: true, aiChart: true, aiDailyMax: 120, faceReal: true, autoBackup: true, quietStart: '', quietEnd: '',
   // look and feel
   hideBalances: false, showCents: true, compactNums: false, defaultRange: '1D', defaultChart: 'Candles',
   theme: 'mango', accent: 'mango', plColors: 'classic', roundedNums: true, reduceMotion: false, celebrate: true,
@@ -320,7 +320,7 @@ const DEF = {
   f_divs: true, f_ext: true, f_movers: true, f_insights: true, f_taxes: true, f_statements: true, f_bots: true, f_buzz: true,
 };
 const LIMITS = {
-  nightRuns: [1, 3], aiDailyMax: [0, 500],
+  maxSymPct: [5, 100], maxSectorPct: [10, 100], maxCryptoPct: [0, 100], corrMax: [0.5, 1], nightRuns: [1, 3], aiDailyMax: [0, 500],
   realDailyLossPct: [0, 50],
   feeFlat: [0, 1000], feePct: [0, 10], slippage: [0, 5], maxPos: [0, 100], reservePct: [0, 100], autoSL: [0, 90], autoTP: [0, 1000],
   defaultBuy: [0, 1e9], cashAPY: [0, 100], startBalance: [100, 1e9], moveThreshold: [1, 50], defaultWallet: [1, 1e9],
@@ -3350,12 +3350,13 @@ function gridCombos(grid) {
 const MANDATE_DEF = {
   budget: 0, maxPosPct: 25, dailyLossPct: 5, maxDDPct: 20, maxTradesDay: 12, minTrade: 10, runAt: '15:45', stops: true, notify: 'trades',
   newsFilter: true, earningsDays: 2, minSentiment: -0.35, blockSevere: true, sellOnSevere: false, tilt: false, flattenOnKill: true, allowLive: false, liveCap: 0, councilVeto: false,
+  takeProfitPct: 15, timeStopDays: 30, trailTighten: true,
 };
 function cleanMandate(m = {}, base = MANDATE_DEF) {
   const o = { ...base };
-  const nums = { liveCap: [0, 1e7], budget: [0, 1e9], maxPosPct: [5, 100], dailyLossPct: [0, 50], maxDDPct: [0, 90], maxTradesDay: [1, 100], minTrade: [1, 10000], earningsDays: [0, 10], minSentiment: [-1, 0] };
+  const nums = { liveCap: [0, 1e7], budget: [0, 1e9], maxPosPct: [5, 100], dailyLossPct: [0, 50], maxDDPct: [0, 90], maxTradesDay: [1, 100], minTrade: [1, 10000], earningsDays: [0, 10], minSentiment: [-1, 0], takeProfitPct: [0, 500], timeStopDays: [0, 365] };
   for (const [k, [lo, hi]] of Object.entries(nums)) if (m[k] !== undefined) o[k] = clamp(num(m[k], base[k]), lo, hi);
-  for (const k of ['stops', 'newsFilter', 'blockSevere', 'sellOnSevere', 'tilt', 'flattenOnKill', 'allowLive', 'councilVeto']) if (m[k] !== undefined) o[k] = !!m[k];
+  for (const k of ['stops', 'newsFilter', 'blockSevere', 'sellOnSevere', 'tilt', 'flattenOnKill', 'allowLive', 'councilVeto', 'trailTighten']) if (m[k] !== undefined) o[k] = !!m[k];
   if (['trades', 'all', 'off'].includes(m.notify)) o.notify = m.notify;
   if (/^\d\d:\d\d$/.test(m.runAt || '') && m.runAt >= '09:45' && m.runAt <= '15:55') o.runAt = m.runAt;
   return o;
@@ -3420,7 +3421,8 @@ async function runBotInner(id, { manual, dry, night }) {
   // ---- data ----
   const syms = bot.syms.filter(s => isCrypto(s) || sess === 'regular' || manual || night);
   const bench = benchFor(bot.syms);
-  const { data, missing } = await loadUniverse([...new Set([...bot.syms, bench])]);
+  const moodSyms = [bot.syms.some(s => !isCrypto(s)) ? 'SPY' : null, bot.syms.some(isCrypto) ? 'BTC' : null].filter(Boolean);
+  const { data, missing } = await loadUniverse([...new Set([...bot.syms, bench, ...moodSyms])]);
   const series = {}, idx = {};
   for (const s of Object.keys(data)) { const r = withLive(data[s], s); series[s] = r.bars; idx[s] = r.bars.d.length - 1; }
   const need = st.need(bot.params);
@@ -3435,7 +3437,9 @@ async function runBotInner(id, { manual, dry, night }) {
   }
   const month = today.slice(0, 7), rebalanceDue = st.rebalance === 'none' || !state._lastRebalance || (st.rebalance === 'monthly' ? state._lastRebalance.slice(0, 7) !== month : true) || manual;
   const band = st.band || 0.01;
-  const ctx = { syms: tradable, data: series, idx, params: bot.params, held, bench, maxW: m.maxPosPct / 100 };
+  const ctx = { syms: tradable, data: series, idx, params: bot.params, held, bench, maxW: m.maxPosPct / 100, beats: bot.strategy === 'earnings' ? await earningsBeats(tradable).catch(() => null) : null };
+  // the market's mood (S&P 500 for stocks, Bitcoin for crypto) scales new buys; Autopilot and Buy and hold manage their own exposure
+  const moodOn = S.moodSwitch !== false && !st.auto && bot.strategy !== 'hold', mood = moodOn ? { stock: moodOf(series.SPY, 'The S&P 500'), crypto: moodOf(series.BTC, 'Bitcoin') } : null;
   const dec = st.auto ? await autopilotDecide(bot, state, series, today, { dry, manual, dd }) : rebalanceDue ? st.decide(ctx) : { weights: Object.fromEntries(Object.entries(held).map(([s, h]) => [s, h.weight || (h.qty * (priceOf(s) || h.entry)) / capital])), stops: {}, notes: Object.fromEntries(Object.keys(held).map(s => [s, 'Holding until the next monthly rebalance.'])) };
   if (st.auto) { ctx.regime = dec.regime; for (const k of Object.keys(dec.weights)) dec.weights[k] = Math.min(dec.weights[k], m.maxPosPct / 100); }
   if (!rebalanceDue) log.risk.push(`${st.name} rebalances monthly; next on the first trading day of next month. Holding as is.`);
@@ -3462,9 +3466,19 @@ async function runBotInner(id, { manual, dry, night }) {
       else if (m.tilt && bz.count >= 5) { const k = clamp(0.75 + bz.sentiment * 0.5, 0.5, 1); if (k < 0.99) { wt = Math.max(have / capital, wt * k); d.why.push(`Sized down to ${Math.round(k * 100)}% because of the news mood.`); } }
     }
     if (bz && held[s] && m.sellOnSevere && bz.flags.includes('severe_news')) { wt = 0; d.why.push('Selling: serious negative news and "sell on bad news" is on.'); }
+    if (mood && wt * capital > have + 1) { const md = isCrypto(s) ? mood.crypto : mood.stock; if (md && md.scale < 1) { wt = (have + (wt * capital - have) * md.scale) / capital; d.why.push(md.line); d.mood = md.k; } }
+    // correlation guard: don't open a position that moves almost in lockstep with one it already holds
+    if (S.corrGuard !== false && !held[s] && wt > 0 && series[s]) { for (const hs of Object.keys(held)) { if (hs === s) continue; const r = corr60(series[s], series[hs]); if (r != null && r >= (S.corrMax ?? 0.9)) { wt = 0; d.why.push(`Skipped buying: over the last 60 days it moved almost exactly like ${hs} (correlation ${r.toFixed(2)}), which it already holds.`); break; } } }
     if (stoppedToday.has(s) && !held[s] && wt > 0) { wt = 0; d.why.push('Not buying back today: its stop loss sold it earlier today.'); }
     if (noBuys && wt * capital > have) { wt = have / capital; d.why.push('No new buys today: the daily loss limit was hit.'); }
     d.target = wt; decisions[s] = d;
+  }
+  // ---- smarter exits: take some profit, and let go of trades that went nowhere ----
+  for (const d of Object.values(decisions)) {
+    const h = held[d.sym], px = priceOf(d.sym); if (!h || !px || !(d.target > 0)) continue;
+    const gain = px / h.entry - 1, s0 = state[d.sym] || {};
+    if (m.takeProfitPct > 0 && gain * 100 >= m.takeProfitPct && !s0.tookProfit && d.target * capital > d.have * 0.6) { d.aiTrim = true; d.target = d.have / 2 / capital; d.takeProfit = true; if (d.mood) { d.why = d.why.filter(w => !/New buys at/.test(w)); delete d.mood; } d.why.push(`Trimming by half: up ${(gain * 100).toFixed(1)}%, past the ${m.takeProfitPct}% take-profit. The rest keeps running with a tighter stop.`); continue; }
+    if (m.timeStopDays > 0 && st.rebalance === 'none' && !st.auto && bot.strategy !== 'hold' && (h.days || 0) >= m.timeStopDays && gain < 0.03) { d.target = 0; d.why.push(`Selling: time stop. ${h.days} trading days and only ${(gain * 100).toFixed(1)}%, so the money can work somewhere else.`); }
   }
   // ---- the council: six kinds of evidence vote on each buy and sell ----
   phase('council');
@@ -3548,9 +3562,10 @@ async function runBotInner(id, { manual, dry, night }) {
     if (!(isCrypto(d.sym) || tradable.includes(d.sym))) continue;
     const targetV = d.target * capital, diff = targetV - d.have;
     if (d.target <= 0) { d.action = 'sell'; await placeOrder(d.sym, 'sell', { pct: 100 }, `${st.short}: ${d.why.find(w => /^Selling/.test(w)) || d.why[0] || d.note}`); delete state[d.sym]; }
-    else if (d.aiTrim) { d.action = 'trim'; await placeOrder(d.sym, 'sell', { qty: held[d.sym].qty / 2 }, `${st.short}: ${d.why.find(w => /^Trimming/.test(w))}`); }
+    else if (d.aiTrim) { d.action = 'trim'; await placeOrder(d.sym, 'sell', { qty: held[d.sym].qty / 2 }, `${st.short}: ${d.why.find(w => /^Trimming/.test(w))}`); if (d.takeProfit) state[d.sym] = { ...(state[d.sym] || {}), tookProfit: today }; }
     else if (rebalanceDue && st.rebalance !== 'none' && -diff > Math.max(m.minTrade, capital * band)) { d.action = 'trim'; await placeOrder(d.sym, 'sell', { qty: Math.min(held[d.sym].qty, -diff / px) }, `${st.short}: rebalance down to ${pct0n(d.target)} of the wallet`); }
   }
+  const exposure = S.sharedRisk === false ? null : await botExposure(brk).catch(() => null);
   for (const d of Object.values(decisions).sort((a, b) => b.target - a.target)) {
     if (!(d.target > 0) || !tradable.includes(d.sym)) continue;
     const px = priceOf(d.sym), targetV = d.target * capital, diff = targetV - d.have;
@@ -3559,7 +3574,8 @@ async function runBotInner(id, { manual, dry, night }) {
     if (diff <= Math.max(m.minTrade, capital * (isNew ? 0.01 : band))) continue;
     const a2 = dry ? acct : await accountInfo(bot.wid);
     const bp = isCrypto(d.sym) || !marginable(d.sym, px) ? a2.bpCrypto : a2.bp;
-    const usd = Math.floor(Math.min(diff, bp * 0.995) * 100) / 100;
+    const room = sharedRoom(exposure, d.sym), usd = Math.floor(Math.min(diff, bp * 0.995, room) * 100) / 100;
+    if (room < diff) d.why.push(room < m.minTrade ? `Not buying: all bots together already have the most allowed in ${room === 0 && sectorOf(d.sym) !== 'Other' ? (exposure.bySym[d.sym] ? d.sym : sectorOf(d.sym)) : d.sym}.` : `Bought less: all bots together are near the cap for ${d.sym} / ${sectorOf(d.sym)}.`);
     if (usd < m.minTrade) { d.why.push(`Not enough buying power for this (${money(bp)} left).`); continue; }
     d.action = isNew ? 'buy' : 'add';
     await placeOrder(d.sym, 'buy', { usd }, `${st.short}: ${d.note}${d.why.length ? ' ' + d.why.join(' ') : ''}`.slice(0, 480));
@@ -3571,8 +3587,11 @@ async function runBotInner(id, { manual, dry, night }) {
     const pnow = await positions(bot.wid);
     for (const p of pnow) {
       if (!mine.has(p.sym)) continue;
-      const sp = dec.stops[p.sym] || (state[p.sym]?.stopPx ? { price: state[p.sym].stopPx, trail: false } : null); if (!sp || !(sp.price > 0)) continue;
-      const prevStop = state[p.sym]?.stopPx, stopPx = sp.trail && prevStop ? Math.max(prevStop, sp.price) : sp.price, cur = priceOf(p.sym);
+      let sp = dec.stops[p.sym] || (state[p.sym]?.stopPx ? { price: state[p.sym].stopPx, trail: false } : null);
+      if (!sp && m.trailTighten) { const t = tightStop(p.avg, Math.max(state[p.sym]?.high || 0, priceOf(p.sym) || 0), priceOf(p.sym)); if (t) sp = { price: t, trail: false }; } // a winner with no stop yet gets one
+      if (!sp || !(sp.price > 0)) continue;
+      const prevStop = state[p.sym]?.stopPx, cur = priceOf(p.sym), tight = m.trailTighten ? tightStop(p.avg, Math.max(state[p.sym]?.high || 0, cur || 0), cur) : null;
+      let stopPx = sp.trail && prevStop ? Math.max(prevStop, sp.price) : sp.price; if (tight) stopPx = Math.max(stopPx, tight, prevStop || 0);
       if (!(stopPx < cur * 0.995)) continue;
       if (brk) {
         const ex = (BROKER.orders || []).find(o => o.sym === p.sym && o.side === 'sell' && (o.kind === 'stop' || o.kind === 'trail'));
@@ -3913,6 +3932,232 @@ async function autopilotDecide(bot, state, series, today, { dry = false, manual 
   }
   return out;
 }
+// =====================================================================
+// Smarter bots: portfolio-wide guards and tools that sit on top of every strategy
+//  - market mood switch: buys get smaller in a choppy or falling market
+//  - correlation guard: no new position that moves almost exactly like one already held
+//  - shared risk: caps on how much of all the bots' money can sit in one stock or one sector
+//  - smarter exits: stops that tighten as profit grows, a partial take-profit, a time stop
+//  - report card and benching, settings re-tuning, the bot tournament, and the earnings-drift strategy
+// =====================================================================
+
+// ---------- sectors (common names; anything else counts as "other" and isn't capped) ----------
+const SECTOR_OF = (() => {
+  const m = {}, add = (sec, list) => list.split(' ').forEach(s => { m[s] = sec; });
+  add('Tech', 'AAPL MSFT NVDA AMD INTC AVGO ORCL CRM ADBE CSCO QCOM TXN IBM NOW INTU AMAT MU LRCX KLAC SNPS CDNS PANW CRWD SHOP PLTR SNOW NET DDOG ZS MDB TEAM UBER ABNB SMCI ARM DELL HPQ ANET MRVL XLK SMH SOXX VGT');
+  add('Communication', 'GOOGL GOOG META NFLX DIS CMCSA T VZ TMUS SPOT RBLX SNAP PINS EA TTWO XLC');
+  add('Consumer', 'AMZN TSLA HD NKE MCD SBUX LOW TGT WMT COST PG KO PEP PM MO CL EL LULU CMG BKNG MAR GM F RIVN XLY XLP');
+  add('Finance', 'JPM BAC WFC C GS MS BLK SCHW AXP V MA PYPL SQ COF USB PNC BRK.B COIN HOOD SOFI XLF KRE');
+  add('Health', 'UNH JNJ LLY PFE MRK ABBV TMO ABT DHR BMY AMGN GILD CVS MDT ISRG VRTX REGN MRNA ZTS XLV IBB');
+  add('Energy', 'XOM CVX COP SLB EOG OXY PSX MPC VLO KMI XLE USO');
+  add('Industrial', 'BA CAT DE GE HON UPS FDX LMT RTX NOC UNP CSX MMM GD XLI');
+  add('Real estate & utilities', 'PLD AMT EQIX O SPG NEE DUK SO D XLRE XLU');
+  add('Materials', 'LIN SHW APD FCX NEM DOW XLB');
+  add('Broad market', 'SPY QQQ DIA IWM VTI VOO IVV RSP VT EFA EEM');
+  add('Bonds & gold', 'TLT IEF SHY BND AGG LQD HYG GLD SLV IAU');
+  return m;
+})();
+const sectorOf = s => isCrypto(s) ? 'Crypto' : SECTOR_OF[s] || 'Other';
+const UNCAPPED = new Set(['Other', 'Broad market', 'Bonds & gold']);
+
+// ---------- market mood ----------
+// From the S&P 500 (stocks) or Bitcoin (crypto): calm uptrend = full size, choppy = 70%, downtrend = 40%.
+function moodOf(b, label) {
+  const i = b?.c?.length - 1; if (!(i >= 210)) return null;
+  const c = b.c[i], s50 = IND.sma(b.c, 50, i), s200 = IND.sma(b.c, 200, i), v20 = IND.vol(b.c, 20, i), v250 = i > 252 ? IND.vol(b.c, 250, i) : v20, vr = v250 ? v20 / v250 : 1;
+  if (c < s200) return { k: 'bear', scale: 0.4, line: `${label} is below its 200-day average: a falling market. New buys at 40% size.` };
+  if (c < s50 || vr > 1.35) return { k: 'choppy', scale: 0.7, line: `${label} is ${c < s50 ? 'below its 50-day average' : `swinging ${vr.toFixed(1)}x harder than usual`}: a choppy market. New buys at 70% size.` };
+  return { k: 'bull', scale: 1, line: `${label} is in a calm uptrend. Full size.` };
+}
+
+// ---------- correlation of daily returns over the last 60 days ----------
+function corr60(a, b) {
+  if (!a?.c || !b?.c) return null;
+  const n = 60, ra = [], rb = [], ma = new Map(a.d.map((d, i) => [d, i]));
+  for (let j = b.d.length - 1; j > 0 && ra.length < n; j--) { const i = ma.get(b.d[j]); if (i == null || i < 1) continue; ra.push(a.c[i] / a.c[i - 1] - 1); rb.push(b.c[j] / b.c[j - 1] - 1); }
+  if (ra.length < 30) return null;
+  const mean = x => x.reduce((t, v) => t + v, 0) / x.length, xa = mean(ra), xb = mean(rb);
+  let sab = 0, saa = 0, sbb = 0; for (let k = 0; k < ra.length; k++) { const da = ra[k] - xa, db = rb[k] - xb; sab += da * db; saa += da * da; sbb += db * db; }
+  return saa && sbb ? sab / Math.sqrt(saa * sbb) : null;
+}
+
+// ---------- shared risk across bots (each side, paper and Alpaca, counted separately) ----------
+async function botExposure(broker) {
+  const out = { bySym: {}, bySector: {}, total: 0, n: 0 };
+  for (const b of await rows("select b.wid, w.broker from bots b join wallets w on w.id=b.wid where b.status <> 'killed'")) {
+    if (!!b.broker !== !!broker) continue;
+    const w = await row('select cash from wallets where id=$1', [b.wid]); if (!w) continue;
+    const pos = await positions(b.wid); out.n++; out.total += +w.cash + marketValue(pos);
+    for (const p of pos) { const v = p.qty * (priceOf(p.sym) || p.avg); out.bySym[p.sym] = (out.bySym[p.sym] || 0) + v; const sec = sectorOf(p.sym); out.bySector[sec] = (out.bySector[sec] || 0) + v; }
+  }
+  return out;
+}
+// how many dollars a buy of `sym` may add without breaking the shared caps (Infinity when there's no cap)
+function sharedRoom(ex, sym) {
+  if (S.sharedRisk === false || !(ex?.total > 0) || ex.n < 2) return Infinity; // one bot alone is governed by its own limits
+  const symCap = (S.maxSymPct ?? 30) / 100 * ex.total, sec = sectorOf(sym), secCap = (S.maxSectorPct ?? 50) / 100 * ex.total;
+  let room = symCap - (ex.bySym[sym] || 0);
+  if (!UNCAPPED.has(sec) && sec !== 'Crypto') room = Math.min(room, secCap - (ex.bySector[sec] || 0));
+  if (sec === 'Crypto') room = Math.min(room, (S.maxCryptoPct ?? 50) / 100 * ex.total - (ex.bySector.Crypto || 0));
+  return Math.max(0, room);
+}
+
+// ---------- smarter exits ----------
+// Stops move up as profit grows: to break-even at +6%, 7% under the high at +12%, 5% under it at +20%.
+function tightStop(entry, high, cur) {
+  const gain = cur / entry - 1; if (!(gain >= 0.06)) return null;
+  let s = entry * 1.002; if (gain >= 0.12) s = Math.max(s, high * 0.93); if (gain >= 0.2) s = Math.max(s, high * 0.95);
+  return s < cur * 0.995 ? s : null;
+}
+
+// ---------- report card and benching ----------
+async function botReport(b, spy) {
+  const bot = botJson(b), w = await row('select * from wallets where id=$1', [b.wid]); if (!w) return null;
+  const since = new Date(bot.created), pos = await positions(b.wid), value = +w.cash + marketValue(pos);
+  const sells = (await rows("select pnl from trd where wid=$1 and side='sell' and pnl is not null and ts >= $2", [b.wid, since])).map(x => +x.pnl);
+  const wins = sells.filter(x => x > 0), losses = sells.filter(x => x <= 0);
+  const back = await row("select eq from snap where wid=$1 and ts <= now() - interval '60 days' order by ts desc limit 1", [b.wid]);
+  const days = Math.round((Date.now() - bot.created) / 864e5);
+  let vs60 = null;
+  if (back && spy) { const i = lastIndexOnOrBefore(spy.d, etDate(Date.now() - 60 * 864e5)), s0 = i >= 0 ? spy.c[i] : null, s1 = priceOf('SPY') || spy.c[spy.c.length - 1]; if (s0) vs60 = (value / +back.eq - 1) - (s1 / s0 - 1); }
+  const benched = days >= 60 && vs60 != null && vs60 < -0.03;
+  return { avgWin: wins.length ? wins.reduce((t, x) => t + x, 0) / wins.length : null, avgLoss: losses.length ? losses.reduce((t, x) => t + x, 0) / losses.length : null, payoff: wins.length && losses.length ? (wins.reduce((t, x) => t + x, 0) / wins.length) / Math.abs(losses.reduce((t, x) => t + x, 0) / losses.length) : null, vs60, benched, days };
+}
+// once a week: flag (and if switched on, pause) bots that have trailed the S&P 500 for 60 days
+async function benchCheck() {
+  let spy = null; try { spy = await dailyBars('SPY'); } catch (e) { return; }
+  for (const b of await rows("select * from bots where status='running'")) {
+    if (STRATEGIES[b.strategy]?.auto) continue;
+    const r = await botReport(b, spy).catch(() => null); if (!r?.benched) continue;
+    const st = jsonOr(b.state, {}); if (st._benchedAt && Date.now() - st._benchedAt < 6 * 864e5) continue;
+    st._benchedAt = Date.now(); await Q('update bots set state=$1 where id=$2', [JSON.stringify(st), b.id]);
+    const msg = `It has trailed the S&P 500 by ${(Math.abs(r.vs60) * 100).toFixed(1)}% over the last 60 days.${S.autoBench ? ' It has been paused.' : ''}`;
+    if (S.autoBench) await Q("update bots set status='paused' where id=$1", [b.id]);
+    await botLog(b.id, 'risk', S.autoBench ? 'Benched: paused for trailing the market' : 'Benched: trailing the market', msg);
+    await notify('bot', `🪑 ${b.name} is benched`, msg, { url: '/#/bot/' + b.id });
+  }
+}
+
+// ---------- re-tuning: retest a bot's settings on recent history and suggest better ones ----------
+async function tuneBot(id, { quiet = false } = {}) {
+  const b = await row('select * from bots where id=$1', [id]); if (!b) fail('That bot is gone', 404);
+  const bot = botJson(b), st = STRATEGIES[bot.strategy]; if (!st || st.auto || !Object.keys(st.grid || {}).length) fail('This strategy has no settings to tune.');
+  const r = await backtest({ strategy: bot.strategy, syms: bot.syms, params: bot.params, years: 3, maxPosPct: bot.mandate.maxPosPct });
+  const R = r.robust, state = jsonOr(b.state, {});
+  let tune = { ts: Date.now(), checked: true, better: false, yours: R?.outSample?.yours || null, bench: R?.outSample?.bench || null };
+  if (R?.tuned && R.outSample?.best && R.outSample?.yours) {
+    const changed = Object.entries(R.tuned).some(([k, v]) => bot.params[k] !== v), gain = (R.outSample.best.sharpe ?? 0) - (R.outSample.yours.sharpe ?? 0);
+    if (changed && gain >= 0.2 && (R.outSample.best.ret ?? 0) > (R.outSample.yours.ret ?? 0)) tune = { ...tune, better: true, params: { ...bot.params, ...R.tuned }, best: R.outSample.best, gain, split: R.split };
+  }
+  state._tune = tune; await Q('update bots set state=$1 where id=$2', [JSON.stringify(state), id]);
+  if (tune.better && !quiet) await notify('bot', `🔧 Better settings for ${bot.name}`, `On the last part of 3 years it never saw while tuning, the suggested settings did better (Sharpe +${tune.gain.toFixed(2)}). Review them on the bot page.`, { url: '/#/bot/' + id });
+  return tune;
+}
+// one bot per hour, each bot about once a month
+async function tuneJob() {
+  if (S.autoTune === false) return;
+  const list = (await rows("select * from bots where status='running' order by id")).filter(b => !STRATEGIES[b.strategy]?.auto && Object.keys(STRATEGIES[b.strategy]?.grid || {}).length);
+  const due = list.find(b => !(jsonOr(b.state, {})._tune?.ts > Date.now() - 30 * 864e5)); if (!due) return;
+  await tuneBot(due.id).catch(e => warn('tune', e.message));
+}
+GET('/api/bots/:id/tune', auth, async req => jsonOr((await row('select state from bots where id=$1', [+req.params.id]))?.state, {})._tune || null);
+POST('/api/bots/:id/tune', auth, async req => tuneBot(+req.params.id, { quiet: true }));
+POST('/api/bots/:id/tune/apply', auth, async req => {
+  const b = await row('select * from bots where id=$1', [+req.params.id]); if (!b) fail('That bot is gone', 404);
+  const state = jsonOr(b.state, {}), t = state._tune; if (!t?.better) fail('No suggestion to apply.');
+  const params = cleanParams(b.strategy, t.params); state._tune = { ...t, better: false, applied: Date.now() };
+  await Q('update bots set params=$1, state=$2 where id=$3', [JSON.stringify(params), JSON.stringify(state), b.id]);
+  await botLog(b.id, 'info', 'Settings updated from the re-test', Object.entries(params).map(([k, v]) => `${k}: ${v}`).join(', '));
+  return { ok: true, params };
+});
+POST('/api/bots/:id/tune/dismiss', auth, async req => { const b = await row('select * from bots where id=$1', [+req.params.id]); if (!b) fail('That bot is gone', 404); const state = jsonOr(b.state, {}); if (state._tune) state._tune.better = false; await Q('update bots set state=$1 where id=$2', [JSON.stringify(state), b.id]); return { ok: true }; });
+
+// ---------- the bot tournament ----------
+// Up to 20 variations of one strategy trade pretend money from the day they join (tested on the real prices since then).
+// Once a month the bottom of the table is replaced by mutations of the top 3. Adopt a winner as a real bot any time.
+const srng = seed => () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+let TOURN = null;
+async function tournaments() { if (!TOURN) TOURN = jsonOr(await kvGet('tournaments').catch(() => null), null) || []; return TOURN; }
+const saveTourn = () => kvSet('tournaments', JSON.stringify(TOURN));
+function mutate(key, base, R = Math.random) {
+  const st = STRATEGIES[key], out = { ...base };
+  for (const p of st.params || []) { if (p.choices || p.min == null) continue; if (R() < 0.5) continue; const span = (p.max - p.min) * 0.25, step = p.step || 1; out[p.k] = clamp(Math.round((num(out[p.k], p.def) + (R() * 2 - 1) * span) / step) * step, p.min, p.max); }
+  if (key === 'trend' && out.fast >= out.slow) out.fast = Math.max(5, Math.round(out.slow / 3));
+  return cleanParams(key, out);
+}
+async function scoreTournament(t) {
+  const { data } = await loadUniverse([...new Set([...t.syms, benchFor(t.syms)])]); const usable = t.syms.filter(s => data[s]); if (!usable.length) return;
+  const end = usable.map(s => data[s].d[data[s].d.length - 1]).sort().pop();
+  for (const e of t.entrants) {
+    // pretend money from the day it joined; before 5 trading days there's nothing to judge
+    const start = e.born > addIso(end, -7) ? addIso(end, -7) : e.born;
+    try { const r = runBacktest({ key: t.strategy, params: e.params, syms: usable, data, start, end, capital: 10000, maxPosPct: t.maxPosPct || 25 }), c = r.curve; e.ret = c.length ? c[c.length - 1][1] / 10000 - 1 : 0; let pk = -Infinity, dd = 0; for (const [, v] of c) { pk = Math.max(pk, v); dd = Math.min(dd, v / pk - 1); } e.dd = dd; e.trades = r.closed.length; e.days = c.length; } catch (x) { e.ret = e.ret ?? 0; }
+  }
+  t.entrants.sort((a, b) => (b.ret ?? -9) - (a.ret ?? -9)); t.scored = Date.now();
+}
+async function tournamentJob() {
+  const list = await tournaments(); if (!list.length) return;
+  for (const t of list) {
+    await scoreTournament(t).catch(e => warn('tournament', e.message));
+    // monthly cull: keep the top 3, refill with mutations of them
+    if (Date.now() - (t.roundAt || t.created) > 30 * 864e5 && t.entrants.length > 3) {
+      const top = t.entrants.slice(0, 3), today = etDate();
+      t.entrants = [...top, ...Array.from({ length: t.size - 3 }, (_, i) => ({ id: `${t.id}-${t.round + 1}-${i}`, params: mutate(t.strategy, top[i % 3].params), born: today, ret: 0 }))];
+      t.round++; t.roundAt = Date.now();
+      await notify('bot', `🏆 Tournament round ${t.round}: ${STRATEGIES[t.strategy].name}`, `The top 3 stay; ${t.size - 3} new variations of them joined.`, { url: '/#/tournament/' + t.id });
+    }
+  }
+  await saveTourn();
+}
+GET('/api/tournaments', auth, async () => (await tournaments()).map(t => ({ ...t, name: STRATEGIES[t.strategy]?.name || t.strategy })));
+POST('/api/tournaments', auth, async req => {
+  const b = req.body || {}, key = b.strategy, st = STRATEGIES[key]; if (!st || st.auto) fail('Pick a strategy');
+  const syms = await cleanBotSyms(b.syms || [], b.kinds); if (!syms.length) fail('Pick at least one symbol');
+  const list = await tournaments(); if (list.length >= 5) fail('You can run up to 5 tournaments at once. End one first.');
+  const size = clamp(Math.round(num(b.size, 12)), 6, 20), base = cleanParams(key, b.params || {}), today = etDate(), id = 't' + Date.now().toString(36);
+  const R = srng(1 + Date.now() % 2147483000), entrants = [{ id: id + '-0-0', params: base, born: today }, ...Array.from({ length: size - 1 }, (_, i) => ({ id: `${id}-0-${i + 1}`, params: mutate(key, base, R), born: today }))];
+  const t = { id, strategy: key, syms, size, created: Date.now(), round: 0, roundAt: Date.now(), maxPosPct: clamp(num(b.maxPosPct, 25), 5, 100), entrants };
+  list.push(t); await scoreTournament(t).catch(() => {}); await saveTourn(); return { ...t, name: st.name };
+});
+POST('/api/tournaments/:id/delete', auth, async req => { const list = await tournaments(); TOURN = list.filter(t => t.id !== req.params.id); await saveTourn(); return { ok: true }; });
+POST('/api/tournaments/:id/score', auth, async req => { const t = (await tournaments()).find(x => x.id === req.params.id); if (!t) fail('That tournament is gone', 404); await scoreTournament(t); await saveTourn(); return { ...t, name: STRATEGIES[t.strategy]?.name }; });
+
+// ---------- earnings: confirmed beats, fetched for the live bot (the lab tests the price pattern only) ----------
+async function earningsBeats(syms) {
+  const out = {}; if (!FINNHUB_KEY) return null; // no key: fall back to the price pattern alone
+  const from = etDate(Date.now() - 20 * 864e5), to = etDate();
+  for (const s of syms.filter(x => !isCrypto(x)).slice(0, 25)) {
+    out[s] = await cached('beat:' + s + ':' + to, 12 * 3600e3, async () => { const d = await fhApi(`calendar/earnings?from=${from}&to=${to}&symbol=${encodeURIComponent(s)}`, 1).catch(() => null); return (d?.earningsCalendar || []).filter(x => x.epsActual != null && x.epsEstimate != null).map(x => ({ date: x.date, surprise: x.epsEstimate ? (x.epsActual - x.epsEstimate) / Math.abs(x.epsEstimate) : 0 })).sort((a, b) => b.date.localeCompare(a.date))[0] || null; }).catch(() => null);
+  }
+  return out;
+}
+STRATEGIES.earnings = {
+  name: 'Earnings drift', short: 'Earnings', icon: 'chart', rebalance: 'none', markets: 'stocks',
+  desc: 'Buys a stock right after a strong earnings report: the company beat what analysts expected and the price jumped and held up the next day. Holds it for about five weeks. Stocks that beat tend to keep drifting up for weeks as the market slowly catches up (post-earnings drift). Live, it checks the real report dates and beats; in the lab only the price pattern can be tested.',
+  params: [{ k: 'beat', label: 'Beat estimates by at least (%)', def: 5, min: 0, max: 50 }, { k: 'gap', label: 'Price jump of at least (%)', def: 2, min: 0, max: 15, step: 0.5 }, { k: 'holdDays', label: 'Hold for (days)', def: 25, min: 5, max: 60 }, { k: 'stopAtr', label: 'Stop (ATRs)', def: 2.5, min: 1, max: 6, step: 0.5 }, { k: 'maxPositions', label: 'Most positions', def: 5, min: 1, max: 15 }],
+  grid: { gap: [1.5, 3], holdDays: [15, 25, 40] },
+  need: () => 60,
+  decide(ctx) {
+    const p = ctx.params, out = { weights: {}, stops: {}, notes: {} }, cand = [], slot = Math.min(ctx.maxW, 1 / p.maxPositions), beats = ctx.beats || null;
+    let held = 0;
+    for (const s of ctx.syms) {
+      const b = ctx.data[s], i = ctx.idx[s]; if (i == null || i < 55) continue;
+      const c = b.c[i], atr = IND.atr(b, 20, i - 1, b.memo), h = ctx.held[s];
+      if (h) { const days = h.days || 0; out.notes[s] = `Bought after earnings; day ${days} of ${p.holdDays}.${days >= p.holdDays ? ' Time is up: sell.' : ''}`; if (days < p.holdDays) { out.weights[s] = h.weight || slot; out.stops[s] = { trail: false, price: h.stopPx || h.entry - p.stopAtr * (atr || 0) }; held++; } continue; }
+      if (!atr) continue;
+      // the reaction: the report day's jump (one of the last 3 days) still holding today
+      let best = null; for (let k = Math.max(1, i - 2); k <= i; k++) { const g = b.c[k] / b.c[k - 1] - 1; if (!best || g > best.g) best = { g, k }; }
+      const holds = best && c >= b.c[best.k] * 0.985, trend = c > IND.sma(b.c, 50, i);
+      let ok = best && best.g * 100 >= p.gap && holds && trend, why = `Biggest move in 3 days ${best ? (best.g * 100).toFixed(1) : 0}%.`;
+      if (beats) { const e = beats[s]; const recent = e && e.date >= b.d[Math.max(0, i - 3)]; why += recent ? ` Reported ${e.date}: ${e.surprise >= 0 ? 'beat' : 'missed'} by ${Math.abs(e.surprise * 100).toFixed(0)}%.` : ' No report in the last few days.'; ok = ok && recent && e.surprise * 100 >= p.beat; }
+      out.notes[s] = why + (ok ? ' A real beat that the market liked: buy.' : '');
+      if (ok) cand.push({ s, g: best.g, atr, c });
+    }
+    cand.sort((a, b) => b.g - a.g);
+    for (const x of cand.slice(0, Math.max(0, p.maxPositions - held))) { out.weights[x.s] = slot; out.stops[x.s] = { trail: false, price: x.c - p.stopAtr * x.atr }; }
+    return out;
+  },
+};
 
 // =====================================================================
 // Login
@@ -4564,7 +4809,8 @@ GET('/api/bots/board', auth, async () => {
     const sells = await rows("select pnl from trd where wid=$1 and side='sell' and pnl is not null and ts >= $2", [b.wid, since]);
     const wins = sells.filter(x => +x.pnl > 0).length, trades = +(await row("select count(*) n from bot_log where bot_id=$1 and kind='trade'", [b.id])).n;
     const st0 = jsonOr(b.state, {}), s0 = st0._spy0 || spyAt(sinceD), spyRet = s0 && spyNow ? spyNow / s0 - 1 : null;
-    out.push({ id: b.id, broker: !!w.broker, name: bot.name, strategy: bot.strategy, status: bot.status, since: bot.created, days: Math.max(0, Math.round((Date.now() - bot.created) / 864e5)), start, value, ret: start ? value / start - 1 : 0, spy: spyRet, vs: spyRet == null ? null : (start ? value / start - 1 : 0) - spyRet, maxDD: dd, trades, closed: sells.length, win: sells.length ? wins / sells.length : null, realized: sells.reduce((t, x) => t + +x.pnl, 0) });
+    const rep = await botReport(b, spy).catch(() => null);
+    out.push({ ...(rep || {}), tune: jsonOr(b.state, {})._tune?.better ? true : false, id: b.id, broker: !!w.broker, name: bot.name, strategy: bot.strategy, status: bot.status, since: bot.created, days: Math.max(0, Math.round((Date.now() - bot.created) / 864e5)), start, value, ret: start ? value / start - 1 : 0, spy: spyRet, vs: spyRet == null ? null : (start ? value / start - 1 : 0) - spyRet, maxDD: dd, trades, closed: sells.length, win: sells.length ? wins / sells.length : null, realized: sells.reduce((t, x) => t + +x.pnl, 0) });
   }
   return out.sort((a, c) => c.ret - a.ret);
 });
@@ -4580,7 +4826,9 @@ GET('/api/bots/:id', auth, async req => {
   const queued = [...limOrders.values()].flat().filter(l => l.wid === b.wid).map(l => ({ id: l.id, sym: l.sym, side: l.side, kind: l.kind, amt: l.amt, units: l.units }));
   const auto = STRATEGIES[card.strategy]?.auto ? { since: state._since || null, alloc: state._alloc || {}, board: state._board || [], boardT: state._boardT || null, month: state._allocMonth || null, risk: state._risk || null, report: (await row("select * from bot_log where bot_id=$1 and kind='report' order by id desc limit 1", [b.id]).then(r => r && logJson(r))) || null } : null;
   const sources = { prices: { ...dataHealth }, news: buzzStatus, stocks: { ok: feeds.stocks.ok, err: feeds.stocks.err || null }, crypto: { ok: feeds.crypto.ok }, broker: BROKER ? { env: BROKER.env, ok: BROKER.ok, err: BROKER.err } : null };
-  return { ...card, positions: pos, log, last: last ? logJson(last) : null, queued, auto, sources, broker: !!card.wallet?.broker, live: !!card.wallet?.broker && BROKER?.env === 'live', strategyInfo: strategiesJson()[card.strategy] || null };
+  let spy = null; try { spy = await dailyBars('SPY'); } catch (e) {}
+  const report = STRATEGIES[card.strategy]?.auto ? null : await botReport(b, spy).catch(() => null), tune = state._tune || null;
+  return { ...card, positions: pos, log, last: last ? logJson(last) : null, queued, auto, sources, report, tune, tunable: !STRATEGIES[card.strategy]?.auto && !!Object.keys(STRATEGIES[card.strategy]?.grid || {}).length, broker: !!card.wallet?.broker, live: !!card.wallet?.broker && BROKER?.env === 'live', strategyInfo: strategiesJson()[card.strategy] || null };
 });
 const logJson = r => ({ id: r.id, ts: tsMs(r.ts), kind: r.kind, sym: r.sym, title: r.title, body: r.body, data: jsonOr(r.data) });
 function nextRunOf(bot) {
@@ -5461,6 +5709,10 @@ function startJobs() {
   every(fast ? 5e3 : 10 * 60e3, standbyPing, 'standby keep-awake'); setTimeout(() => standbyPing().catch(() => {}), 20e3);
   every(fast ? 5e3 : 10 * 60e3, backupJob, 'backups');
   every(fast ? 5e3 : 30 * 60e3, settleCouncil, 'council');
+  // smarter bots: weekly bench check, one re-tune an hour (each bot about monthly), tournaments scored every 6 hours
+  every(fast ? 30e3 : 24 * 3600e3, () => { if (!standbyPaused()) return benchCheck(); }, 'bench'); 
+  every(fast ? 600e3 : 3600e3, () => { if (!standbyPaused()) return tuneJob(); }, 'tune');
+  every(fast ? 20e3 : 6 * 3600e3, () => { if (!standbyPaused()) return tournamentJob(); }, 'tournaments');
   every(3600e3, () => Q("delete from bot_log where ts < now() - interval '2 years'"), 'bot log cleanup');
   every(3600e3, () => Q("delete from settle where settles < now() - interval '7 days'"), 'settlement cleanup');
   if (BROKER && STANDBY) warn('Standby copy has Alpaca keys: orders are blocked while standby is off, but keep real-money keys on one server only.');
@@ -5550,7 +5802,7 @@ const ICONS = {};
 const icon = (name, fn) => ICONS[name] || (ICONS[name] = fn());
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD646"/><stop offset=".5" stop-color="#FFA028"/><stop offset="1" stop-color="#FA5256"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="#1E1430"/><ellipse cx="31" cy="36" rx="18" ry="22" transform="rotate(30 31 36)" fill="url(#g)"/><path d="M20 41l6.5-6 5 3.5 9.5-10" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37 28.5h4.5V33" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="45" cy="11.5" rx="9" ry="4.6" transform="rotate(-24 45 11.5)" fill="#3BD68A"/></svg>`;
 let BUILD = 'dev', INDEX = null, INDEX_GZ = null;
-const APP_VERSION = '2.14.2'; // stamped by build.sh from package.json
+const APP_VERSION = '2.15.0'; // stamped by build.sh from package.json
 function loadIndex() {
   const file = path.join(__dirname, 'index.html');
   let html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<!doctype html><title>Mango</title><p>index.html is missing next to server.js.</p>';

@@ -20,6 +20,12 @@ Trade stocks, ETFs and crypto with practice money. You can also put strategies t
 - Limits are per bot: position size, trades per day, daily loss, a drawdown stop and a budget.
 - **Autopilot** tests 21 strategy tryouts on pretend money and backs the ones that are working. It also handles volatility targeting, a safety switch and a brake after a drop.
 - A strategy lab for backtesting up to 10 years with out-of-sample checks, and a leaderboard that compares every bot against simply holding the S&P 500.
+- **Report card** on every bot: average win and loss, payoff, and how it did against the S&P 500 over the last 60 days. A bot trailing by more than 3% is **benched** (you're notified; with Auto-bench on it's paused).
+- **Smarter exits** per bot: sell half once a position is up a set amount (default 15%), sell a trade that went nowhere after a set number of days (default 30), and tighten the stop as a trade wins (break-even at +6%, 7% under the high at +12%, 5% under at +20%).
+- **Portfolio guards** across all bots: a market mood switch (new buys at 70% size in a choppy market, 40% in a falling one), a correlation guard (no new position that moves almost exactly like one already held), and shared caps on one symbol, one sector and crypto.
+- **Monthly re-tune**: each bot's settings are re-tested on 3 years, scored only on the part they weren't tuned on. Better settings are suggested, never applied without you.
+- **Tournaments**: up to 20 variations of one strategy compete on real prices from the day they join. Each month the bottom is replaced by mutations of the top 3. Adopt any entrant as a bot.
+- **Earnings drift** strategy: buys after a real earnings beat that the market liked, holds about five weeks. Needs FINNHUB_KEY for the beat check live; the lab tests the price pattern.
 
 **Mango HQ**
 - Each bot is a character in one of four themed worlds: **Office**, **Starship**, **Village** or **Island**. Each world has its own rooms, furniture, people, sky and way of talking.
