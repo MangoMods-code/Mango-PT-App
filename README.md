@@ -83,6 +83,10 @@ Trade stocks, ETFs and crypto with practice money. You can also put strategies t
 
 ---
 
+## Releases
+
+Every version is on the repo's **Releases** page with what changed and a ready-to-run zip (`server.js`, `index.html`, `package.json`, `README.md` and an `.env.example` listing the settings). Download it, put it on any Node 20+ host with Postgres, fill in the variables and run `npm install` then `npm start`.
+
 ## Running it
 
 The repo holds the built app: `server.js` (the server) and `index.html` (the whole front end in one file). The host runs:
