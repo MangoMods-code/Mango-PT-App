@@ -2925,6 +2925,17 @@ function parkIdle(out, ctx, p, why) {
 }
 // how much each pick gets: spread over the picks there are (at least half the slots), capped per position
 const spreadW = (n, slots, maxW) => Math.min(maxW, 1 / Math.max(n, Math.ceil(slots / 2), 1));
+// fit to the wallet: never more positions than the money can fill with a useful size ($25, or twice the smallest trade)
+const MIN_SLOT = 25;
+const fitSlots = (ctx, n) => { const cap = ctx.capital || 0, min = Math.max(MIN_SLOT, num(ctx.params?.minPos, 0), (ctx.minTrade || 0) * 2); return cap > 0 ? Math.max(1, Math.min(n, Math.floor(cap / min))) : n; };
+// broad index, bond and gold funds are already spread out inside, so strategies built on them may hold more than the per-position limit
+const FUNDS = new Set(['SPY', 'VOO', 'IVV', 'VTI', 'QQQ', 'IWM', 'DIA', 'EFA', 'VEA', 'EEM', 'VWO', 'VT', 'ACWI', 'AGG', 'BND', 'IEF', 'TLT', 'SHY', 'TIP', 'GLD', 'IAU', 'SGOV', 'BIL', 'DBC', 'VNQ']);
+// tiny wallets: the per-position limit never forces a position smaller than a useful size
+const walletMaxW = (maxW, capital, minTrade = 0) => capital > 0 ? Math.max(maxW, Math.min(1, Math.max(MIN_SLOT, minTrade * 2) / capital)) : maxW;
+const fundCap = (ctx, s) => ctx.params?.fullFund !== 'off' && FUNDS.has(s) ? 1 : ctx.maxW;
+const FUND_P = { k: 'fullFund', label: 'Index funds can go past the per-position limit', def: 'on', choices: [['on', 'Yes (they are spread out inside)'], ['off', 'No']] };
+// strategies that park idle money need the T-bill fund in their list (not for crypto-only lists: it only trades in stock hours)
+const withPark = (syms, p) => p?.safe && p.safe !== 'cash' && syms.length && syms.some(x => !isCrypto(x)) && !syms.includes(p.safe) ? [...syms, p.safe] : syms;
 const SAFE_P = { k: 'safe', label: 'Idle money', def: 'SGOV', choices: [['SGOV', 'SGOV (T-bills)'], ['BIL', 'BIL (T-bills)'], ['cash', 'Cash']] };
 const FLOW_P = { k: 'flow', label: 'New money', def: 'flow', choices: [['flow', 'Top up what it holds'], ['rebal', 'Only on new trades']] };
 const STRATEGIES = {
@@ -2948,11 +2959,11 @@ const STRATEGIES = {
         else if (held) out.notes[s] += ' Exit: the trend broke.';
       }
       cand.sort((a, b) => (b.held ? 1 : 0) - (a.held ? 1 : 0) || b.q - a.q);
-      const picks = cand.slice(0, p.maxPositions);
+      const slots = fitSlots(ctx, p.maxPositions), picks = cand.slice(0, slots);
       // with only a couple of trends it doesn't go all in: the picks share at most picks/(half the slots) of the money
-      const frac = picks.length / Math.max(picks.length, Math.ceil(p.maxPositions / 2), 1);
+      const frac = picks.length / Math.max(picks.length, Math.ceil(slots / 2), 1);
       if (p.sizing === 'invvol') { const w = sizeWeights(picks.map(x => x.s), ctx, 1); for (const k in w) out.weights[k] = Math.min(ctx.maxW, w[k] * frac); }
-      else for (const x of picks) out.weights[x.s] = spreadW(picks.length, p.maxPositions, ctx.maxW);
+      else for (const x of picks) out.weights[x.s] = spreadW(picks.length, slots, ctx.maxW);
       for (const x of picks) { const hi = Math.max(x.c, ctx.held[x.s]?.high || 0); out.stops[x.s] = { trail: true, price: hi - p.atrMult * x.atr, atr: x.atr, mult: p.atrMult }; }
       parkIdle(out, ctx, p, `Money not in an uptrend waits in ${p.safe} (T-bills).`);
       return out;
@@ -2999,7 +3010,7 @@ const STRATEGIES = {
     grid: { entry: [5, 10, 15], exitLen: [3, 5, 10] },
     need: p => Math.max(p.trendLen || 0, 20) + 5,
     decide(ctx) {
-      const p = ctx.params, out = { weights: {}, stops: {}, notes: {} }, cand = [], slot = Math.min(ctx.maxW, 1 / p.maxPositions), cum = p.mode === 'cum', exitRsi = num(p.exitRsi, 101);
+      const p = ctx.params, out = { weights: {}, stops: {}, notes: {} }, cand = [], slots = fitSlots(ctx, p.maxPositions), slot = Math.min(ctx.maxW, 1 / slots), cum = p.mode === 'cum', exitRsi = num(p.exitRsi, 101);
       let held = 0;
       for (const s of ctx.syms) {
         if (s === p.safe) continue;
@@ -3017,7 +3028,7 @@ const STRATEGIES = {
         }
       }
       cand.sort((a, b) => a.r - b.r);
-      for (const x of cand.slice(0, Math.max(0, p.maxPositions - held))) { out.weights[x.s] = slot; if (p.stopAtr > 0) out.stops[x.s] = { trail: false, price: ctx.data[x.s].c[ctx.idx[x.s]] - p.stopAtr * IND.atr(ctx.data[x.s], 14, ctx.idx[x.s], ctx.data[x.s].memo) }; }
+      for (const x of cand.slice(0, Math.max(0, slots - held))) { out.weights[x.s] = slot; if (p.stopAtr > 0) out.stops[x.s] = { trail: false, price: ctx.data[x.s].c[ctx.idx[x.s]] - p.stopAtr * IND.atr(ctx.data[x.s], 14, ctx.idx[x.s], ctx.data[x.s].memo) }; }
       parkIdle(out, ctx, p, `Waiting for a dip: the money sits in ${p.safe} (T-bills) and is sold first when one comes.`);
       return out;
     },
@@ -3052,7 +3063,8 @@ const STRATEGIES = {
         }
       }
       cand.sort((a, b) => b.strength - a.strength);
-      for (const x of cand.slice(0, Math.max(0, p.maxPositions - held))) { out.weights[x.s] = x.w; out.stops[x.s] = { trail: false, price: x.c - p.atrMult * x.atr }; }
+      const slots = fitSlots(ctx, p.maxPositions);
+      for (const x of cand.slice(0, Math.max(0, slots - held))) { out.weights[x.s] = Math.max(x.w, Math.min(ctx.maxW, 1 / slots / 2)); out.stops[x.s] = { trail: false, price: x.c - p.atrMult * x.atr }; }
       parkIdle(out, ctx, p, `Money between breakouts waits in ${p.safe} (T-bills).`);
       return out;
     },
@@ -3064,8 +3076,11 @@ const STRATEGIES = {
     params: [{ k: 'weighting', label: 'Shares', def: 'equal', choices: [['equal', 'Equal'], ['invvol', 'Calmer assets get more']] }, { k: 'band', label: 'Rebalance when off by (points, 0 = always)', def: 5, min: 0, max: 50 }, FLOW_P],
     grid: {}, need: () => 64,
     decide(ctx) {
-      const p = ctx.params, out = { weights: {}, stops: {}, notes: {} }, live = ctx.syms.filter(s => ctx.idx[s] != null);
-      if (!live.length) return out;
+      const p = ctx.params, out = { weights: {}, stops: {}, notes: {} }, all = ctx.syms.filter(s => ctx.idx[s] != null);
+      if (!all.length) return out;
+      // a small wallet holds the first few in the list (what it already owns first) and adds the rest as it grows
+      const n = fitSlots(ctx, all.length), live = [...all.filter(s => ctx.held[s]), ...all.filter(s => !ctx.held[s])].slice(0, n);
+      if (n < all.length) out.regime = `A ${'$' + Math.round(ctx.capital)} wallet holds ${n} of the ${all.length} in its list, so each is a useful size. The rest join as the wallet grows.`;
       let w = {};
       if (p.weighting === 'invvol') { const iv = live.map(s => { const v = IND.vol(ctx.data[s].c, 63, ctx.idx[s]); return v > 0 ? 1 / v : 0; }), tot = iv.reduce((a, b) => a + b, 0) || 1; live.forEach((s, k) => { w[s] = iv[k] / tot; }); }
       else live.forEach(s => { w[s] = 1 / live.length; });
@@ -3076,7 +3091,7 @@ const STRATEGIES = {
       let drift = 0;
       for (const s of live) { const now = cur(s); drift = Math.max(drift, Math.abs(now - w[s])); out.weights[s] = w[s]; out.notes[s] = `Target ${(w[s] * 100).toFixed(0)}%, now ${(now * 100).toFixed(0)}%.`; }
       // only trim winners when something drifted past the band; otherwise just top up
-      if (band > 0 && tot > 0.5 && drift < band) { out.noTrim = true; out.regime = `Within ${(band * 100).toFixed(0)} points of target: no rebalance.`; }
+      if (band > 0 && tot > 0.5 && drift < band) { out.noTrim = true; out.regime = (out.regime ? out.regime + ' ' : '') + `Within ${(band * 100).toFixed(0)} points of target: no rebalance.`; }
       return out;
     },
   },
@@ -3084,68 +3099,97 @@ const STRATEGIES = {
 const SAFE = new Set(['TLT', 'IEF', 'SHY', 'BIL', 'SGOV', 'AGG', 'BND', 'TIP']);
 STRATEGIES.dual = {
   name: 'Dual momentum', short: 'Dual momentum', icon: 'swap', rebalance: 'monthly', markets: 'both',
-  desc: 'Once a month, holds whichever risky asset rose the most over the past year, but only if it beat bonds and is actually up. Otherwise it moves to bonds, or to cash if bonds are falling too. Gary Antonacci\'s rule: it sat out most of 2008 and 2022.',
-  params: [{ k: 'lookback', label: 'Look back (days)', def: 252, min: 63, max: 300 }, { k: 'top', label: 'Hold the top', def: 1, min: 1, max: 3 }],
+  overlays: { council: 'advise', mood: false, corr: false, exits: false, tighten: false, news: 'none', review: false, stops: false },
+  desc: 'Once a month, holds the risky fund with the strongest momentum (an average of its 1, 3, 6 and 12-month returns), but only if it beats T-bills. Otherwise it moves to bonds, or to T-bills if bonds are falling too. Index funds can hold all the money, since they are spread out inside. Gary Antonacci\'s rule: it sat out most of 2008 and 2022.',
+  params: [{ k: 'lookback', label: 'Look back (days, when not blended)', def: 252, min: 63, max: 300 }, { k: 'score', label: 'Momentum means', def: 'blend', choices: [['blend', 'Average of 1, 3, 6 and 12 months'], ['one', 'The look-back only']] }, { k: 'top', label: 'Hold the top', def: 1, min: 1, max: 3 }, SAFE_P, FUND_P],
   grid: { lookback: [126, 252], top: [1, 2] },
-  need: p => p.lookback + 5,
+  need: p => Math.max(p.lookback, p.score === 'blend' ? 252 : 0) + 5,
   decide(ctx) {
-    const p = ctx.params, out = { weights: {}, stops: {}, notes: {} }, risky = [], safe = [];
-    for (const s of ctx.syms) { const b = ctx.data[s], i = ctx.idx[s]; if (i == null || i < p.lookback) continue; const r = IND.ret(b.c, p.lookback, i, 0); if (r == null) continue; (SAFE.has(s) ? safe : risky).push({ s, r }); }
-    risky.sort((a, b) => b.r - a.r); safe.sort((a, b) => b.r - a.r);
-    const bond = safe[0], bar = Math.max(0, bond ? bond.r : 0);
-    const picks = risky.filter(x => x.r > bar).slice(0, p.top);
-    for (const x of risky) out.notes[x.s] = `${p.lookback}-day return ${pf(x.r, 1)}${bond ? ` vs bonds ${pf(bond.r, 1)}` : ''}.${picks.includes(x) ? ' Best and beating bonds: hold.' : ''}`;
-    for (const x of safe) out.notes[x.s] = `Bonds: ${p.lookback}-day return ${pf(x.r, 1)}.`;
-    if (picks.length) picks.forEach(x => { out.weights[x.s] = Math.min(ctx.maxW, 1 / picks.length); });
-    else if (bond && bond.r > 0) { out.weights[bond.s] = Math.min(ctx.maxW, 1); out.notes[bond.s] += ' Nothing risky beats bonds: hold bonds.'; }
-    ctx.regime = picks.length ? `Risk on: ${picks.map(x => x.s).join(', ')}` : bond && bond.r > 0 ? `Defensive: holding ${bond.s}` : 'Defensive: everything is falling, holding cash';
+    const p = ctx.params, out = { weights: {}, stops: {}, notes: {} }, risky = [], bonds = [], blend = p.score === 'blend';
+    const safe = p.safe && p.safe !== 'cash' && ctx.syms.includes(p.safe) ? p.safe : null;
+    const score = (b, i) => blend ? [21, 63, 126, 252].map(n => IND.ret(b.c, n, i)).reduce((t, x) => x == null ? null : t == null ? null : t + x / 4, 0) : IND.ret(b.c, p.lookback, i, 0);
+    let bill = 0;
+    for (const s of ctx.syms) {
+      const b = ctx.data[s], i = ctx.idx[s]; if (i == null || i < (blend ? 252 : p.lookback)) continue; const r = score(b, i); if (r == null) continue;
+      if (s === 'SGOV' || s === 'BIL') { bill = Math.max(bill, r); out.notes[s] = `T-bills: ${blend ? 'momentum' : `${p.lookback}-day return`} ${pf(r, 1)}. The bar the others must beat.`; continue; }
+      (SAFE.has(s) ? bonds : risky).push({ s, r });
+    }
+    risky.sort((a, b) => b.r - a.r); bonds.sort((a, b) => b.r - a.r);
+    const bond = bonds[0], bar = Math.max(bill, 0), what = blend ? 'Momentum (1-12 months)' : `${p.lookback}-day return`;
+    const picks = risky.filter(x => x.r > bar).slice(0, fitSlots(ctx, p.top));
+    for (const x of risky) out.notes[x.s] = `${what} ${pf(x.r, 1)} vs T-bills ${pf(bill, 1)}.${picks.includes(x) ? ' Strongest and beating T-bills: hold.' : ''}`;
+    for (const x of bonds) out.notes[x.s] = `Bonds: ${what.toLowerCase()} ${pf(x.r, 1)}.`;
+    if (picks.length) picks.forEach(x => { out.weights[x.s] = Math.min(fundCap(ctx, x.s), 1 / picks.length); });
+    else if (bond && bond.r > bar) { out.weights[bond.s] = fundCap(ctx, bond.s); out.notes[bond.s] += ' Nothing risky beats T-bills: hold bonds.'; }
+    parkIdle(out, ctx, p, `Money not in a fund waits in ${p.safe} (T-bills).`);
+    out.regime = picks.length ? `Risk on: ${picks.map(x => x.s).join(', ')}` : bond && bond.r > bar ? `Defensive: holding ${bond.s}` : `Defensive: everything is falling, ${safe ? `waiting in ${safe}` : 'holding cash'}`;
+    ctx.regime = out.regime;
     return out;
   },
 };
 STRATEGIES.lowvol = {
   name: 'Low volatility', short: 'Low volatility', icon: 'shield', rebalance: 'monthly', markets: 'stocks',
-  desc: 'Once a month, holds the calmest stocks in the list (the smallest daily swings over the past 3 months) that are above their 200-day average. Calm stocks have historically earned about as much as wild ones with much smaller drops.',
-  params: [{ k: 'volLen', label: 'Measure swings over (days)', def: 63, min: 20, max: 126 }, { k: 'trendLen', label: 'Trend filter (days)', def: 200, min: 0, max: 300 }, { k: 'top', label: 'Hold the calmest', def: 5, min: 1, max: 10 }],
+  overlays: { mood: false, corr: false, exits: false, tighten: false, council: 'advise', review: false },
+  desc: 'Once a month, holds the calmest stocks in the list (the smallest daily swings over the past 3 months) that are above their 200-day average and up over the past 6 months. Calmer ones get a bigger share, a holding stays until it falls well down the ranking, and new money tops up without selling. Empty slots wait in T-bills. Calm stocks have historically earned about as much as wild ones with much smaller drops.',
+  params: [{ k: 'volLen', label: 'Measure swings over (days)', def: 63, min: 20, max: 126 }, { k: 'trendLen', label: 'Trend filter (days)', def: 200, min: 0, max: 300 }, { k: 'top', label: 'Hold the calmest', def: 5, min: 1, max: 10 }, { k: 'momLen', label: 'Must be up over (days, 0 = off)', def: 126, min: 0, max: 252 }, { k: 'sizing', label: 'Sizing', def: 'invvol', choices: [['invvol', 'Calmer gets more'], ['equal', 'Equal']] }, { k: 'buffer', label: 'Keep a holding until it drops below rank (top +)', def: 2, min: 0, max: 10 }, SAFE_P, FLOW_P],
   grid: { volLen: [42, 63], top: [3, 5] },
-  need: p => Math.max(p.volLen, p.trendLen || 0) + 5,
+  need: p => Math.max(p.volLen, p.trendLen || 0, num(p.momLen, 0)) + 5,
   decide(ctx) {
-    const p = ctx.params, out = { weights: {}, stops: {}, notes: {} }, ranked = [];
-    for (const s of ctx.syms) { const b = ctx.data[s], i = ctx.idx[s]; if (i == null || i < Math.max(p.volLen, p.trendLen)) continue; const v = IND.vol(b.c, p.volLen, i), up = !p.trendLen || b.c[i] > IND.sma(b.c, p.trendLen, i); if (v == null) continue; ranked.push({ s, v, up }); }
+    const p = ctx.params, out = { weights: {}, stops: {}, notes: {}, noTrim: p.flow === 'flow' }, ranked = [], momLen = num(p.momLen, 0), buf = num(p.buffer, 0);
+    for (const s of ctx.syms) {
+      if (s === p.safe) continue;
+      const b = ctx.data[s], i = ctx.idx[s]; if (i == null || i < Math.max(p.volLen, p.trendLen, momLen)) continue;
+      const v = IND.vol(b.c, p.volLen, i), up = (!p.trendLen || b.c[i] > IND.sma(b.c, p.trendLen, i)) && (!momLen || (IND.ret(b.c, momLen, i) ?? 0) > 0); if (v == null) continue; ranked.push({ s, v, up });
+    }
     ranked.sort((a, b) => a.v - b.v);
-    const picks = ranked.filter(x => x.up).slice(0, p.top).map(x => x.s);
-    ranked.forEach((x, k) => { out.notes[x.s] = `Daily swings ${(x.v * 100).toFixed(2)}% (calmest ${k + 1} of ${ranked.length})${x.up ? '' : ', below its trend'}.${picks.includes(x.s) ? ' Calm and rising: hold.' : ''}`; });
-    picks.forEach(s => { out.weights[s] = Math.min(ctx.maxW, 1 / Math.max(picks.length, p.top)); });
+    const ok = ranked.filter(x => x.up), top = fitSlots(ctx, p.top);
+    // holdings keep their place while they're inside the top + buffer; new names fill what's left
+    const keep = ok.filter((x, k) => ctx.held[x.s] && k < top + buf).slice(0, top), picks = [...keep, ...ok.filter(x => !keep.includes(x))].slice(0, top);
+    ranked.forEach((x, k) => { out.notes[x.s] = `Daily swings ${(x.v * 100).toFixed(2)}% (calmest ${k + 1} of ${ranked.length})${x.up ? '' : ', not in an uptrend'}.${picks.includes(x) ? (keep.includes(x) && !ok.slice(0, top).includes(x) ? ' Still close to the top: keep.' : ' Calm and rising: hold.') : ''}`; });
+    const share = picks.length / Math.max(picks.length, top);
+    if (p.sizing === 'invvol') { const iv = picks.map(x => 1 / x.v), t = iv.reduce((a, b) => a + b, 0) || 1; picks.forEach((x, k) => { out.weights[x.s] = Math.min(ctx.maxW, iv[k] / t * share); }); }
+    else picks.forEach(x => { out.weights[x.s] = Math.min(ctx.maxW, 1 / Math.max(picks.length, top)); });
+    parkIdle(out, ctx, p, `Slots without a calm, rising stock wait in ${p.safe} (T-bills).`);
     return out;
   },
 };
 STRATEGIES.drift = {
   name: 'News jump drift', short: 'Jump drift', icon: 'bolt', rebalance: 'none', markets: 'stocks',
-  desc: 'Buys a stock the day after it jumps on heavy volume and closes near its high, which usually means good earnings or big news, and holds it for about a month. Big surprises tend to keep drifting the same way as the market slowly catches up (post-earnings drift).',
-  params: [{ k: 'jump', label: 'Jump of at least (ATRs)', def: 2, min: 1, max: 6, step: 0.5 }, { k: 'volMult', label: 'Volume of at least (x normal)', def: 1.5, min: 1, max: 5, step: 0.25 }, { k: 'holdDays', label: 'Hold for (days)', def: 20, min: 3, max: 60 }, { k: 'stopAtr', label: 'Stop (ATRs)', def: 2.5, min: 1, max: 6, step: 0.5 }, { k: 'maxPositions', label: 'Most positions', def: 5, min: 1, max: 15 }],
+  overlays: { mood: false, corr: false, exits: false, tighten: false, council: 'advise', news: 'severe' },
+  desc: 'Buys a stock within a few days after it jumps on heavy volume and closes near its high (usually good earnings or big news), as long as it is holding most of the jump. Holds it for about a month. Big surprises tend to keep drifting the same way as the market slowly catches up. Works best on a long list of stocks, since jumps are rare. Waiting money sits in T-bills.',
+  params: [{ k: 'jump', label: 'Jump of at least (ATRs)', def: 1.5, min: 1, max: 6, step: 0.5 }, { k: 'volMult', label: 'Volume of at least (x normal)', def: 1.5, min: 1, max: 5, step: 0.25 }, { k: 'within', label: 'Buy within (days after the jump)', def: 3, min: 1, max: 10 }, { k: 'holdDays', label: 'Hold for (days)', def: 20, min: 3, max: 60 }, { k: 'stopAtr', label: 'Stop (ATRs)', def: 2.5, min: 1, max: 6, step: 0.5 }, { k: 'maxPositions', label: 'Most positions', def: 5, min: 1, max: 15 }, SAFE_P],
   grid: { jump: [1.5, 2.5], holdDays: [10, 20, 40] },
   need: () => 60,
   decide(ctx) {
-    const p = ctx.params, out = { weights: {}, stops: {}, notes: {} }, cand = [], slot = Math.min(ctx.maxW, 1 / p.maxPositions);
+    const p = ctx.params, out = { weights: {}, stops: {}, notes: {} }, cand = [], slots = fitSlots(ctx, p.maxPositions), slot = Math.min(ctx.maxW, 1 / slots), within = num(p.within, 1);
     let held = 0;
     for (const s of ctx.syms) {
+      if (s === p.safe) continue;
       const b = ctx.data[s], i = ctx.idx[s]; if (i == null || i < 55) continue;
-      const c = b.c[i], atr = IND.atr(b, 20, i - 1, b.memo), h = ctx.held[s];
+      const c = b.c[i], h = ctx.held[s];
       if (h) {
-        const days = h.days || 0;
+        const days = h.days || 0, atr = IND.atr(b, 20, i, b.memo);
         out.notes[s] = `Bought after a jump; day ${days} of ${p.holdDays}.${days >= p.holdDays ? ' Time is up: sell.' : ''}`;
         if (days < p.holdDays) { out.weights[s] = h.weight || slot; out.stops[s] = { trail: false, price: h.stopPx || h.entry - p.stopAtr * (atr || 0) }; held++; }
         continue;
       }
-      if (!atr) continue;
-      const move = (c - b.c[i - 1]) / atr, range = b.h[i] - b.l[i], nearHigh = range > 0 ? (c - b.l[i]) / range : 1;
-      let avgV = 0; for (let k = i - 20; k < i; k++) avgV += b.v[k] || 0; avgV /= 20;
-      const volOk = !avgV || !b.v[i] || b.v[i] >= p.volMult * avgV, trend = c > IND.sma(b.c, 50, i);
-      const ok = move >= p.jump && volOk && nearHigh >= 0.7 && trend;
-      out.notes[s] = `Today ${move >= 0 ? '+' : ''}${move.toFixed(1)} ATRs${avgV && b.v[i] ? `, volume ${(b.v[i] / avgV).toFixed(1)}x normal` : ''}.${ok ? ' A strong jump on heavy volume: buy.' : ''}`;
-      if (ok) cand.push({ s, move, atr, c });
+      // the jump: a finished day in the last few (today's volume isn't complete yet while the market is open)
+      let ev = null;
+      for (let k = i - 1; k >= Math.max(25, i - within); k--) {
+        const atr = IND.atr(b, 20, k - 1, b.memo); if (!atr) continue;
+        const move = (b.c[k] - b.c[k - 1]) / atr, range = b.h[k] - b.l[k], nearHigh = range > 0 ? (b.c[k] - b.l[k]) / range : 1;
+        let avgV = 0, n = 0; for (let q = k - 20; q < k; q++) if (b.v?.[q] > 0) { avgV += b.v[q]; n++; } avgV = n ? avgV / n : 0;
+        const volX = avgV && b.v?.[k] ? b.v[k] / avgV : null, volOk = volX == null || volX >= p.volMult;
+        if (move >= p.jump && volOk && nearHigh >= 0.6 && b.c[k] > IND.sma(b.c, 50, k)) { ev = { k, move, volX, atr, base: b.c[k - 1], top: b.c[k] }; break; }
+      }
+      if (!ev) { out.notes[s] = `No jump on heavy volume in the last ${within} day${within === 1 ? '' : 's'}.`; continue; }
+      const kept = (c - ev.base) / (ev.top - ev.base), ago = i - ev.k, ok = kept >= 0.5;
+      out.notes[s] = `Jumped ${ev.move.toFixed(1)} ATRs ${ago === 1 ? 'yesterday' : `${ago} days ago`}${ev.volX ? ` on ${ev.volX.toFixed(1)}x volume` : ''}, holding ${Math.round(kept * 100)}% of it.${ok ? ' Buy the drift.' : ' Gave back too much: skip.'}`;
+      if (ok) cand.push({ s, move: ev.move * kept, atr: ev.atr, c });
     }
     cand.sort((a, b) => b.move - a.move);
-    for (const x of cand.slice(0, Math.max(0, p.maxPositions - held))) { out.weights[x.s] = slot; out.stops[x.s] = { trail: false, price: x.c - p.stopAtr * x.atr }; }
+    for (const x of cand.slice(0, Math.max(0, slots - held))) { out.weights[x.s] = slot; out.stops[x.s] = { trail: false, price: x.c - p.stopAtr * x.atr }; }
+    parkIdle(out, ctx, p, `Waiting for a jump: the money sits in ${p.safe} (T-bills).`);
     return out;
   },
 };
@@ -3158,53 +3202,62 @@ const monthPos = (d, dates, i) => { // trading days left in this month after i, 
 };
 STRATEGIES.tom = {
   name: 'Turn of the month', short: 'Turn of month', icon: 'calendar', rebalance: 'none', markets: 'stocks',
-  desc: 'Holds index ETFs only from the last trading day of each month through the first few days of the next, and sits in cash the rest of the time. Paychecks, 401(k) contributions and fund rebalancing push money into stocks then; for decades a big part of the market\'s gains came on these few days.',
-  params: [{ k: 'before', label: 'Buy this many days before month end', def: 1, min: 1, max: 4 }, { k: 'after', label: 'Sell after this many days into the month', def: 3, min: 1, max: 6 }, { k: 'trendLen', label: 'Only above this average (days, 0 = off)', def: 0, min: 0, max: 300 }],
+  overlays: { council: 'off', mood: false, corr: false, exits: false, tighten: false, news: 'none', review: false, stops: false },
+  desc: 'Holds index funds only from the last trading day of each month through the first few days of the next, and waits in T-bills the rest of the time, so it trades about twice a month and earns interest in between. Paychecks, 401(k) contributions and fund rebalancing push money into stocks then; for decades a big part of the market\'s gains came on these few days. Index funds can hold all the money.',
+  params: [{ k: 'before', label: 'Buy this many days before month end', def: 1, min: 1, max: 4 }, { k: 'after', label: 'Sell after this many days into the month', def: 3, min: 1, max: 6 }, { k: 'trendLen', label: 'Only above this average (days, 0 = off)', def: 0, min: 0, max: 300 }, SAFE_P, FUND_P],
   grid: { before: [1, 2], after: [2, 3, 4] },
   need: p => Math.max(25, p.trendLen || 0) + 5,
   decide(ctx) {
     const p = ctx.params, out = { weights: {}, stops: {}, notes: {} }, picks = [];
+    let next = null;
     for (const s of ctx.syms) {
+      if (s === p.safe) continue;
       const b = ctx.data[s], i = ctx.idx[s]; if (i == null) continue;
       const d = b.d[i]; let { left, into } = monthPos(d, b.d, i);
       // The last bar is today: the calendar, not the data, says how many trading days are left.
-      if (i === b.d.length - 1) { let [y, m, dd] = d.split('-').map(Number), n = 0; left = 0; while (n++ < 10) { [y, m, dd] = nextTradingDay(y, m, dd); if (`${y}-${String(m).padStart(2, '0')}` !== d.slice(0, 7)) break; left++; } }
+      if (i === b.d.length - 1) { let [y, m, dd] = d.split('-').map(Number), n = 0; left = 0; while (n++ < 10) { [y, m, dd] = nextTradingDay(y, m, dd); if (`${y}-${String(m).padStart(2, '0')}` !== d.slice(0, 7)) break; left++; } if (left >= p.before) next = left - p.before + 1; }
       const trendOk = !p.trendLen || b.c[i] > IND.sma(b.c, p.trendLen, i);
       const inWindow = left < p.before || into < p.after; // sold at the close of day 'after'
-      out.notes[s] = left < p.before ? `${left === 0 ? 'Last trading day' : `${left + 1} trading days left`} of the month: the window is open.` : into <= p.after ? `Day ${into} of the month: still in the window.` : `Day ${into} of the month: outside the window, so cash.`;
+      out.notes[s] = left < p.before ? `${left === 0 ? 'Last trading day' : `${left + 1} trading days left`} of the month: the window is open.` : into <= p.after ? `Day ${into} of the month: still in the window.` : `Day ${into} of the month: outside the window.`;
       if (inWindow && !trendOk) out.notes[s] += ` Below its ${p.trendLen}-day average, so it sits this one out.`;
       if (inWindow && trendOk) picks.push(s);
     }
-    picks.forEach(s => { out.weights[s] = Math.min(ctx.maxW, 1 / picks.length); });
+    const n = Math.min(picks.length, fitSlots(ctx, picks.length));
+    picks.slice(0, n).forEach(s => { out.weights[s] = Math.min(fundCap(ctx, s), 1 / n); });
+    parkIdle(out, ctx, p, `Outside the window the money earns T-bill interest in ${p.safe}.`);
+    ctx.regime = out.regime = picks.length ? 'The turn-of-the-month window is open: invested.' : next ? `Waiting for the window: it opens in ${next} trading day${next === 1 ? '' : 's'}.` : 'Outside the window.';
     return out;
   },
 };
 // Snap-back: very stretched below its Bollinger band in an uptrend, sell at the middle.
 STRATEGIES.snapback = {
   name: 'Snap-back', short: 'Snap-back', icon: 'refresh', rebalance: 'none', markets: 'both',
-  desc: 'Buys when something in a long uptrend closes far below its 20-day Bollinger band (more than 2 standard deviations under its average) and sells when it gets back to the average, or after 10 days. Panics in strong assets usually snap back fast. A disaster stop limits the ones that keep falling.',
-  params: [{ k: 'bands', label: 'Below the band by (std devs)', def: 2, min: 1, max: 3.5, step: 0.25 }, { k: 'len', label: 'Average over (days)', def: 20, min: 10, max: 50 }, { k: 'trendLen', label: 'Trend filter (days)', def: 200, min: 0, max: 300 }, { k: 'maxDays', label: 'Most days to hold', def: 10, min: 3, max: 30 }, { k: 'stopAtr', label: 'Disaster stop (ATRs)', def: 3, min: 1, max: 8, step: 0.5 }, { k: 'maxPositions', label: 'Most positions', def: 4, min: 1, max: 10 }],
-  grid: { bands: [1.75, 2.25], len: [10, 20] },
+  overlays: { mood: false, corr: false, exits: false, tighten: false, council: 'advise', news: 'severe', review: false },
+  desc: 'Buys when something in a long uptrend closes far below its 20-day Bollinger band and near the low of its day, and sells when it gets back to its average, or after 10 days. Panics in strong assets usually snap back fast. A disaster stop limits the ones that keep falling. Works best on a spread of index and sector ETFs; waiting money sits in T-bills.',
+  params: [{ k: 'bands', label: 'Below the band by (std devs)', def: 1.75, min: 1, max: 3.5, step: 0.25 }, { k: 'len', label: 'Average over (days)', def: 20, min: 10, max: 50 }, { k: 'trendLen', label: 'Trend filter (days)', def: 200, min: 0, max: 300 }, { k: 'maxDays', label: 'Most days to hold', def: 10, min: 3, max: 30 }, { k: 'stopAtr', label: 'Disaster stop (ATRs)', def: 3, min: 1, max: 8, step: 0.5 }, { k: 'maxPositions', label: 'Most positions', def: 4, min: 1, max: 10 }, { k: 'exitZ', label: 'Sell at (std devs from average)', def: 0, min: -1, max: 2, step: 0.25 }, SAFE_P],
+  grid: { bands: [1.5, 2], len: [10, 20] },
   need: p => Math.max(p.trendLen || 0, p.len) + 5,
   decide(ctx) {
-    const p = ctx.params, out = { weights: {}, stops: {}, notes: {} }, cand = [], slot = Math.min(ctx.maxW, 1 / p.maxPositions);
+    const p = ctx.params, out = { weights: {}, stops: {}, notes: {} }, cand = [], slots = fitSlots(ctx, p.maxPositions), slot = Math.min(ctx.maxW, 1 / slots), exitZ = num(p.exitZ, 0);
     let held = 0;
     for (const s of ctx.syms) {
+      if (s === p.safe) continue;
       const b = ctx.data[s], i = ctx.idx[s]; if (i == null || i < Math.max(p.trendLen, p.len)) continue;
       const c = b.c[i], m = IND.sma(b.c, p.len, i); let v = 0; for (let k = i - p.len + 1; k <= i; k++) v += (b.c[k] - m) ** 2;
       const sd = Math.sqrt(v / p.len), z = sd > 0 ? (c - m) / sd : 0, h = ctx.held[s], trend = !p.trendLen || c > IND.sma(b.c, p.trendLen, i);
       if (h) {
-        const exit = c >= m || (h.days || 0) >= p.maxDays;
-        out.notes[s] = `${z.toFixed(1)} std devs from its ${p.len}-day average, day ${h.days || 0}.${exit ? (c >= m ? ' Back to average: sell.' : ' Held too long: sell.') : ' Waiting for the snap-back.'}`;
+        const back = z >= exitZ, exit = back || (h.days || 0) >= p.maxDays;
+        out.notes[s] = `${z.toFixed(1)} std devs from its ${p.len}-day average, day ${h.days || 0}.${exit ? (back ? ' Snapped back: sell.' : ' Held too long: sell.') : ' Waiting for the snap-back.'}`;
         if (!exit) { out.weights[s] = h.weight || slot; out.stops[s] = { trail: false, price: h.stopPx || h.entry - p.stopAtr * (IND.atr(b, 14, i, b.memo) || 0) }; held++; }
       } else {
-        const ok = z <= -p.bands && trend;
-        out.notes[s] = `${z.toFixed(1)} std devs from its ${p.len}-day average${p.trendLen ? `, ${trend ? 'above' : 'below'} its ${p.trendLen}-day trend` : ''}.${ok ? ' Stretched in an uptrend: buy.' : ''}`;
+        const range = b.h[i] - b.l[i], low = range > 0 ? (c - b.l[i]) / range <= 0.5 : true, ok = z <= -p.bands && trend && low;
+        out.notes[s] = `${z.toFixed(1)} std devs from its ${p.len}-day average${p.trendLen ? `, ${trend ? 'above' : 'below'} its ${p.trendLen}-day trend` : ''}.${ok ? ' Stretched in an uptrend: buy.' : z <= -p.bands && trend && !low ? ' Stretched, but it already bounced off the low today: skip.' : ''}`;
         if (ok) cand.push({ s, z, c, atr: IND.atr(b, 14, i, b.memo) || 0 });
       }
     }
     cand.sort((a, b) => a.z - b.z);
-    for (const x of cand.slice(0, Math.max(0, p.maxPositions - held))) { out.weights[x.s] = slot; out.stops[x.s] = { trail: false, price: x.c - p.stopAtr * x.atr }; }
+    for (const x of cand.slice(0, Math.max(0, slots - held))) { out.weights[x.s] = slot; out.stops[x.s] = { trail: false, price: x.c - p.stopAtr * x.atr }; }
+    parkIdle(out, ctx, p, `Waiting for a snap-back setup: the money sits in ${p.safe} (T-bills).`);
     return out;
   },
 };
@@ -3305,7 +3358,7 @@ function runBacktest({ key, params, syms, data, start, end, capital = 10000, pro
     const acts = st.rebalance === 'none' || rebalanceDay;
     const flow = p.flow === 'flow';
     if (tradable.length && acts) {
-      const ctx = { syms: tradable, data: series, idx, params: p, held, bench, maxW: maxPosPct / 100, capital: eq0 };
+      const ctx = { syms: tradable, data: series, idx, params: p, held, bench, maxW: walletMaxW(maxPosPct / 100, eq0), capital: eq0 };
       const dec = st.decide(ctx);
       // exits first
       for (const s of Object.keys(pos)) if (tradable.includes(s) && !(dec.weights[s] > 0)) trade(s, 'sell', pos[s].qty, series[s].c[ptr[s]], d, 'signal');
@@ -3377,9 +3430,9 @@ const ppy = syms => syms.every(isCrypto) ? 365 : 252;
 const downsamplePts = (pts, n = 260) => { if (pts.length <= n) return pts; const out = [], step = (pts.length - 1) / (n - 1); for (let i = 0; i < n; i++) out.push(pts[Math.round(i * step)]); return out; };
 async function backtest(o) {
   const key = o.strategy, st = STRATEGIES[key]; if (!st) fail('Pick a strategy'); if (st.auto) fail('Autopilot picks its own strategies, so it is tested by its tryouts instead');
-  const syms = [...new Set((o.syms || []).map(cleanSym).filter(Boolean))].slice(0, 40); if (!syms.length) fail('Pick at least one symbol');
+  const params0 = cleanParams(key, o.params), syms = withPark([...new Set((o.syms || []).map(cleanSym).filter(Boolean))].slice(0, 40), params0); if (!syms.length) fail('Pick at least one symbol');
   for (const s of syms) if (!assets.has(s)) addAsset(s, CRYPTO_DEFAULT.includes(s) || o.kinds?.[s] === 'crypto' ? 'crypto' : 'stock');
-  const params = cleanParams(key, o.params), years = clamp(num(o.years, 3), 1, 8), capital = clamp(num(o.capital, 10000), 25, 1e8), addWeekly = clamp(num(o.addWeekly, 0), 0, 1e6);
+  const params = params0, years = clamp(num(o.years, 3), 1, 8), capital = clamp(num(o.capital, 10000), 25, 1e8), addWeekly = clamp(num(o.addWeekly, 0), 0, 1e6);
   const bench = benchFor(syms);
   const { data, missing } = await loadUniverse([...new Set([...syms, bench])]);
   const usable = syms.filter(s => data[s]); if (!usable.length) fail('No price history for those symbols right now');
@@ -3474,6 +3527,7 @@ async function runBot(id, { manual = false, dry = false, night = false } = {}) {
 // its old default to the new one (a value you changed yourself is never touched) and add symbols the new version needs.
 // strategy versions: when a strategy gets better, bots on it upgrade themselves on their next run (and at boot).
 // set: { param: [old default, new default] } only changes params still at the old default; addSyms adds symbols the new version needs.
+const DRIFT_SYMS = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'META', 'AVGO', 'TSLA', 'JPM', 'V', 'LLY', 'COST', 'NFLX', 'WMT', 'XOM', 'AMD', 'ORCL', 'CRM', 'ADBE', 'UNH', 'HD', 'MA', 'BAC', 'PG'];
 const DIP_ETFS = ['SPY', 'QQQ', 'IWM', 'DIA', 'XLK', 'XLF', 'XLV', 'XLE', 'XLY', 'XLI'];
 const withSafe = p => p.safe && p.safe !== 'cash' ? [p.safe] : [];
 const STRAT_VER = {
@@ -3494,9 +3548,29 @@ const STRAT_VER = {
   hold: [{ v: 2, title: 'Really just holds', note: 'Buy and hold 2: no stops, vetoes, mood cuts or news filters any more, so it stays invested. New money goes to whatever is furthest below its share, and it only rebalances when something drifts more than 5 points off target. Shares can be equal or by calmness.',
     changes: ['No stops, vetoes, mood or news filters', 'New money fills the most underweight holding', 'Rebalances only past a 5-point drift', 'Equal shares or calmer assets get more'],
     set: { weighting: [undefined, 'equal'], band: [undefined, 5], flow: [undefined, 'flow'] } }],
+  dual: [{ v: 2, title: 'Fully invested, steadier signal', note: 'Dual momentum 2: momentum is now the average of the 1, 3, 6 and 12-month returns (fewer false switches), the bar to beat is T-bills instead of zero, and when nothing beats them the money waits in SGOV. Index funds can hold all of the money instead of being capped at the per-position limit, which had left most of it in cash. Market mood, news, correlation, stops and the council veto no longer interfere with its monthly switch.',
+    changes: ['Was only 25% invested: index funds now get all the money', 'Momentum = average of 1, 3, 6 and 12 months', 'Must beat T-bills, not just zero', 'Waits in SGOV when everything is falling', 'No more stops, mood or news cuts on its monthly switch'],
+    set: { score: [undefined, 'blend'], safe: [undefined, 'SGOV'], fullFund: [undefined, 'on'] }, addSyms: withSafe }],
+  lowvol: [{ v: 2, title: 'Calm and rising', note: 'Low volatility 2: also needs to be up over 6 months, calmer stocks get a bigger share, a holding stays while it is within 2 places of the top, new money tops up without selling, and empty slots wait in SGOV. Market mood, correlation, take-profit, time stop and the daily AI trim no longer touch it.',
+    changes: ['Must also be up over the last 6 months', 'Calmer stocks get a bigger share', 'Keeps a holding within 2 places of the top', 'New money tops up without selling', 'Empty slots wait in SGOV'],
+    set: { momLen: [undefined, 126], sizing: [undefined, 'invvol'], buffer: [undefined, 2], safe: [undefined, 'SGOV'], flow: [undefined, 'flow'] }, addSyms: withSafe }],
+  drift: [{ v: 2, title: 'Actually catches the jumps', note: 'News jump drift 2: it only looked at today, when the day\'s volume isn\'t complete yet, so it never saw a jump. Now it looks for a jump on heavy volume in the last 3 finished days and buys if the stock is still holding at least half of it. The jump needed is 1.5 ATRs instead of 2, and the list grows to 24 big stocks if it was short. Mood, correlation, news mood, take-profit, time stop and the council veto no longer block it. Waiting money sits in SGOV.',
+    changes: ['Was blind to jumps (today\'s volume is incomplete): now checks the last 3 finished days', 'Buys if it\'s still holding half the jump', 'Jump of 1.5 ATRs instead of 2', 'Trades 24 big stocks if the list was short', 'Not blocked by mood, news mood or the council; waits in SGOV'],
+    set: { jump: [2, 1.5], within: [undefined, 3], safe: [undefined, 'SGOV'] }, addSyms: (p, syms) => [...(syms.filter(x => !isCrypto(x)).length < 12 ? DRIFT_SYMS : []), ...withSafe(p)] }],
+  tom: [{ v: 2, title: 'Earns interest between windows', note: 'Turn of the month 2: between windows the money earns T-bill interest in SGOV instead of sitting in cash, and index funds can hold all of it (it was capped at 25% each). The council, mood, news, correlation guard and stops are off for it: the correlation guard was blocking its second fund. It only trades from the last trading day of the month through day 3, so quiet weeks are normal; the bot page says when the next window opens.',
+    changes: ['Waits in SGOV (T-bills) between windows', 'Index funds can hold all the money', 'Correlation guard no longer blocks its second fund', 'No council, mood, news or stops in the way', 'Shows when the next window opens'],
+    set: { safe: [undefined, 'SGOV'], fullFund: [undefined, 'on'] }, addSyms: withSafe }],
+  snapback: [{ v: 2, title: 'Cleaner panics, more of them', note: 'Snap-back 2: buys at 1.75 standard deviations under the band instead of 2 (more trades), only when it closed in the lower half of its day (still panicking), sells when it is back at its average, and waits in SGOV between setups. It trades 10 index and sector ETFs. Mood, news mood, correlation and the council veto no longer block it.',
+    changes: ['1.75 std devs instead of 2: more trades', 'Must close near the low of its day', 'Trades 10 index and sector ETFs', 'Waits in SGOV between setups', 'Not blocked by mood, news mood, correlation or the council'],
+    set: { bands: [2, 1.75], exitZ: [undefined, 0], safe: [undefined, 'SGOV'] }, addSyms: (p, syms) => [...(syms.some(isCrypto) ? [] : DIP_ETFS), ...withSafe(p)] }],
+  earnings: [{ v: 2, title: 'Fits any wallet', note: 'Earnings drift 2: holds fewer positions when the wallet is small so each one is a useful size, and the market mood, correlation guard, news mood, take-profit, time stop and council veto no longer block it.',
+    changes: ['Fewer, bigger positions in a small wallet', 'Not blocked by mood, news mood or the council'] }],
 };
+// every strategy: fewer positions when the wallet is small, so nothing is bought in dust-sized pieces
+const FIT = { v: 3, title: 'Fits any wallet', changes: ['Holds fewer positions when the wallet is small, so each one is at least $25', 'In a tiny wallet the per-position limit stretches to that minimum'] };
+for (const k of ['trend', 'rsi2', 'breakout', 'hold']) STRAT_VER[k].push({ ...FIT, note: `${{ trend: 'Trend follower', rsi2: 'Dip buyer', breakout: 'Breakout', hold: 'Buy and hold' }[k]} 3: holds fewer positions when the wallet is small so each one is at least $25, and in a tiny wallet the per-position limit stretches to that minimum.` });
 const V1 = { title: 'Original', changes: [] };
-const stratVersion = k => { const l = STRAT_VER[k] || []; const last = l[l.length - 1]; return last ? { v: last.v, title: last.title, changes: last.changes || [], history: l.map(x => ({ v: x.v, title: x.title })) } : { v: 1, ...V1, history: [] }; };
+const stratVersion = k => { const l = STRAT_VER[k] || []; const last = l[l.length - 1]; return last ? { v: last.v, title: last.title, changes: last.changes || [], history: l.map(x => ({ v: x.v, title: x.title, changes: x.changes || [] })) } : { v: 1, ...V1, history: [] }; };
 async function upgradeBot(b) {
   const steps = STRAT_VER[b.strategy]; if (!steps || !STRATEGIES[b.strategy]) return b;
   const state = jsonOr(b.state, {}), have = state._sv || 1, todo = steps.filter(x => x.v > have); if (!todo.length) return b;
@@ -3581,10 +3655,12 @@ async function runBotInner(id, { manual, dry, night }) {
   // which of the shared safety layers this strategy uses: a dip buyer shouldn't be blocked by bad-mood news, buy and hold shouldn't be stopped out
   const OV = { council: 'veto', mood: true, corr: true, exits: true, tighten: true, news: 'all', review: true, stops: true, ...(st.overlays || {}), ...(bot.params?.overlays || {}) };
   const binding = OV.council === 'veto' || !!m.councilVeto, parkSym = bot.params?.safe && bot.params.safe !== 'cash' ? bot.params.safe : null;
-  const ctx = { syms: tradable, data: series, idx, params: bot.params, held, bench, maxW: m.maxPosPct / 100, capital, beats: bot.strategy === 'earnings' ? await earningsBeats(tradable).catch(() => null) : null };
+  const ctx = { syms: tradable, data: series, idx, params: bot.params, held, bench, maxW: walletMaxW(m.maxPosPct / 100, capital, m.minTrade), capital, minTrade: m.minTrade, beats: bot.strategy === 'earnings' ? await earningsBeats(tradable).catch(() => null) : null };
   // the market's mood (S&P 500 for stocks, Bitcoin for crypto) scales new buys; Autopilot and Buy and hold manage their own exposure
   const moodOn = S.moodSwitch !== false && !st.auto && OV.mood, mood = moodOn ? { stock: moodOf(series.SPY, 'The S&P 500'), crypto: moodOf(series.BTC, 'Bitcoin') } : null;
   const dec = st.auto ? await autopilotDecide(bot, state, series, today, { dry, manual, dd, capital }) : rebalanceDue ? st.decide(ctx) : { weights: Object.fromEntries(Object.entries(held).map(([s, h]) => [s, h.weight || (h.qty * (priceOf(s) || h.entry)) / capital])), stops: {}, notes: Object.fromEntries(Object.keys(held).map(s => [s, 'Holding until the next monthly rebalance.'])) };
+  if (!st.auto && dec.regime && !ctx.regime) ctx.regime = dec.regime;
+  if (ctx.maxW > m.maxPosPct / 100 + 1e-9) log.risk.push(`Small wallet: a position can be up to ${Math.round(ctx.maxW * 100)}% (instead of ${m.maxPosPct}%) so each one is at least $${Math.max(25, m.minTrade * 2)}.`);
   if (st.auto) { ctx.regime = dec.regime; for (const k of Object.keys(dec.weights)) dec.weights[k] = Math.min(dec.weights[k], m.maxPosPct / 100); }
   if (!rebalanceDue) log.risk.push(`${st.name} rebalances monthly; next on the first trading day of next month. Holding as is.`);
   // ---- news and social check before buying ----
@@ -3612,7 +3688,8 @@ async function runBotInner(id, { manual, dry, night }) {
     }
     if (bz && held[s] && OV.news !== 'none' && m.sellOnSevere && bz.flags.includes('severe_news')) { wt = 0; d.why.push('Selling: serious negative news and "sell on bad news" is on.'); }
     const parking = s === bot.params?.safe && bot.params.safe !== 'cash';
-    if (mood && !parking && wt * capital > have + 1) { const md = isCrypto(s) ? mood.crypto : mood.stock; if (md && md.scale < 1) { const w0 = wt; wt = (have + (wt * capital - have) * md.scale) / capital; moodCut += w0 - wt; d.why.push(md.line); d.mood = md.k; } }
+    // weak mood: new positions start smaller and held ones aren't added to, so repeated runs don't nibble
+    if (mood && !parking && wt * capital > have + 1) { const md = isCrypto(s) ? mood.crypto : mood.stock; if (md && md.scale < 1) { const w0 = wt; wt = held[s] ? have / capital : (have + (wt * capital - have) * md.scale) / capital; moodCut += w0 - wt; d.why.push(md.line); d.mood = md.k; } }
     // correlation guard: don't open a position that moves almost in lockstep with one it already holds
     if (S.corrGuard !== false && OV.corr && !parking && !held[s] && wt > 0 && series[s]) { for (const hs of Object.keys(held)) { if (hs === s) continue; const r = corr60(series[s], series[hs]); if (r != null && r >= (S.corrMax ?? 0.9)) { wt = 0; d.why.push(`Skipped buying: over the last 60 days it moved almost exactly like ${hs} (correlation ${r.toFixed(2)}), which it already holds.`); break; } } }
     if (stoppedToday.has(s) && !held[s] && wt > 0) { wt = 0; d.why.push('Not buying back today: its stop loss sold it earlier today.'); }
@@ -3705,13 +3782,15 @@ async function runBotInner(id, { manual, dry, night }) {
       return r;
     } catch (e) { log.skips.push(`${s}: ${e.message}`); await botLog(id, 'error', `Couldn't ${side} ${s}`, e.message, null, s); return null; }
   };
+  // the T-bill spot is sold down outside rebalance days only to pay for a brand-new position (daily strategies: whenever their targets say so)
+  const parkFree = !!parkSym && (st.rebalance === 'none' || Object.values(decisions).some(x => x.sym !== parkSym && !held[x.sym] && x.target > 0));
   for (const d of Object.values(decisions)) {
     const px = priceOf(d.sym); if (!px || !held[d.sym]) continue;
     if (!(isCrypto(d.sym) || tradable.includes(d.sym))) continue;
     const targetV = d.target * capital, diff = targetV - d.have;
     if (d.target <= 0) { d.action = 'sell'; await placeOrder(d.sym, 'sell', { pct: 100 }, `${st.short}: ${d.why.find(w => /^Selling/.test(w)) || d.why[0] || d.note}`); delete state[d.sym]; }
     else if (d.aiTrim) { d.action = 'trim'; await placeOrder(d.sym, 'sell', { qty: held[d.sym].qty / 2 }, `${st.short}: ${d.why.find(w => /^Trimming/.test(w))}`); if (d.takeProfit) state[d.sym] = { ...(state[d.sym] || {}), tookProfit: today }; }
-    else if (((rebalanceDue && st.rebalance !== 'none' && !dec.noTrim) || d.sym === parkSym) && -diff > Math.max(m.minTrade, capital * band)) { d.action = 'trim'; await placeOrder(d.sym, 'sell', { qty: Math.min(held[d.sym].qty, -diff / px) }, `${st.short}: rebalance down to ${pct0n(d.target)} of the wallet`); }
+    else if (((rebalanceDue && st.rebalance !== 'none' && !dec.noTrim) || (d.sym === parkSym && parkFree)) && -diff > Math.max(m.minTrade, capital * band)) { d.action = 'trim'; await placeOrder(d.sym, 'sell', { qty: Math.min(held[d.sym].qty, -diff / px) }, `${st.short}: rebalance down to ${pct0n(d.target)} of the wallet`); }
   }
   const exposure = S.sharedRisk === false ? null : await botExposure(brk).catch(() => null);
   // topping up between rebalances: all the spare cash goes to the single most underweight holding (one small trade, not several)
@@ -4207,6 +4286,7 @@ async function botExposure(broker) {
 // how many dollars a buy of `sym` may add without breaking the shared caps (Infinity when there's no cap)
 function sharedRoom(ex, sym) {
   if (sym === 'SGOV' || sym === 'BIL') return Infinity; // T-bill parking isn't a concentration risk
+  if (FUNDS.has(sym) && S.sharedRisk !== false && ex?.total > 0 && ex.n >= 2) return Math.max(0, (Math.max(S.maxSymPct ?? 30, 60)) / 100 * ex.total - (ex.bySym[sym] || 0)); // broad index funds are spread out inside: a looser cap
   if (S.sharedRisk === false || !(ex?.total > 0) || ex.n < 2) return Infinity; // one bot alone is governed by its own limits
   const symCap = (S.maxSymPct ?? 30) / 100 * ex.total, sec = sectorOf(sym), secCap = (S.maxSectorPct ?? 50) / 100 * ex.total;
   let room = symCap - (ex.bySym[sym] || 0);
@@ -4346,12 +4426,13 @@ async function earningsBeats(syms) {
 }
 STRATEGIES.earnings = {
   name: 'Earnings drift', short: 'Earnings', icon: 'chart', rebalance: 'none', markets: 'stocks',
+  overlays: { mood: false, corr: false, exits: false, tighten: false, council: 'advise', news: 'severe' },
   desc: 'Buys a stock right after a strong earnings report: the company beat what analysts expected and the price jumped and held up the next day. Holds it for about five weeks. Stocks that beat tend to keep drifting up for weeks as the market slowly catches up (post-earnings drift). Live, it checks the real report dates and beats; in the lab only the price pattern can be tested.',
   params: [{ k: 'beat', label: 'Beat estimates by at least (%)', def: 5, min: 0, max: 50 }, { k: 'gap', label: 'Price jump of at least (%)', def: 2, min: 0, max: 15, step: 0.5 }, { k: 'holdDays', label: 'Hold for (days)', def: 25, min: 5, max: 60 }, { k: 'stopAtr', label: 'Stop (ATRs)', def: 2.5, min: 1, max: 6, step: 0.5 }, { k: 'maxPositions', label: 'Most positions', def: 5, min: 1, max: 15 }],
   grid: { gap: [1.5, 3], holdDays: [15, 25, 40] },
   need: () => 60,
   decide(ctx) {
-    const p = ctx.params, out = { weights: {}, stops: {}, notes: {} }, cand = [], slot = Math.min(ctx.maxW, 1 / p.maxPositions), beats = ctx.beats || null;
+    const p = ctx.params, out = { weights: {}, stops: {}, notes: {} }, cand = [], slots = fitSlots(ctx, p.maxPositions), slot = Math.min(ctx.maxW, 1 / slots), beats = ctx.beats || null;
     let held = 0;
     for (const s of ctx.syms) {
       const b = ctx.data[s], i = ctx.idx[s]; if (i == null || i < 55) continue;
@@ -4367,7 +4448,7 @@ STRATEGIES.earnings = {
       if (ok) cand.push({ s, g: best.g, atr, c });
     }
     cand.sort((a, b) => b.g - a.g);
-    for (const x of cand.slice(0, Math.max(0, p.maxPositions - held))) { out.weights[x.s] = slot; out.stops[x.s] = { trail: false, price: x.c - p.stopAtr * x.atr }; }
+    for (const x of cand.slice(0, Math.max(0, slots - held))) { out.weights[x.s] = slot; out.stops[x.s] = { trail: false, price: x.c - p.stopAtr * x.atr }; }
     return out;
   },
 };
@@ -5302,7 +5383,7 @@ POST('/api/bots', auth, async req => {
     syms = apSyms(params.markets);
     for (const s of syms) if (!assets.has(s)) addAsset(s, AP_CRYPTO.includes(s) || CRYPTO_DEFAULT.includes(s) ? 'crypto' : 'stock');
     Promise.allSettled(syms.map(s => trackAsset(s, AP_CRYPTO.includes(s) ? 'crypto' : 'stock'))).catch(() => {});
-  } else syms = await cleanBotSyms(b.syms, b.kinds || {});
+  } else syms = withPark(await cleanBotSyms(b.syms, b.kinds || {}), params);
   let wid = +b.wallet || 0;
   if (!wid) {
     if (+(await row('select count(*) n from wallets')).n >= 25) fail('You have 25 wallets already. Pick an existing wallet for this bot or archive one.');
@@ -5346,14 +5427,14 @@ PATCH('/api/bots/:id', auth, async req => {
     // A bot's own wallet is named after it; keep the two in step.
     if (x.renameWallet !== false) await Q('update wallets set name=$1 where id=$2 and name=$3', [nm, bot.wid, bot.name]).then(r => r.rowCount && loadWalletMeta()).catch(() => {});
   }
-  if (x.params) { const np = cleanParams(bot.strategy, { ...bot.params, ...x.params }); set('params', JSON.stringify(np)); if (STRATEGIES[bot.strategy]?.auto) set('syms', JSON.stringify(apSyms(np.markets))); }
+  if (x.params) { const np = cleanParams(bot.strategy, { ...bot.params, ...x.params }); set('params', JSON.stringify(np)); if (STRATEGIES[bot.strategy]?.auto) set('syms', JSON.stringify(apSyms(np.markets))); else if (!x.syms) { const ws = withPark(bot.syms, np); if (ws.length !== bot.syms.length) set('syms', JSON.stringify(ws)); } }
   if (x.mandate) {
     const nm = cleanMandate(x.mandate, bot.mandate), w = await row('select broker from wallets where id=$1', [bot.wid]);
     if (w?.broker && BROKER?.env === 'live' && nm.allowLive && !bot.mandate.allowLive && x.confirm !== 'REAL MONEY') fail('Type REAL MONEY to let this bot trade real money.');
     if (w?.broker && BROKER?.env === 'live' && nm.allowLive && !(nm.liveCap > 0)) fail('Set a real-money cap first.');
     set('mandate', JSON.stringify(nm));
   }
-  if (x.syms && !STRATEGIES[bot.strategy]?.auto) set('syms', JSON.stringify(await cleanBotSyms(x.syms, x.kinds || {})));
+  if (x.syms && !STRATEGIES[bot.strategy]?.auto) set('syms', JSON.stringify(withPark(await cleanBotSyms(x.syms, x.kinds || {}), { ...bot.params, ...(x.params || {}) })));
   const changes = [];
   if (x.status && ['running', 'paused'].includes(x.status) && x.status !== bot.status) {
     set('status', x.status); changes.push(x.status === 'running' ? 'Resumed' : 'Paused');
@@ -6627,7 +6708,7 @@ const ICONS = {};
 const icon = (name, fn) => ICONS[name] || (ICONS[name] = fn());
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD646"/><stop offset=".5" stop-color="#FFA028"/><stop offset="1" stop-color="#FA5256"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="#1E1430"/><ellipse cx="31" cy="36" rx="18" ry="22" transform="rotate(30 31 36)" fill="url(#g)"/><path d="M20 41l6.5-6 5 3.5 9.5-10" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37 28.5h4.5V33" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="45" cy="11.5" rx="9" ry="4.6" transform="rotate(-24 45 11.5)" fill="#3BD68A"/></svg>`;
 let BUILD = 'dev', INDEX = null, INDEX_GZ = null;
-const APP_VERSION = '3.3.0'; // stamped by build.sh from package.json
+const APP_VERSION = '3.4.0'; // stamped by build.sh from package.json
 function loadIndex() {
   const file = path.join(__dirname, 'index.html');
   let html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<!doctype html><title>Mango</title><p>index.html is missing next to server.js.</p>';
