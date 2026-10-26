@@ -986,6 +986,13 @@ button.tile:active { transform: scale(.98); }
 .panic-card .cell:first-child .title { color: var(--dn); font-weight: 750; }
 .cost-row { grid-template-columns: 120px 1fr 50px; }
 .dca-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 6px; } .dca-row > div { display: flex; flex-direction: column; gap: 2px; } .dca-row span { font-size: 12px; color: var(--mu); } .dca-row b { font-size: 18px; }
+/* what's new */
+.wn-rel { padding: 16px; border-radius: var(--r-xl, 20px); background: var(--card); margin-bottom: 12px; }
+.wn-rel.old { opacity: .85; }
+.wn-head { display: flex; justify-content: space-between; align-items: baseline; } .wn-head b { color: var(--ac); font-family: var(--font-num); } .wn-head span { font-size: 12px; color: var(--mu); }
+.wn-rel h3 { margin: 4px 0 8px; font-size: 19px; }
+.wn-gt { font-weight: 700; font-size: 14px; margin-top: 10px; }
+.wn-g ul { margin: 4px 0 0; padding-left: 18px; } .wn-g li { margin: 4px 0; line-height: 1.45; color: var(--tx2, var(--tx)); font-size: 15px; }
 
 /* ---------- Paper / Alpaca sides ---------- */
 .space-sw { display: inline-flex; gap: 4px; padding: 4px; border-radius: 14px; background: var(--card); box-shadow: var(--hi); margin: 2px 0 10px; }
@@ -1325,7 +1332,7 @@ button.tile:active { transform: scale(.98); }
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '3.1.0';
+const BUILD = '__BUILD__', APP_VERSION = '3.2.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -4457,16 +4464,16 @@ function autoSections(b) {
   const days = a.since ? Math.max(0, Math.round((Date.now() - Date.parse(a.since + 'T12:00:00')) / 864e5)) : 0;
   return `<div class="section-h"><h2>The plan</h2><span class="t-foot">${a.month ? 'For ' + new Date(a.month + '-15T12:00').toLocaleDateString('en-US', { month: 'long' }) : 'Not made yet'}</span></div>
     <div class="card">${used.length ? `<div class="stack plan-stack">${used.map((t, i) => `<i style="flex:${t.alloc};background:${COL[i % COL.length]}"></i>`).join('')}${cash > 0.005 ? `<i style="flex:${cash};background:var(--card3)"></i>` : ''}</div>
-      <div class="plan-list">${used.map((t, i) => `<div class="plan-row"><i style="background:${COL[i % COL.length]}"></i><span class="grow">${h(t.label)}</span><b class="n">${Math.round(t.alloc * 100)}%</b></div>`).join('')}${cash > 0.005 ? `<div class="plan-row"><i style="background:var(--card3)"></i><span class="grow">Cash</span><b class="n">${Math.round(cash * 100)}%</b></div>` : ''}</div>` : `<p class="t-foot" style="margin:0">${a.board.length ? 'Holding cash: none of the strategies has a good enough record right now. It checks again every day.' : 'Its first plan shows up here after the first decision.'}</p>`}
-      ${a.risk ? `<div class="plan-risk">${a.risk.vol != null ? `<span>${icon('activity')}Swinging ${Math.round(a.risk.vol * 100)}% a year${a.risk.scale < 0.999 ? ` · holding ${Math.round(a.risk.scale * 100)}% of the plan` : ''}</span>` : ''}${a.risk.stocksOff ? `<span class="dn">${icon('shield')}Safety switch on for stocks</span>` : ''}${a.risk.cryptoOff ? `<span class="dn">${icon('shield')}Safety switch on for crypto</span>` : ''}${a.risk.brake ? `<span class="dn">${icon('pause')}Brake on: holding half until it recovers</span>` : ''}</div>` : ''}
+      <div class="plan-list">${used.map((t, i) => `<div class="plan-row"><i style="background:${COL[i % COL.length]}"></i><span class="grow">${h(t.label)}</span><b class="n">${Math.round(t.alloc * 100)}%</b></div>`).join('')}${cash > 0.005 ? `<div class="plan-row"><i style="background:var(--card3)"></i><span class="grow">${a.risk?.parked ? "Not used: waits in T-bills" : "Cash"}</span><b class="n">${Math.round(cash * 100)}%</b></div>` : ''}</div>` : `<p class="t-foot" style="margin:0">${a.board.length ? 'Holding cash: none of the strategies has a good enough record right now. It checks again every day.' : 'Its first plan shows up here after the first decision.'}</p>`}
+      ${a.risk ? `<div class="plan-risk">${a.risk.vol != null ? `<span>${icon('activity')}Swinging ${Math.round(a.risk.vol * 100)}% a year${a.risk.scale < 0.999 ? ` · holding ${Math.round(a.risk.scale * 100)}% of the plan` : ''}</span>` : ''}${a.risk.stocksOff ? `<span class="dn">${icon('shield')}Safety switch on for stocks</span>` : ''}${a.risk.cryptoOff ? `<span class="dn">${icon('shield')}Safety switch on for crypto</span>` : ''}${a.risk.brake ? `<span class="dn">${icon('pause')}Brake on: holding half until it recovers</span>` : ''}${a.risk.parked ? `<span>${icon('shield')}${Math.round(a.risk.parked * 100)}% waiting in T-bills</span>` : ''}${a.risk.mood ? `<span>${icon('chart')}Stocks are ${({ up: 'rising', choppy: 'choppy', down: 'falling' })[a.risk.mood]}${a.risk.moodCrypto ? `, crypto ${({ up: 'rising', choppy: 'choppy', down: 'falling' })[a.risk.moodCrypto]}` : ''}</span>` : ''}</div>` : ''}
       ${a.report ? `<button class="link mt12" data-act="botReport" data-id="${a.report.id}">Read the ${h(a.report.title.toLowerCase())}</button>` : ''}</div>
     ${board.length ? `<div class="section-h"><h2>Tryouts</h2><span class="t-foot">${days ? `${days} day${days === 1 ? '' : 's'} live` : 'Live from today'}</span></div>
-    <div class="group">${board.map(t => `<div class="cell tryout ${t.alloc > 0 ? 'on' : ''}"><div class="main"><div class="title">${h(t.label)}</div><div class="sub">${t.alloc > 0 ? `<b class="ac">${Math.round(t.alloc * 100)}% of the money</b> · ` : t.eligible ? 'Not needed this month · ' : '<span class="dn">Not working lately</span> · '}${t.cooling ? '<span class="ac">Cooling off</span> · ' : ''}6 months ${pct(t.ret6m * 100, 1)} · Sharpe ${t.sharpe.toFixed(2)} · since start ${pct(t.live * 100, 1)}</div></div>${sparkSvg(t.spark, { w: 64, h: 28 })}</div>`).join('')}</div>
+    <div class="group">${board.map(t => `<div class="cell tryout ${t.alloc > 0 ? 'on' : ''}"><div class="main"><div class="title">${h(t.label)}</div><div class="sub">${t.alloc > 0 ? `<b class="ac">${Math.round(t.alloc * 100)}% of the money</b> · ` : t.eligible ? 'Not needed this month · ' : t.badMood ? '<span class="dn">Sits out: weak in this kind of market</span> · ' : t.mutant && !t.eligible ? `<span class="ac">New variant, on trial since ${fmtDate(t.born + 'T12:00')}</span> · ` : '<span class="dn">Not working lately</span> · '}${t.cooling ? '<span class="ac">Cooling off</span> · ' : ''}6 months ${pct(t.ret6m * 100, 1)} · Sharpe ${t.sharpe.toFixed(2)}${t.fit != null ? ` · in ${({ up: 'rising', choppy: 'choppy', down: 'falling' })[t.mood] || 'this'} markets ${t.fit.toFixed(2)}` : ''} · since start ${pct(t.live * 100, 1)}</div></div>${sparkSvg(t.spark, { w: 64, h: 28 })}</div>`).join('')}</div>
     <p class="note">Each idea runs in a couple of versions, and one idea never gets more than the per-strategy limit however many versions it has. Each tryout trades its own pretend $10,000 with real fees. Scores use the last 6 months (and the last year, for stability): return per unit of risk, docked for big drops. A tryout whose own results are sliding is cooled off, and one that moves in lockstep with a pick is skipped. A strategy needs a Sharpe above 0.3 and no real loss in the last 3 months to get money, and starts at most 25% until it has 4 weeks of live results.</p>` : ''}`;
 }
 ACT.botReport = el => {
   const p = curBot(); const l = p?.d?.auto?.report?.id === +el.dataset.id ? p.d.auto.report : (p?.d?.log || []).concat(p?.logAll || []).find(x => x.id === +el.dataset.id); if (!l) return;
-  sheet({ title: l.title, tall: true, html: `<div class="t-foot">${fmtDT(l.ts)}</div><div class="group mt12">${(l.data?.board || []).slice().sort((a, b) => (b.alloc || 0) - (a.alloc || 0) || b.score - a.score).map(t => { const was = l.data.prev?.[t.k]; return `<div class="cell"><div class="main"><div class="title">${h(t.label)}</div><div class="sub">6 months ${pct(t.ret6m * 100, 1)} · 3 months ${pct(t.ret3m * 100, 1)} · Sharpe ${t.sharpe.toFixed(2)} · biggest drop ${pct0(Math.abs(t.dd) * 100, 1)}${t.eligible ? '' : ' · not working lately'}</div></div><div class="trail col" style="align-items:flex-end"><b class="n">${t.alloc ? Math.round(t.alloc * 100) + '%' : '–'}</b>${was != null && Math.round(was * 100) !== Math.round((t.alloc || 0) * 100) ? `<span class="t-cap">was ${Math.round(was * 100)}%</span>` : ''}</div></div>`; }).join('')}</div>` });
+  sheet({ title: l.title, tall: true, html: `<div class="t-foot">${fmtDT(l.ts)}</div>${l.data?.note ? `<div class="callout mt12">${icon('sparkle')}<div><b>The Analyst:</b> ${h(l.data.note)}</div></div>` : ''}<div class="group mt12">${(l.data?.board || []).slice().sort((a, b) => (b.alloc || 0) - (a.alloc || 0) || b.score - a.score).map(t => { const was = l.data.prev?.[t.k]; return `<div class="cell"><div class="main"><div class="title">${h(t.label)}</div><div class="sub">6 months ${pct(t.ret6m * 100, 1)} · 3 months ${pct(t.ret3m * 100, 1)} · Sharpe ${t.sharpe.toFixed(2)} · biggest drop ${pct0(Math.abs(t.dd) * 100, 1)}${t.eligible ? '' : ' · not working lately'}</div></div><div class="trail col" style="align-items:flex-end"><b class="n">${t.alloc ? Math.round(t.alloc * 100) + '%' : '–'}</b>${was != null && Math.round(was * 100) !== Math.round((t.alloc || 0) * 100) ? `<span class="t-cap">was ${Math.round(was * 100)}%</span>` : ''}</div></div>`; }).join('')}</div>` });
 };
 
 // ---------- health ----------
@@ -8212,6 +8219,71 @@ PAGES.costs = {
 };
 
 // ===================================================================
+// What's new: the changelog, shown once after an update and any time from Settings.
+// Newest first. Each release: version, date, a one-line headline and grouped notes.
+// ===================================================================
+const CHANGELOG = [
+  { v: '3.2.0', d: '2026-10-26', title: 'Autopilot 2, self-upgrading bots, and this page', groups: [
+    ['Autopilot 2', [
+      '32 strategy tryouts, up from 21: momentum with T-bills, 3-month sector rotation, trend and breakouts on ETFs, gold and bond trend, dip buying in big stocks, earnings reactions, calm ETFs, crypto momentum, Bitcoin and Ether dips, and holding Bitcoin and Ether.',
+      'Reads the market\'s mood (rising, choppy or falling) and favors the tryouts that have done well on days like today. A tryout that does badly in this kind of market sits out.',
+      'Splits money by score per unit of risk, so steadier strategies get more. You can switch to by-score or evenly.',
+      'Checks the plan weekly and only switches when more than 15% of the money would move, plus the monthly re-plan.',
+      'Breeds variations: each month a variation of each of its 3 best tryouts joins on trial. Variants are judged only on what happened after they were born, and they leave if they do worse than their parent after 4 months.',
+      'Money no strategy needs (and whatever the safety switch, swing target or brake holds back) waits in SGOV T-bills instead of cash.',
+      'Small accounts: at most one strategy per $50 of money, and positions too small to be worth a trade are skipped, so a $150 wallet isn\'t split into dust.',
+      'The Analyst writes a short note on each new plan: what it is betting on, the biggest risk, and what to watch.',
+    ]],
+    ['Bots upgrade themselves', [
+      'When a strategy gets better, every bot that uses it switches to the new version automatically. Settings you changed yourself are kept, and the journal says what changed.',
+      'Your existing momentum bots now use the small-account version (top up with new money, keep band, $25 smallest position, SGOV when the market is weak), and SGOV was added to their symbols.',
+    ]],
+    ['This page', ['What\'s new shows up once after each update. Find it any time in Settings.']],
+  ] },
+  { v: '3.1.0', d: '2026-10-26', title: 'Momentum rotation for small accounts', groups: [
+    ['Small accounts', ['"Add every week" on every bot: paper wallets get the deposit automatically; Alpaca bots get a bigger budget and you deposit at Alpaca.', 'The lab and the new-bot test can add weekly deposits: see what you put in, what it grew to, and the same deposits into SPY.']],
+    ['Momentum rotation', ['Holds fewer positions when there is less money, keeps winners longer, tops up with new money without selling, and parks money in SGOV when the market is weak.', 'A "Small account preset" button on the New bot screen.']],
+  ] },
+  { v: '3.0.0', d: '2026-10-26', title: 'Four new worlds', groups: [
+    ['Mango HQ', ['Underwater, Castle, Cyberpunk and Mars, each with its own sky, ground, scenery, ambient life, costumes, speech and weather.', 'Council names per theme now use a scrolling chip row.']],
+  ] },
+  { v: '2.19.0', d: '2026-10-26', title: 'Life in HQ', groups: [
+    ['Mango HQ', ['Market events: crash alarm, win party, earnings day.', 'Weather and seasons that follow the market and the calendar.', 'Bot levels, XP and gear.', 'Hire and farewell ceremonies, visitors, photo mode, and a timelapse replay with speed controls.']],
+  ] },
+  { v: '2.18.0', d: '2026-10-26', title: 'Real-money safety and costs', groups: [
+    ['Safety', ['Real-money rules a bot must pass before going live.', 'Real vs paper twin for Alpaca bots.', 'Panic button, also from a Shortcut.', 'Nightly offsite backup to a private GitHub repo, and an uptime monitor between the main server and the standby.']],
+    ['Costs', ['A cost dashboard: real AI spend plus a server estimate.']],
+  ] },
+  { v: '2.17.0', d: '2026-10-26', title: 'Practice tools', groups: [
+    ['Practice', ['Chart-signal alerts (RSI, moving averages, crosses, 52-week highs and lows, volume spikes).', 'Monthly review with coach\'s notes.', 'What if? machine.', 'Options practice with Black-Scholes estimates.', 'Dividend calendar and a Home Screen widget via Shortcuts.']],
+  ] },
+  { v: '2.16.0', d: '2026-10-26', title: 'AI features', groups: [
+    ['AI', ['Morning brief, Ask the Council, Friday letter from the chair, chat with a bot, lessons from losing trades, and Explain the news.']],
+  ] },
+  { v: '2.15.0', d: '2026-10-26', title: 'Smarter bots', groups: [
+    ['Bots', ['Report cards and benching, smarter exits, portfolio guards (market mood, correlation, shared caps), monthly re-tune suggestions, tournaments, and the Earnings drift strategy.']],
+  ] },
+];
+const verNum = v => String(v || '0').split('.').map(Number).reduce((t, x) => t * 1000 + (x || 0), 0);
+function changelogHtml(list) {
+  return list.map((r, i) => `<div class="wn-rel ${i ? 'old' : ''}"><div class="wn-head"><b>v${h(r.v)}</b><span>${h(new Date(r.d + 'T12:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }))}</span></div><h3>${h(r.title)}</h3>
+    ${r.groups.map(([g, items]) => `<div class="wn-g"><div class="wn-gt">${h(g)}</div><ul>${items.map(x => `<li>${h(x)}</li>`).join('')}</ul></div>`).join('')}</div>`).join('');
+}
+PAGES.whatsnew = {
+  mount(p) { p.title('What\'s new', true); p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">What's new</h1><p class="t-sub" style="margin:0 2px">You're on v${h(APP_VERSION)}.</p><div class="mt16">${changelogHtml(CHANGELOG)}</div>`; },
+};
+// once after an update: the releases since the version you last saw
+function whatsNewCheck() {
+  let seen = null; try { seen = store.get('seenVer'); } catch (e) {}
+  const cur = APP_VERSION; if (!cur || cur.startsWith('__')) return;
+  try { store.set('seenVer', cur); } catch (e) {}
+  if (seen && verNum(seen) >= verNum(cur)) return;
+  const fresh = seen ? CHANGELOG.filter(r => verNum(r.v) > verNum(seen) && verNum(r.v) <= verNum(cur)) : CHANGELOG.filter(r => r.v === cur); if (!fresh.length) return; // never seen before: just this release
+  setTimeout(() => sheet({ title: `What's new in v${cur}`, tall: true, html: `${changelogHtml(fresh.slice(0, 4))}${fresh.length > 4 ? `<p class="note">And ${fresh.length - 4} more update${fresh.length - 4 === 1 ? '' : 's'} in Settings → What's new.</p>` : ''}`, foot: '<button class="btn btn-primary btn-block btn-lg" data-x="ok">Got it</button>', mount: s => s.el.addEventListener('click', e => { if (e.target.closest('[data-x="ok"]')) s.close(); }) }), 1200);
+}
+on('state', function once() { if (once.done) return; once.done = true; whatsNewCheck(); });
+
+// ===================================================================
 // Settings
 // ===================================================================
 function applyLook(s) {
@@ -8260,6 +8332,7 @@ PAGES.settings = {
   root() {
     const S = App.S;
     return `<div class="set-hero"><svg viewBox="0 0 120 120" class="av"><use href="#mango-mark"/></svg><div><div class="t-title">Mango <span class="set-ver">v${h(APP_VERSION)}</span></div><div class="t-foot">Logged in as ${h(S.user || 'you')} · ${(S.wallets || []).filter(w => !w.archived).length} wallet${(S.wallets || []).length === 1 ? '' : 's'}</div></div></div>
+      <div class="group mt16">${rowLink('sparkle', 'What\'s new', `v${APP_VERSION}: ${(CHANGELOG.find(r => r.v === APP_VERSION) || CHANGELOG[0]).title}`, 'whatsnew')}</div>
       ${standbyCard()}${panicCard()}${guardsCard()}${promoCard()}${briefsCard()}${widgetCard()}${opsCard()}${councilCard()}${nightCard()}${analystCard()}
       <div class="group mt16">${Object.entries(SECTIONS).map(([k, v]) => rowLink(v.icon, v.title, v.sub, 'settings/' + k)).join('')}</div>
       <div class="group mt16">${rowLink('wallet', 'Wallets', 'Create, rename, reset, move cash', 'wallets')}${rowToggle('hideBalances', 'Hide balances', 'Blur dollar amounts. Press and hold to peek.')}</div>
