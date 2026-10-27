@@ -340,7 +340,7 @@ const DEF = {
   confirmStyle: 'hold', confirmBuy: false, confirmSell: true, cashAPY: 0, startBalance: 10000,
   // notifications
   pushAlerts: true, pushOrders: true, notifySummary: true, notifyMoves: true, moveThreshold: 5,
-  decayAlerts: true, notifyAchv: true, notifyGames: true, pushBots: true, botWeekly: true, pushReal: true, realDailyLossPct: 3, realHalt: false, standbyActive: false, standbyActiveAt: 0, councilWeighted: true, vetoAll: true, promoGate: true, promoMinDays: 60, promoMinTrades: 10, promoBeatSpy: true, promoMaxDD: 15, panicAt: 0, offsiteOn: true, offsiteKeep: 14, briefOn: true, briefAt: '08:45', letterOn: true, aiPostmortem: true, aiChat: true, aiExplain: true, moodSwitch: true, corrGuard: true, corrMax: 0.9, sharedRisk: true, maxSymPct: 30, maxSectorPct: 50, maxCryptoPct: 50, autoBench: false, autoTune: true, aiVeto: true, aiReview: true, aiSizeUp: true, nightOn: true, nightRuns: 2, aiOn: true, aiSize: true, aiDebate: true, aiHawk: true, aiGuard: true, aiChart: true, aiDailyMax: 120, faceReal: true, autoBackup: true, quietStart: '', quietEnd: '',
+  decayAlerts: true, coolOff: true, coolLosses: 3, coolDropPct: 5, coolMins: 30, notifyAchv: true, notifyGames: true, pushBots: true, botWeekly: true, pushReal: true, realDailyLossPct: 3, realHalt: false, standbyActive: false, standbyActiveAt: 0, councilWeighted: true, vetoAll: true, promoGate: true, promoMinDays: 60, promoMinTrades: 10, promoBeatSpy: true, promoMaxDD: 15, panicAt: 0, offsiteOn: true, offsiteKeep: 14, briefOn: true, briefAt: '08:45', letterOn: true, aiPostmortem: true, aiChat: true, aiExplain: true, moodSwitch: true, corrGuard: true, corrMax: 0.9, sharedRisk: true, maxSymPct: 30, maxSectorPct: 50, maxCryptoPct: 50, autoBench: false, autoTune: true, aiVeto: true, aiReview: true, aiSizeUp: true, nightOn: true, nightRuns: 2, aiOn: true, aiSize: true, aiDebate: true, aiHawk: true, aiGuard: true, aiChart: true, aiDailyMax: 120, faceReal: true, autoBackup: true, quietStart: '', quietEnd: '',
   // look and feel
   hideBalances: false, showCents: true, compactNums: false, defaultRange: '1D', defaultChart: 'Candles',
   theme: 'mango', accent: 'mango', plColors: 'classic', roundedNums: true, reduceMotion: false, celebrate: true,
@@ -355,7 +355,7 @@ const LIMITS = {
   promoMinDays: [0, 365], promoMinTrades: [0, 200], promoMaxDD: [1, 90], offsiteKeep: [3, 60], maxSymPct: [5, 100], maxSectorPct: [10, 100], maxCryptoPct: [0, 100], corrMax: [0.5, 1], nightRuns: [1, 3], aiDailyMax: [0, 500],
   realDailyLossPct: [0, 50],
   feeFlat: [0, 1000], feePct: [0, 10], slippage: [0, 5], maxPos: [0, 100], reservePct: [0, 100], autoSL: [0, 90], autoTP: [0, 1000],
-  defaultBuy: [0, 1e9], cashAPY: [0, 100], startBalance: [100, 1e9], moveThreshold: [1, 50], defaultWallet: [1, 1e9],
+  defaultBuy: [0, 1e9], cashAPY: [0, 100], startBalance: [100, 1e9], moveThreshold: [1, 50], defaultWallet: [1, 1e9], coolLosses: [2, 10], coolDropPct: [1, 50], coolMins: [5, 240],
 };
 const CHOICES = {
   closedTrading: ['fill', 'queue', 'block'], confirmStyle: ['hold', 'tap', 'none'], defaultRange: ['1D', '1W', '1M', '3M', '1Y', 'ALL', '5Y'],
@@ -1866,7 +1866,7 @@ function checkAlerts(sym, p) {
       if (Math.abs(ch) >= a.pct && etDate(a.last || 0) !== etDate()) {
         a.last = Date.now();
         Q('update alert set last_fired=now() where id=$1', [a.id]).catch(() => {});
-        notify('alert', `${sym} is ${ch >= 0 ? 'up' : 'down'} ${Math.abs(ch).toFixed(1)}% today`, `${sym} is at ${pxStr(p)}, ${pct(ch)} since the last close. You asked to know about moves over ${a.pct}%.${a.label ? ' Note: ' + a.label : ''}`, { sym });
+        notify('alert', `${sym} is ${ch >= 0 ? 'up' : 'down'} ${Math.abs(ch).toFixed(1)}% today`, `${plainMove(sym, ch, p)} You asked to know about moves over ${a.pct}%.${a.label ? ' Note: ' + a.label : ''}`, { sym });
       }
       continue;
     }
@@ -1881,7 +1881,7 @@ function checkAlerts(sym, p) {
     a.armed = false; a.last = Date.now();
     if (a.rep) Q('update alert set armed=false, last_fired=now() where id=$1', [a.id]).catch(() => {});
     else { Q('update alert set fired=true, armed=false, last_fired=now() where id=$1', [a.id]).catch(() => {}); list.splice(list.indexOf(a), 1); }
-    notify('alert', `${sym} ${a.dir === 'above' ? 'rose to' : 'fell to'} ${pxStr(a.price)}`, `${sym} is now ${pxStr(p)} per ${isCrypto(sym) ? 'coin' : 'share'}.${a.label ? ' ' + a.label : ''}${a.rep ? ' This alert repeats.' : ''}`, { sym, data: { kind: 'alert' } });
+    notify('alert', `${sym} ${a.dir === 'above' ? 'rose to' : 'fell to'} ${pxStr(a.price)}`, `${shortName(sym)} just ${a.dir === 'above' ? 'went above' : 'dropped below'} ${pxStr(a.price)}, the level you set. It's at ${pxStr(p)}${prices.get(sym)?.prev ? `, ${pct((p / prices.get(sym).prev - 1) * 100)} today` : ''}${levelWords(sym, p) ? `, ${levelWords(sym, p)}` : ''}.${a.label ? ' ' + a.label : ''}${a.rep ? ' This alert repeats.' : ''}`, { sym, data: { kind: 'alert' } });
     break;
   }
 }
@@ -5540,7 +5540,7 @@ async function optOpenOrder(wid, sym, legsIn, o = {}) {
   await loadOptBook(); refreshUserSyms().catch(() => {}); broadcast({ t: 'evt', e: 'opt', wid });
   return { ok: true, legs: made, net: plan.net, fees: plan.fees, hold: plan.hold };
 }
-POST('/api/opt/order', auth, async req => { const wid = await activeWalletId(req); return optOpenOrder(wid, req.body?.sym, req.body?.legs, { note: req.body?.note }); });
+POST('/api/opt/order', auth, async req => { const wid = await activeWalletId(req); const cg = await coolGate(wid, req.body); if (cg) return cg; return optOpenOrder(wid, req.body?.sym, req.body?.legs, { note: req.body?.note }); });
 
 // ---------- closing, exercising, and what happens at expiration ----------
 // tax lots for options: closing a long is a sale, closing a short is the purchase that ends it (always short-term)
@@ -6488,7 +6488,7 @@ GET('/api/state', auth, async req => {
   for (const s of new Set(mine)) ensureMeta(s).catch(() => {});
   const eq = await equitySeries(wid, '1D').catch(() => null);
   const out = {
-    v: BUILD, appVersion: APP_VERSION, now: Date.now(), market: market(), mstate: mstateJson(), calNote: calendarNote(), days: dayEvents(), profile: profileJson(), user: APP_USER,
+    v: BUILD, appVersion: APP_VERSION, now: Date.now(), market: market(), mstate: mstateJson(), calNote: calendarNote(), days: dayEvents(), cool: await coolState(wid).catch(() => null), profile: profileJson(), user: APP_USER,
     wallet: w, wallets, pos, ord, lims, account, xfers, options: optSummary(wid), rules: rulesJson(wr), broker: brokerJson(), trd: trd.map(tradeJson), watch: watch.map(x => x.sym), alerts: alerts.map(alertJson),
     preds: preds.map(p => ({ id: p.id, sym: p.sym, dir: p.dir, start: +p.start_px, startTs: tsMs(p.start_ts), end: tsMs(p.end_ts) })),
     assets: assetsJson(syms), prices: pricesJson(), spark: sp, eq1d: eq,
@@ -6620,6 +6620,8 @@ POST('/api/trade', auth, async req => {
   const { side, otype, mode, amount, o, units } = orderInput(b);
   if (!(amount > 0)) fail('Enter an amount');
   const real = isReal(w);
+  // the cool-off timer: after a losing streak or a bad day, new buys wait (or you type "I'm sure")
+  if (side === 'buy') { const cg = await coolGate(wid, b); if (cg) return cg; }
   // the "are you sure?" checks, once per order: the app asks, you confirm
   if (!b.confirm) {
     const acct0 = await accountInfo(wid, { w }).catch(() => null), px0 = otype === 'limit' ? num(b.price) : otype === 'stoplimit' ? num(b.lpx) : priceOf(sym) || 0;
@@ -6686,6 +6688,7 @@ POST('/api/limit', auth, async req => {
   if (!assets.has(sym)) await trackAsset(sym, req.body.kind_asset);
   const w = await walletRow(wid);
   if (w.broker) return brokerTrade(w, { ...req.body, otype: req.body.kind, mode: req.body.units === 'qty' ? 'qty' : req.body.units === 'pct' ? 'pct' : 'usd', tif: req.body.expires === 'day' ? 'day' : 'gtc' });
+  if (req.body.side !== 'sell') { const cg = await coolGate(wid, req.body); if (cg) return cg; }
   return addLimit(wid, sym, req.body);
 });
 DEL('/api/limit/:id', auth, async req => { if (String(req.params.id).startsWith('a:')) return brokerCancel(req.params.id); await Q('delete from lim where id=$1', [+req.params.id]); await loadOrders(); await refreshUserSyms(); });
@@ -8672,6 +8675,209 @@ GET('/api/research/s/:sym/:part', auth, async req => {
   try { return { ok: true, ...(await fn(sym)) }; }
   catch (e) { return { ok: false, error: e.status === 503 && /FINNHUB/.test(e.message) ? 'Add FINNHUB_KEY in Railway to turn this on.' : e.message }; }
 });
+// =====================================================================
+// Safety and quality of life: the cool-off timer, plain-words alerts (and typing alerts in plain English),
+// and exporting everything as CSV, a TurboTax-ready TXF file, or one zip
+// =====================================================================
+
+// ---------- the cool-off timer ----------
+// After 3 losing sales in a row, or losing 5% of a wallet in a day, your own new buys in that wallet wait 30 minutes.
+// Selling (taking risk off) is always allowed, bots keep running, and typing "I'm sure" skips the wait.
+const coolN = () => clamp(Math.round(num(S.coolLosses, 3)), 2, 10), coolDrop = () => clamp(num(S.coolDropPct, 5), 1, 50), coolMs = () => clamp(num(S.coolMins, 30), 5, 240) * 60e3;
+const COOL_PHRASE = /^\s*i['’]?\s*m\s+sure\s*\.?\s*$/i;
+async function coolState(wid) {
+  if (S.coolOff === false) return null;
+  const w = walletMeta.get(wid) || await row('select * from wallets where id=$1', [wid]); if (!w || w.broker) return null;
+  const now = Date.now(), n = coolN();
+  const skip = jsonOr(await kvGet('coolskip:' + wid).catch(() => null), null);
+  // a losing streak: the last n sales you made yourself all lost money
+  const sells = await rows("select pnl, ts from trd where wid=$1 and side='sell' and why='manual' and pnl is not null order by id desc limit $2", [wid, n]);
+  if (sells.length >= n && sells.every(s => +s.pnl < 0)) {
+    const until = tsMs(sells[0].ts) + coolMs(), total = sells.reduce((t, s) => t + +s.pnl, 0);
+    if (until > now && !(skip?.until === until)) return { until, kind: 'streak', why: `${n} losing sales in a row (${money(total)} in all)` };
+  }
+  // a bad day: down the set percentage since the last snapshot before today's open, not counting deposits
+  const k = 'cool:' + wid + ':' + etDate(), saved = jsonOr(await kvGet(k).catch(() => null), null);
+  if (saved) return saved.until > now && !(skip?.until === saved.until) ? saved : null; // once a day
+  const p = etParts(), open = etToUtc(p.y, p.m, p.d, 9, 30), start = await row('select eq from snap where wid=$1 and ts < $2 order by ts desc limit 1', [wid, new Date(open)]);
+  if (!start || !(+start.eq > 0)) return null;
+  const flows = +(await row("select coalesce(sum(price),0) s from trd where wid=$1 and side='cash' and ts >= $2", [wid, new Date(open)])).s;
+  const value = +(await row('select cash from wallets where id=$1', [wid])).cash + marketValue(await positions(wid)), ch = (value - flows) / +start.eq - 1;
+  if (ch <= -coolDrop() / 100) { const v = { until: now + coolMs(), kind: 'drop', why: `this wallet is down ${(Math.abs(ch) * 100).toFixed(1)}% today`, ts: now }; await kvSet(k, JSON.stringify(v)); return v; }
+  return null;
+}
+// returns null when the buy may go ahead, or what to show instead
+async function coolGate(wid, b) {
+  const c = await coolState(wid); if (!c) return null;
+  if (COOL_PHRASE.test(String(b?.coolSkip || ''))) { await kvSet('coolskip:' + wid, JSON.stringify({ until: c.until, ts: Date.now() })); const nn = +(await kvGet('cool_skips', '0')) + 1; await kvSet('cool_skips', String(nn)); return null; }
+  return { cooloff: { ...c, left: c.until - Date.now(), mins: Math.round(coolMs() / 60e3) } };
+}
+GET('/api/cooloff', auth, async req => ({ cool: await coolState(await activeWalletId(req)), on: S.coolOff !== false, losses: coolN(), drop: coolDrop(), mins: Math.round(coolMs() / 60e3) }));
+
+// ---------- plain-words context for moves and alerts ----------
+const shortName = sym => String(assets.get(sym)?.name || sym).replace(/,?\s+(Inc\.?|Incorporated|Corp\.?|Corporation|Co\.?|Ltd\.?|plc|PLC|Holdings?|Group|Class [A-C]|Common Stock|ETF Trust|Trust)\b.*$/i, '').replace(/\s+/g, ' ').trim() || sym;
+// "its biggest one-day drop since March" / "its first move this big in over a year", from saved daily history
+function moveWords(sym, ch) {
+  const b = cache.get('d1:' + sym)?.v; if (!b?.c?.length || !Number.isFinite(ch)) return '';
+  const c = b.c, n = c.length, r = ch / 100, up = r > 0;
+  for (let i = n - 1, k = 0; i > 0 && k < 520; i--, k++) {
+    const x = c[i] / c[i - 1] - 1;
+    if (b.d[i] === etDate()) continue; // today's bar, if the history already has it
+    if (up ? x >= r : x <= r) {
+      if (k < 15) return '';
+      const when = new Date(b.d[i] + 'T12:00:00Z'), months = Math.round(k / 21);
+      return months >= 2 ? `its biggest one-day ${up ? 'gain' : 'drop'} since ${when.toLocaleDateString('en-US', { month: 'long', year: when.getUTCFullYear() !== new Date().getUTCFullYear() ? 'numeric' : undefined, timeZone: 'UTC' })}` : '';
+    }
+  }
+  return `its biggest one-day ${up ? 'gain' : 'drop'} in over two years`;
+}
+function levelWords(sym, p) {
+  const b = cache.get('d1:' + sym)?.v; if (!b?.c?.length || !(p > 0)) return '';
+  const yr = b.c.slice(-252); if (yr.length < 200) return '';
+  const hi = Math.max(...yr), lo = Math.min(...yr);
+  if (p >= hi) return 'a new 52-week high'; if (p <= lo) return 'a new 52-week low';
+  if (p >= hi * 0.98) return `within ${((1 - p / hi) * 100).toFixed(1)}% of its 52-week high`;
+  if (p <= lo * 1.02) return `near its 52-week low`;
+  return '';
+}
+// one plain sentence for a move: "Apple fell 5.2% today, its biggest one-day drop since March. It's at $201.40."
+function plainMove(sym, ch, p) {
+  const m = moveWords(sym, ch), l = levelWords(sym, p);
+  return `${shortName(sym)} ${ch >= 0 ? 'rose' : 'fell'} ${Math.abs(ch).toFixed(1)}% today${m ? `, ${m}` : ''}. It's at ${pxStr(p)}${l ? `, ${l}` : ''}.`;
+}
+
+// ---------- typing an alert in plain English ----------
+const NAMES2SYM = { bitcoin: 'BTC', ether: 'ETH', ethereum: 'ETH', solana: 'SOL', dogecoin: 'DOGE', apple: 'AAPL', microsoft: 'MSFT', nvidia: 'NVDA', tesla: 'TSLA', amazon: 'AMZN', google: 'GOOGL', alphabet: 'GOOGL', meta: 'META', facebook: 'META', netflix: 'NFLX', 'coca cola': 'KO', coke: 'KO', 'the s&p 500': 'SPY', 's&p 500': 'SPY', 's&p': 'SPY', nasdaq: 'QQQ', gold: 'GLD' };
+const STOP_WORDS = new Set(['ME', 'IF', 'AND', 'OR', 'THE', 'TO', 'A', 'AN', 'IT', 'IS', 'AT', 'OF', 'ON', 'BY', 'UP', 'MY', 'RSI', 'ALL', 'TIME', 'HIGH', 'LOW', 'DAY', 'WHEN', 'TELL', 'LET', 'KNOW', 'GOES', 'GETS', 'HITS', 'DROPS', 'FALLS']);
+function ruleParse(text) {
+  const t = String(text).trim(), lo = t.toLowerCase(), out = [];
+  let sym = null;
+  for (const [k, v] of Object.entries(NAMES2SYM)) if (lo.includes(k)) { sym = v; break; }
+  if (!sym) { const m = t.match(/\$?\b[A-Z]{1,5}\b/g); const cand = (m || []).map(x => x.replace('$', '')).find(x => !STOP_WORDS.has(x)); if (cand) sym = cand; }
+  if (!sym) { const m = lo.match(/\b([a-z]{1,5})\b(?=\s+(drops?|falls?|goes|gets|hits|rises?|moves?|jumps?|is|crosses|reaches))/); if (m && !STOP_WORDS.has(m[1].toUpperCase())) sym = m[1].toUpperCase(); }
+  const num1 = s => { const m = s.match(/\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*(k)?/i); return m ? +m[1].replace(/,/g, '') * (m[2] ? 1000 : 1) : null; };
+  const pctm = lo.match(/([0-9]+(?:\.[0-9]+)?)\s*%/);
+  if (/\brsi\b/.test(lo) || /oversold|overbought/.test(lo)) { const v = num1(lo.replace(/.*rsi/, '')) || (/overbought/.test(lo) ? 70 : 30); out.push({ sym, kind: 'ind', ind: { t: /above|over|overbought/.test(lo) ? 'rsiAbove' : 'rsiBelow', v } }); }
+  else if (/golden cross/.test(lo)) out.push({ sym, kind: 'ind', ind: { t: 'golden' } });
+  else if (/death cross/.test(lo)) out.push({ sym, kind: 'ind', ind: { t: 'death' } });
+  else if (/52[- ]week high|all[- ]time high|new high/.test(lo)) out.push({ sym, kind: 'ind', ind: { t: 'high52' } });
+  else if (/52[- ]week low|new low/.test(lo)) out.push({ sym, kind: 'ind', ind: { t: 'low52' } });
+  else if (/200[- ]day/.test(lo)) out.push({ sym, kind: 'ind', ind: { t: /below|under|drops?|falls?/.test(lo) ? 'below200' : 'above200' } });
+  else if (/50[- ]day/.test(lo)) out.push({ sym, kind: 'ind', ind: { t: /below|under|drops?|falls?/.test(lo) ? 'below50' : 'above50' } });
+  else if (pctm && /move|jump|drop|fall|swing|up|down|change/.test(lo)) out.push({ sym, kind: 'daymove', pct: +pctm[1] });
+  else { const v = num1(lo.replace(new RegExp(`\\b${(sym || '').toLowerCase()}\\b`, 'g'), '')); if (v) out.push({ sym, kind: 'price', price: v }); }
+  return out.filter(x => x.sym);
+}
+const ALERT_SYS = `You turn alert requests into JSON for a paper trading app. Reply with only a JSON array, nothing else.
+Each item is one of:
+{"sym":"TICKER","kind":"price","price":123.45}  (alert when the price crosses this level, either direction)
+{"sym":"TICKER","kind":"daymove","pct":5}  (alert when it moves this many percent in a day)
+{"sym":"TICKER","kind":"ind","ind":{"t":"rsiBelow","v":30}}  (t is one of rsiBelow, rsiAbove, above50, below50, above200, below200, golden, death, high52, low52, volSpike)
+Use official tickers (Bitcoin is BTC, the S&P 500 is SPY, the Nasdaq 100 is QQQ). Add "label" with a few words from the request if useful. If you can't tell, reply [].`;
+POST('/api/alerts/parse', auth, async req => {
+  const text = String(req.body?.text || '').slice(0, 300).trim(); if (!text) fail('Type what you want to be told about');
+  let list = [], via = 'rules';
+  if (AI_KEY && S.aiOn !== false) {
+    const r = await aiText('alerts', ALERT_SYS, 'Request: ' + text, { max: 300 });
+    if (r.ok) { try { const j = JSON.parse(r.text.slice(r.text.indexOf('['), r.text.lastIndexOf(']') + 1)); if (Array.isArray(j) && j.length) { list = j; via = 'ai'; } } catch (e) {} }
+  }
+  if (!list.length) list = ruleParse(text);
+  const out = [];
+  for (const x of list.slice(0, 4)) {
+    const sym = cleanSym(x.sym); if (!sym) continue;
+    const kind = ['price', 'daymove', 'ind'].includes(x.kind) ? x.kind : null; if (!kind) continue;
+    if (!assets.has(sym)) await trackAsset(sym).catch(() => {});
+    const p = priceOf(sym);
+    if (kind === 'price' && !(+x.price > 0)) continue;
+    if (kind === 'daymove' && !(+x.pct > 0)) continue;
+    if (kind === 'ind' && !IND_ALERTS[x.ind?.t]) continue;
+    const say = kind === 'price' ? `${sym} ${p ? (+x.price > p ? 'rises to' : 'falls to') : 'reaches'} ${pxStr(+x.price)}${p ? ` (it's ${pxStr(p)} now)` : ''}` : kind === 'daymove' ? `${sym} moves ${+x.pct}% or more in a day` : `${sym}: ${IND_ALERTS[x.ind.t].title(x.ind.v ?? IND_ALERTS[x.ind.t].def)}`;
+    out.push({ sym, kind, price: kind === 'price' ? +x.price : undefined, pct: kind === 'daymove' ? +x.pct : undefined, ind: kind === 'ind' ? { t: x.ind.t, v: x.ind.v ?? IND_ALERTS[x.ind.t].def } : undefined, label: String(x.label || text).slice(0, 80), say });
+  }
+  if (!out.length) fail('I couldn\'t turn that into an alert. Try something like "tell me if NVDA drops below 120" or "AAPL moves 5% in a day".');
+  return { alerts: out, via };
+});
+
+// ---------- export everything ----------
+const csvEsc = v => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+const toCsv = (head, list) => [head.join(','), ...list.map(r => r.map(csvEsc).join(','))].join('\n');
+const isoT = t => t ? new Date(tsMs(t)).toISOString() : '';
+const ymdT = t => t ? etDate(tsMs(t)) : '';
+const EXPORTS = {
+  trades: { name: 'Trades', desc: 'Every buy, sell, dividend, fee and transfer, with fees broken out', async csv(wid) {
+    const list = await rows('select * from trd where wid=$1 order by id', [wid]);
+    return toCsv(['Date', 'Type', 'Symbol', 'Quantity', 'Price', 'Total', 'Fee', 'SEC fee', 'FINRA TAF', 'CAT fee', 'Crypto fee', 'Order type', 'Session', 'Bid', 'Ask', 'Price improvement', 'Settles', 'Profit/Loss', 'Placed by', 'Note'],
+      list.map(t => { const f = jsonOr(t.fees, {}); return [isoT(t.ts), t.side, t.sym, +t.qty, +t.price, t.side === 'cash' || t.side === 'int' || t.side === 'fee' ? +t.price : +t.qty * +t.price, +t.fee || 0, f.sec ?? '', f.taf ?? '', f.cat ?? '', f.crypto ?? '', t.otype || '', t.sess || '', t.bid ?? '', t.ask ?? '', t.imp ?? '', isoT(t.settle), t.pnl ?? '', t.why || '', t.note || '']; })); } },
+  positions: { name: 'Positions', desc: 'What the wallet holds now, with cost and gain', async csv(wid) {
+    const pos = await positions(wid);
+    return toCsv(['Symbol', 'Name', 'Quantity', 'Average cost', 'Cost basis', 'Price', 'Value', 'Gain', 'Gain %', 'Since'], pos.map(p => { const px = priceOf(p.sym) || p.avg, v = p.qty * px, c = p.qty * p.avg; return [p.sym, assets.get(p.sym)?.name || '', p.qty, p.avg, c, px, v, v - c, c ? (v / c - 1) * 100 : '', p.since ? new Date(p.since).toISOString() : '']; })); } },
+  options: { name: 'Option trades', desc: 'Every option opened, closed, exercised, assigned or expired', async csv(wid) {
+    const list = await rows('select * from opttrd where wid=$1 order by id', [wid]);
+    return toCsv(['Date', 'Action', 'Underlying', 'Type', 'Strike', 'Expiration', 'Contracts', 'Price per share', 'Fee', 'Profit/Loss', 'Note'], list.map(t => [isoT(t.ts), t.action, t.sym, t.kind, +t.strike, t.exp, +t.qty, +t.price, +t.fee || 0, t.pnl ?? '', t.note || ''])); } },
+  lots: { name: 'Tax lots sold', desc: 'Each sale matched to the shares it sold, with holding period and wash sales', async csv(wid) {
+    const list = await rows('select * from realized where wid=$1 order by sold, id', [wid]);
+    return toCsv(['Description', 'Quantity', 'Date acquired', 'Date sold', 'Proceeds', 'Cost basis', 'Wash sale disallowed', 'Gain/Loss', 'Term', 'Crypto'], list.map(r => [r.sym, +r.qty, ymdT(r.acquired), ymdT(r.sold), +r.proceeds, +r.basis, +r.wash || 0, +r.proceeds - +r.basis + (+r.wash || 0), r.term, r.crypto ? 'yes' : 'no'])); } },
+  f8949: { name: 'Form 8949 (this year)', desc: 'All taxable wallets, by Form 8949 box, ready for any tax software', year: true, async csv(wid, y) {
+    const f = await form8949(y);
+    return toCsv(['Box', 'Description', 'Date acquired', 'Date sold', 'Proceeds', 'Cost basis', 'Code', 'Adjustment', 'Gain/Loss', 'Wallet'], f.lines.map(l => [l.box, l.desc, ymdT(l.acquired), ymdT(l.sold), l.proceeds.toFixed(2), l.basis.toFixed(2), l.code || '', l.adj ? l.adj.toFixed(2) : '', (l.proceeds - l.basis + (l.adj || 0)).toFixed(2), l.wallet])); } },
+  history: { name: 'Wallet value history', desc: 'The wallet\'s value at the end of each day', async csv(wid) {
+    const list = await rows("select distinct on ((ts at time zone 'America/New_York')::date) (ts at time zone 'America/New_York')::date d, eq from snap where wid=$1 order by (ts at time zone 'America/New_York')::date, ts desc", [wid]);
+    return toCsv(['Date', 'Value'], list.map(r => [String(r.d instanceof Date ? r.d.toISOString().slice(0, 10) : r.d).slice(0, 10), +r.eq])); } },
+  dividends: { name: 'Dividends and interest', desc: 'Every dividend and interest payment', async csv(wid) {
+    const list = await rows("select * from trd where wid=$1 and side in ('div','int') order by id", [wid]);
+    return toCsv(['Date', 'Type', 'Symbol', 'Shares', 'Per share', 'Amount'], list.map(t => [isoT(t.ts), t.side === 'div' ? 'Dividend' : 'Interest', t.sym || '', t.side === 'div' ? +t.qty : '', t.side === 'div' ? +t.price : '', t.side === 'div' ? +t.qty * +t.price : +t.price])); } },
+  transfers: { name: 'Deposits and withdrawals', desc: 'Money in and out, with when it became available', async csv(wid) {
+    const list = await rows('select * from xfer where wid=$1 order by id', [wid]);
+    return toCsv(['Created', 'Type', 'Amount', 'Instant', 'Status', 'Available', 'Done', 'Method', 'Fee'], list.map(x => [isoT(x.created), x.kind, +x.amount, +x.instant || 0, x.status, isoT(x.avail), isoT(x.done), x.method || '', +x.fee || 0])); } },
+  bots: { name: 'Bot journals', desc: 'Every decision, trade and warning your bots logged', all: true, async csv() {
+    const list = await rows('select l.*, b.name from bot_log l join bots b on b.id=l.bot_id order by l.id desc limit 20000');
+    return toCsv(['Date', 'Bot', 'Kind', 'Symbol', 'Title', 'Details'], list.map(l => [isoT(l.ts), l.name, l.kind, l.sym || '', l.title, l.body || ''])); } },
+};
+// TXF (Tax Exchange Format v042): TurboTax, H&R Block and TaxAct desktop import it. Codes map to Form 8949 boxes;
+// format 5 carries the wash-sale amount.
+const TXF_CODE = { A: 321, D: 323, C: 712, F: 714 };
+const txfDate = t => { const d = etDate(t); return `${d.slice(5, 7)}/${d.slice(8, 10)}/${d.slice(0, 4)}`; };
+async function txfFile(y) {
+  const f = await form8949(y), out = ['V042', 'AMango Paper Trading', 'D' + txfDate(Date.now()), '^'];
+  for (const l of f.lines) {
+    out.push('TD', 'N' + (TXF_CODE[l.box] || 673), 'C1', 'L1', 'P' + l.desc.slice(0, 60), 'D' + txfDate(l.acquired), 'D' + txfDate(l.sold), '$' + l.basis.toFixed(2), '$' + l.proceeds.toFixed(2));
+    if (l.adj > 0) out.push('$' + l.adj.toFixed(2));
+    out.push('^');
+  }
+  return out.join('\r\n') + '\r\n';
+}
+// a small zip writer (stored, no compression needed for text this size; deflated when it helps)
+const CRC = (() => { const t = []; for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return b => { let c = -1; for (const x of b) c = t[(c ^ x) & 255] ^ (c >>> 8); return (c ^ -1) >>> 0; }; })();
+function zipFiles(files) {
+  const parts = [], central = []; let off = 0;
+  const now = new Date(), dosT = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1), dosD = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+  for (const [name, text] of files) {
+    const raw = Buffer.from(text, 'utf8'), def = zlib.deflateRawSync(raw), use = def.length < raw.length, data = use ? def : raw, nm = Buffer.from(name), crc = CRC(raw);
+    const h = Buffer.alloc(30); h.writeUInt32LE(0x04034b50, 0); h.writeUInt16LE(20, 4); h.writeUInt16LE(0x0800, 6); h.writeUInt16LE(use ? 8 : 0, 8); h.writeUInt16LE(dosT, 10); h.writeUInt16LE(dosD, 12); h.writeUInt32LE(crc, 14); h.writeUInt32LE(data.length, 18); h.writeUInt32LE(raw.length, 22); h.writeUInt16LE(nm.length, 26); h.writeUInt16LE(0, 28);
+    parts.push(h, nm, data);
+    const c = Buffer.alloc(46); c.writeUInt32LE(0x02014b50, 0); c.writeUInt16LE(20, 4); c.writeUInt16LE(20, 6); c.writeUInt16LE(0x0800, 8); c.writeUInt16LE(use ? 8 : 0, 10); c.writeUInt16LE(dosT, 12); c.writeUInt16LE(dosD, 14); c.writeUInt32LE(crc, 16); c.writeUInt32LE(data.length, 20); c.writeUInt32LE(raw.length, 24); c.writeUInt16LE(nm.length, 28); c.writeUInt32LE(off, 42);
+    central.push(c, nm); off += 30 + nm.length + data.length;
+  }
+  const cd = Buffer.concat(central), e = Buffer.alloc(22); e.writeUInt32LE(0x06054b50, 0); e.writeUInt16LE(files.length, 8); e.writeUInt16LE(files.length, 10); e.writeUInt32LE(cd.length, 12); e.writeUInt32LE(off, 16);
+  return Buffer.concat([...parts, cd, e]);
+}
+const slug = s => String(s || 'wallet').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'wallet';
+GET('/api/exports', auth, async () => ({ kinds: Object.entries(EXPORTS).map(([k, x]) => ({ k, name: x.name, desc: x.desc, year: !!x.year, all: !!x.all })), years: [...new Set((await rows("select distinct extract(year from sold at time zone 'America/New_York')::int y from realized order by y desc")).map(r => r.y))] }));
+GET('/api/exports/:kind', auth, async (req, res) => {
+  const wid = await activeWalletId(req), w = await walletRow(wid), y = clamp(Math.round(num(req.query.y, +etDate().slice(0, 4))), 2000, 2100), k = req.params.kind, day = etDate();
+  if (k === 'txf') return send(req, res, 200, await txfFile(y), 'text/plain; charset=utf-8', { 'Content-Disposition': `attachment; filename="mango-${y}.txf"` });
+  if (k === 'zip') {
+    const files = [];
+    for (const ww of await rows('select * from wallets order by sort, id')) for (const [kk, x] of Object.entries(EXPORTS)) { if (x.year || x.all) continue; const csv = await x.csv(ww.id); if (csv.split('\n').length > 1) files.push([`${slug(ww.name)}-${ww.id}/${kk}.csv`, csv]); }
+    for (const yy of [...new Set([y, ...(await rows("select distinct extract(year from sold at time zone 'America/New_York')::int y from realized")).map(r => r.y)])]) { const f = await EXPORTS.f8949.csv(wid, yy); if (f.split('\n').length > 1) { files.push([`taxes/form-8949-${yy}.csv`, f]); files.push([`taxes/turbotax-${yy}.txf`, await txfFile(yy)]); } }
+    files.push(['bot-journals.csv', await EXPORTS.bots.csv()]);
+    files.push(['README.txt', `Mango Paper Trading export, ${day}.\r\nOne folder per wallet with its trades, positions, option trades, tax lots, daily value history, dividends and transfers.\r\nThe taxes folder has Form 8949 for every year with sales, and a .txf file that TurboTax, H&R Block and TaxAct desktop can import.\r\nThis is paper trading: none of it is real money.\r\n`]);
+    return send(req, res, 200, zipFiles(files), 'application/zip', { 'Content-Disposition': `attachment; filename="mango-export-${day}.zip"` });
+  }
+  const x = EXPORTS[k]; if (!x) fail('Unknown export', 404);
+  const csv = await x.csv(wid, y), name = x.year ? `mango-form-8949-${y}.csv` : x.all ? `mango-${k}-${day}.csv` : `mango-${slug(w.name)}-${k}-${day}.csv`;
+  return send(req, res, 200, csv, 'text/csv; charset=utf-8', { 'Content-Disposition': `attachment; filename="${name}"` });
+});
 
 // =====================================================================
 // Background jobs
@@ -8746,7 +8952,8 @@ async function daily() {
       const ch = (q.p / q.prev - 1) * 100;
       if (Math.abs(ch) < S.moveThreshold) continue;
       sent.add(h.sym); changed = true;
-      await notify('move', `${h.sym} is ${ch >= 0 ? 'up' : 'down'} ${Math.abs(ch).toFixed(1)}% today ${ch >= 0 ? '🚀' : '📉'}`, `It's at ${pxStr(q.p)}. Your ${+(+h.qty).toFixed(6)} ${isCrypto(h.sym) ? h.sym : 'shares'} ${ch >= 0 ? 'gained' : 'lost'} about ${money(Math.abs(+h.qty * (q.p - q.prev)))} today.`, { sym: h.sym });
+      await dailyBars(h.sym).catch(() => null); // for "its biggest drop since…"
+      await notify('move', `${h.sym} is ${ch >= 0 ? 'up' : 'down'} ${Math.abs(ch).toFixed(1)}% today ${ch >= 0 ? '🚀' : '📉'}`, `${plainMove(h.sym, ch, q.p)} Your ${+(+h.qty).toFixed(6)} ${isCrypto(h.sym) ? h.sym : 'shares'} ${ch >= 0 ? 'gained' : 'lost'} about ${money(Math.abs(+h.qty * (q.p - q.prev)))} today.`, { sym: h.sym });
     }
     if (changed) await kvSet('job_moves', JSON.stringify({ [today]: [...sent] }));
   }
@@ -8882,7 +9089,7 @@ const ICONS = {};
 const icon = (name, fn) => ICONS[name] || (ICONS[name] = fn());
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD646"/><stop offset=".5" stop-color="#FFA028"/><stop offset="1" stop-color="#FA5256"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="#1E1430"/><ellipse cx="31" cy="36" rx="18" ry="22" transform="rotate(30 31 36)" fill="url(#g)"/><path d="M20 41l6.5-6 5 3.5 9.5-10" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37 28.5h4.5V33" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="45" cy="11.5" rx="9" ry="4.6" transform="rotate(-24 45 11.5)" fill="#3BD68A"/></svg>`;
 let BUILD = 'dev', INDEX = null, INDEX_GZ = null;
-const APP_VERSION = '4.3.0'; // stamped by build.sh from package.json
+const APP_VERSION = '4.4.0'; // stamped by build.sh from package.json
 function loadIndex() {
   const file = path.join(__dirname, 'index.html');
   let html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<!doctype html><title>Mango</title><p>index.html is missing next to server.js.</p>';

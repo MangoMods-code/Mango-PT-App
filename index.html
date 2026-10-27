@@ -1219,6 +1219,10 @@ html[data-standby] #halt-bar { bottom: calc(var(--nav-h, 64px) + env(safe-area-i
 .dc-tally span { font-size: 11px; color: var(--mu); } .dc-tally b { font-size: 18px; } .dc-tally em { font-style: normal; font-size: 10px; color: var(--mu2); }
 .dc-hist { display: flex; gap: 4px; justify-content: center; } .dc-hist i { width: 14px; height: 14px; border-radius: 4px; background: color-mix(in srgb, var(--tx) 10%, transparent); } .dc-hist i.win { background: var(--up); } .dc-hist i.loss { background: var(--dn); }
 .share-img { width: 100%; border-radius: 16px; display: block; margin-top: 8px; }
+/* safety and quality of life */
+.cool-ring { width: 150px; height: 150px; margin: 6px auto 14px; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 6px solid color-mix(in srgb, var(--ac) 60%, transparent); }
+.cool-ring b { font-size: 36px; font-weight: 800; font-variant-numeric: tabular-nums; } .cool-ring span { font-size: 12px; color: var(--mu); }
+.nl-alert { display: flex; gap: 8px; align-items: center; } .nl-alert input { flex: 1; min-width: 0; height: 44px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); color: var(--tx); padding: 0 12px; font-size: 16px; }
 
 /* ---------- Paper / Alpaca sides ---------- */
 .space-sw { display: inline-flex; gap: 4px; padding: 4px; border-radius: 14px; background: var(--card); box-shadow: var(--hi); margin: 2px 0 10px; }
@@ -1558,7 +1562,7 @@ html[data-standby] #halt-bar { bottom: calc(var(--nav-h, 64px) + env(safe-area-i
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '4.3.0';
+const BUILD = '__BUILD__', APP_VERSION = '4.4.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1753,6 +1757,8 @@ async function api(path, o = {}) {
   if (r.status === 401 && path !== 'login') { logout(true); throw new ApiError('Please log in again', 401); }
   if (r.status === 428 && j.step && !o.stepped) { App.step = null; await faceStep(); return api(path, { ...o, stepped: true }); } // Face ID, then try once more
   if (!r.ok) throw new ApiError(j.error || 'Something went wrong', r.status);
+  // the cool-off timer: wait it out, or type "I'm sure" and the same request goes again
+  if (j && j.cooloff && o.body && !o.body.coolSkip && typeof coolSheet === 'function') { const ph = await coolSheet(j.cooloff); if (!ph) throw new ApiError(`Not placed: cooling off for ${Math.max(1, Math.ceil(j.cooloff.left / 60e3))} more minutes`, 0); return api(path, { ...o, body: { ...o.body, coolSkip: ph } }); }
   return j;
 }
 const post = (path, body) => api(path, { method: 'POST', body: body || {} });
@@ -2492,7 +2498,7 @@ VIEWS.portfolio = {
     const u = $('#pf-unread'); u.textContent = App.S.unread > 99 ? '99+' : App.S.unread; u.classList.toggle('hidden', !App.S.unread);
     $('#pf-mstate').innerHTML = marketChip();
     this.renderStrip(); this.renderBody(); this.tick();
-    const cn = $('#pf-calnote', el); if (cn) cn.innerHTML = typeof calNoteHtml === 'function' ? calNoteHtml() : '';
+    const cn = $('#pf-calnote', el); if (cn) cn.innerHTML = (typeof coolNoteHtml === 'function' ? coolNoteHtml() : '') + (typeof calNoteHtml === 'function' ? calNoteHtml() : '');
     if (this.eqWallet !== App.W) this.loadEq();
   },
   renderStrip() {
@@ -8446,6 +8452,26 @@ PAGES.costs = {
 // Newest first. Each release: version, date, a one-line headline and grouped notes.
 // ===================================================================
 const CHANGELOG = [
+  { v: '4.4.0', d: '2026-10-27', title: 'Safety and quality of life', short: [
+    'Cool-off timer: new buys pause for 30 minutes after 3 losing sales or a 5% down day',
+    'Alerts in plain words, and type alerts in plain English',
+    'Export everything: spreadsheets, a TurboTax file, or one zip',
+  ], groups: [
+    ['Cool-off timer (on by default)', [
+      'After 3 losing sales in a row that you made yourself, or when a wallet is down 5% in a day (not counting deposits), your own new buys in that wallet wait 30 minutes. That covers market, limit and options orders.',
+      'Selling is always allowed and bots keep running. To place a buy anyway, type "I\'m sure". A banner on the portfolio shows the time left.',
+      'Change the number of losses, the daily drop and the length (or switch it off) in Settings → Market rules.',
+    ]],
+    ['Plain-words alerts', [
+      'Move and alert notifications now read like a sentence: "Apple fell 5.2% today, its biggest one-day drop since March. It\'s at $201.40, near its 52-week low."',
+      'Type an alert the way you\'d say it, at the top of Orders and alerts: "tell me if NVDA drops below 120", "bitcoin moves 5% in a day", "TSLA RSI under 30", "AAPL hits a 52-week high". Check what it understood, then set it. With an Anthropic key the AI reads it; without one, simple rules do.',
+    ]],
+    ['Export everything (Settings → Data → Export)', [
+      'Spreadsheets for trades (fees broken out), positions, option trades, tax lots sold, daily wallet value, dividends and interest, deposits and withdrawals, and every bot\'s journal.',
+      'Taxes: Form 8949 as a spreadsheet, and a .txf file that TurboTax, H&R Block and TaxAct desktop can import, with every sale in the right box and wash sales included.',
+      'Or everything at once in one zip: a folder per wallet, the tax files for every year, and the bot journals.',
+    ]],
+  ] },
   { v: '4.3.0', d: '2026-10-27', title: 'Learning and fun', short: [
     'Story mode: 9 Academy chapters you finish by doing it, and a Time machine through real crashes',
     'Compound interest and DCA calculators, and a risk profile meter',
@@ -9744,6 +9770,75 @@ const DAY_LINES = {
 { const ev0 = eventOf; eventOf = st => { const e = ev0(st); if (e || !LIFE.get().events) return e; const dd = App.S?.days?.[0]; return dd ? { k: 'day', sub: dd.k, text: dd.text } : null; }; }
 
 // ===================================================================
+// Safety and quality of life: the cool-off timer, typing alerts in plain English, and exports
+// ===================================================================
+// ---------- the cool-off timer ----------
+function coolSheet(c) {
+  return new Promise(resolve => {
+    let done = false; const fin = v => { if (done) return; done = true; resolve(v); };
+    const s = sheet({ title: 'Take a breather', onClose: () => fin(null) });
+    const draw = () => {
+      const left = Math.max(0, c.until - Date.now()), m = Math.floor(left / 60e3), sec = Math.floor(left / 1000) % 60;
+      s.html(`<div class="cool-ring"><b>${m}:${String(sec).padStart(2, '0')}</b><span>left</span></div>
+        <p class="t-sub" style="text-align:center">New buys in this wallet are paused because ${h(c.why)}. Right after losses is when people chase them back with bigger, riskier trades. Selling is still allowed, and bots keep running.</p>
+        <div class="card mt12"><b>While you wait</b><p class="t-sub" style="margin:6px 0 0">Look at your last few trades. What made you take them? Would you take this one if you were up today?</p></div>
+        <label class="field mt16"><span>Still want to place it? Type <b>I'm sure</b></span><input id="cool-in" autocomplete="off" autocapitalize="off" placeholder="I'm sure"></label>`);
+      s.foot(`<div class="btns"><button class="btn btn-quiet" id="cool-wait">I'll wait</button><button class="btn btn-primary" id="cool-go" disabled>Place it anyway</button></div>`);
+      const inp = $('#cool-in', s.body), go = $('#cool-go', s.footEl);
+      inp.addEventListener('input', () => { go.disabled = !/^\s*i['’]?\s*m\s+sure\s*\.?\s*$/i.test(inp.value); });
+      go.addEventListener('click', () => { const v = inp.value; fin(v); s.close(); });
+      $('#cool-wait', s.footEl).addEventListener('click', () => { fin(null); s.close(); });
+    };
+    draw();
+    const t = setInterval(() => { if (s.closed) return clearInterval(t); const el = $('.cool-ring b', s.body); if (!el) return; const left = Math.max(0, c.until - Date.now()); el.textContent = `${Math.floor(left / 60e3)}:${String(Math.floor(left / 1000) % 60).padStart(2, '0')}`; if (left <= 0) { clearInterval(t); fin('I\'m sure'); s.close(); toast('Cool-off over'); } }, 1000);
+  });
+}
+function coolNoteHtml() { const c = App.S?.cool; if (!c || c.until <= Date.now()) return ''; return `<div class="callout warn mt12">${icon('hourglass')}<div><b>Cool-off: ${Math.ceil((c.until - Date.now()) / 60e3)} min left</b><br>New buys here wait because ${h(c.why)}. You can still sell.</div></div>`; }
+{ const mr0 = marketRulesCard; marketRulesCard = () => mr0() + `<div class="group mt16"><div class="cell"><div class="lead">${icon('hourglass')}</div><div class="main"><div class="title">Cool-off timer</div><div class="sub">A pause on new buys after losses, so one bad trade doesn't turn into five</div></div></div>
+  ${rowToggle('coolOff', 'Cool-off after losses', 'Pause your own new buys in a wallet for a while. Typing "I\'m sure" skips it')}
+  ${SET().coolOff !== false ? `${rowNum('coolLosses', '· Losing sales in a row', 'Sales you made yourself', '')}${rowNum('coolDropPct', '· Or a wallet down this much in a day', 'Not counting deposits', '%')}${rowNum('coolMins', '· Pause for', 'Minutes', 'min')}` : ''}</div>`; }
+// ---------- typing an alert in plain English ----------
+{ const ah0 = alertsHtml; alertsHtml = () => `<div class="nl-alert"><input id="nl-in" placeholder="Tell me if NVDA drops below 120…" maxlength="300"><button class="btn btn-primary btn-sm" data-act="nlAlert">${icon('sparkle')}Set</button></div><p class="t-foot" style="margin:6px 4px 12px">Type it like you'd say it: "AAPL above 250", "bitcoin moves 5% in a day", "TSLA RSI under 30".</p>` + ah0(); }
+ACT.nlAlert = async el => {
+  const inp = $('#nl-in'), text = inp?.value.trim(); if (!text) return toast('Type an alert first', { kind: 'err' });
+  busy(el, true);
+  try {
+    const r = await post('alerts/parse', { text }); busy(el, false);
+    const s = sheet({ title: r.alerts.length > 1 ? 'Set these alerts?' : 'Set this alert?' }), on = r.alerts.map(() => true);
+    const draw = () => { s.html(`<div class="group">${r.alerts.map((a, i) => `<button class="cell" data-i="${i}"><div class="lead ${on[i] ? 'up' : ''}">${icon(on[i] ? 'check' : 'bell')}</div><div class="main"><div class="title">${h(a.say)}</div><div class="sub">${a.kind === 'price' ? 'Price alert' : a.kind === 'daymove' ? 'Daily move alert' : 'Chart signal'}</div></div></button>`).join('')}</div><p class="note">${r.via === 'ai' ? 'Read by the AI.' : 'Read by simple rules (add ANTHROPIC_API_KEY for smarter reading).'} You get a notification when it happens.</p>`);
+      s.foot(`<button class="btn btn-primary btn-lg btn-block" id="nl-go" ${on.some(Boolean) ? '' : 'disabled'}>Set ${on.filter(Boolean).length === 1 ? 'alert' : on.filter(Boolean).length + ' alerts'}</button>`);
+      s.body.querySelectorAll('[data-i]').forEach(b => b.addEventListener('click', () => { on[+b.dataset.i] = !on[+b.dataset.i]; draw(); }));
+      $('#nl-go', s.footEl).addEventListener('click', async e => { busy(e.currentTarget, true); try { for (const [i, a] of r.alerts.entries()) if (on[i]) await post('alert', { sym: a.sym, kind: a.kind, price: a.price, pct: a.pct, ind: a.ind, label: a.label }); s.close(); if (inp) inp.value = ''; toast('Alert set'); reload(); } catch (err) { busy(e.currentTarget, false); toastErr(err); } });
+    };
+    draw();
+  } catch (e) { busy(el, false); toastErr(e); }
+};
+// ---------- exports ----------
+async function download(path, fallback) {
+  const r = await api(path, { raw: true }); if (!r.ok) { let m = 'Export failed'; try { m = (await r.json()).error || m; } catch (e) {} throw new Error(m); }
+  const cd = r.headers.get('content-disposition') || '', name = (/filename="([^"]+)"/.exec(cd) || [])[1] || fallback;
+  const blob = await r.blob(), url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+  return name;
+}
+PAGES.exports = {
+  mount(p) {
+    p.title('Export', true); p.body.innerHTML = '<div class="sk sk-block mt16" style="height:360px"></div>';
+    api('exports').then(d => {
+      const y0 = new Date().getFullYear(), years = [...new Set([y0, ...d.years])].sort((a, b) => b - a); p.y = years[0];
+      p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Export</h1><p class="t-sub" style="margin:0 2px">Spreadsheet (CSV) files open in Numbers, Excel and Google Sheets. Most are for ${h(W().emoji)} ${h(W().name)}; switch wallets to export another.</p>
+        <button class="card cmp-cta mt16" data-x="zip"><span class="cmp-cta-ic">${icon('download')}</span><span><b>Everything, in one zip</b><span class="t-foot">Every wallet, every file below, and the tax files for each year</span></span>${icon('right')}</button>
+        <div class="section-h"><h2>Taxes</h2></div><div class="field"><span>Tax year</span>${seg('ex-y', years.slice(0, 5).map(y => [y, String(y)]), p.y)}</div>
+        <div class="group"><button class="cell" data-x="txf"><div class="lead">${icon('note')}</div><div class="main"><div class="title">TurboTax file (.txf)</div><div class="sub">Imports into TurboTax, H&R Block and TaxAct desktop. Every sale, by Form 8949 box, with wash sales</div></div>${icon('download', 'chev')}</button>
+          <button class="cell" data-x="f8949"><div class="lead">${icon('list')}</div><div class="main"><div class="title">Form 8949 (CSV)</div><div class="sub">All taxable wallets, for any tax software or an accountant</div></div>${icon('download', 'chev')}</button></div>
+        <div class="section-h"><h2>Spreadsheets</h2></div><div class="group">${d.kinds.filter(k => !k.year).map(k => `<button class="cell" data-x="${k.k}"><div class="lead">${icon('download')}</div><div class="main"><div class="title">${h(k.name)}</div><div class="sub">${h(k.desc)}${k.all ? ' · all bots' : ''}</div></div>${icon('download', 'chev')}</button>`).join('')}</div>
+        <p class="note">Paper trading only: none of this is real money, so it isn't something to file. The tax files show what the same trades would look like on a real return.</p>`;
+      onSeg(p.body, 'ex-y', v => { p.y = +v; });
+      p.body.querySelectorAll('[data-x]').forEach(b => b.addEventListener('click', async () => { busy(b, true); try { const n = await download(`exports/${b.dataset.x}?y=${p.y}`, 'mango-export'); toast('Exported', { sub: n }); } catch (e) { toastErr(e); } busy(b, false); }));
+    }).catch(e => { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; });
+  },
+};
+
+// ===================================================================
 // Settings
 // ===================================================================
 function applyLook(s) {
@@ -9858,7 +9953,7 @@ PAGES.settings = {
   },
   data() {
     return `<div class="section-h"><h2>Export</h2></div><div class="group">
-        <button class="cell" data-act="exportCsv"><div class="lead">${icon('download')}</div><div class="main"><div class="title">Trades as a spreadsheet</div><div class="sub">CSV file for ${h(W().emoji)} ${h(W().name)}</div></div></button>
+        <button class="cell" data-act="go" data-to="exports"><div class="lead">${icon('download')}</div><div class="main"><div class="title">Export</div><div class="sub">Spreadsheets of everything, tax files for TurboTax, or one zip</div></div>${icon('right', 'chev')}</button>
         <button class="cell" data-act="backup"><div class="lead">${icon('database')}</div><div class="main"><div class="title">Full backup</div><div class="sub">Every wallet, trade, order and setting in one file</div></div></button></div>
       <div class="section-h"><h2>Restore</h2></div><div class="group"><label class="cell tap"><div class="lead">${icon('upload')}</div><div class="main"><div class="title">Restore from a backup file</div><div class="sub">Replaces everything with what's in the file</div></div><input type="file" accept="application/json,.json" id="restore-in" class="sr"></label></div>
       <div class="section-h"><h2>Start over</h2></div><div class="group">
