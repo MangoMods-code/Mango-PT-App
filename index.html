@@ -1146,6 +1146,32 @@ html[data-standby] #halt-bar { bottom: calc(var(--nav-h, 64px) + env(safe-area-i
 .f8949 .up { color: var(--up); } .f8949 .dn { color: var(--dn); }
 @media print { html.printing body { background: #fff; color: #000; } html.printing nav, html.printing .page-head, html.printing #halt-bar, html.printing #standby-bar { display: none !important; } html.printing .f8949 { box-shadow: none; overflow: visible; } }
 
+/* options */
+.opt-wal { display: inline-flex; align-items: center; gap: 4px; margin: 2px 2px 0; padding: 4px 10px; border-radius: 999px; background: var(--card2, color-mix(in srgb, var(--tx) 6%, transparent)); color: var(--tx); font-weight: 600; font-size: 14px; }
+.opt-wal svg { width: 14px; height: 14px; }
+.opt-rb { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.opt-lvl-n { font-size: 24px; font-weight: 800; letter-spacing: -.02em; }
+.opt-ladder { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 12px; }
+.opt-ladder > div { border-radius: 12px; padding: 8px; background: color-mix(in srgb, var(--tx) 5%, transparent); font-size: 11px; line-height: 1.3; color: var(--mu); display: flex; flex-direction: column; gap: 4px; }
+.opt-ladder > div b { font-size: 15px; color: var(--tx); width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--tx) 10%, transparent); }
+.opt-ladder > div.on { background: color-mix(in srgb, var(--ac) 14%, transparent); color: var(--tx); }
+.opt-ladder > div.on b { background: var(--ac); color: #fff; }
+.opt-ladder > div.off { opacity: .45; }
+.opt-needs { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line, color-mix(in srgb, var(--tx) 10%, transparent)); }
+.opt-need { display: grid; grid-template-columns: 20px 1fr auto; gap: 8px; align-items: center; padding: 6px 0; font-size: 14px; }
+.opt-need svg { width: 16px; height: 16px; color: var(--mu); } .opt-need.ok svg { color: var(--up); }
+.opt-need em { font-style: normal; color: var(--mu); font-size: 13px; }
+.opt-k.short { box-shadow: inset 0 0 0 1.5px currentColor; }
+.opt-flag { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 6px; background: color-mix(in srgb, var(--ac) 16%, transparent); color: var(--ac); margin-left: 4px; }
+.opt-flag.dn { background: color-mix(in srgb, var(--dn) 16%, transparent); color: var(--dn); }
+.opt-ctl { display: flex; gap: 8px; flex-wrap: wrap; } .opt-ctl .seg { flex: 1; min-width: 150px; }
+.opt-chain .cell { grid-template-columns: 1fr .9fr .9fr .8fr; }
+.opt-row.picked { background: color-mix(in srgb, var(--ac) 22%, transparent); }
+.quiz-q { display: flex; flex-direction: column; gap: 6px; } .quiz-q > b { line-height: 1.35; margin-bottom: 2px; }
+.quiz-a { text-align: left; padding: 11px 14px; border-radius: 12px; background: color-mix(in srgb, var(--tx) 5%, transparent); color: var(--tx); font-size: 14px; line-height: 1.35; }
+.quiz-a.on { background: color-mix(in srgb, var(--ac) 20%, transparent); box-shadow: inset 0 0 0 1.5px var(--ac); }
+.quiz-q.wrong .quiz-a.on { box-shadow: inset 0 0 0 1.5px var(--dn); background: color-mix(in srgb, var(--dn) 12%, transparent); }
+
 /* ---------- Paper / Alpaca sides ---------- */
 .space-sw { display: inline-flex; gap: 4px; padding: 4px; border-radius: 14px; background: var(--card); box-shadow: var(--hi); margin: 2px 0 10px; }
 .space-sw button { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: 10px; font-size: 14px; font-weight: 650; color: var(--mu); transition: background .2s, color .2s; }
@@ -1484,7 +1510,7 @@ html[data-standby] #halt-bar { bottom: calc(var(--nav-h, 64px) + env(safe-area-i
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '3.9.0';
+const BUILD = '__BUILD__', APP_VERSION = '4.0.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1755,6 +1781,7 @@ function onEvent(d) {
     emit('unread'); reload();
   } else if (d.e === 'fill' || d.e === 'pred' || d.e === 'settings') reload();
   else if (d.e === 'bot') emit('bot', d);
+  else if (d.e === 'opt') emit('opt', d);
   else if (d.e === 'hq') emit('hq', d.ev);
   else if (d.e === 'mstate' && App.S) { App.S.mstate = d.ev; emit('mstate'); const mc = $('#pf-mstate'); if (mc) mc.innerHTML = marketChip(); }
   else if (d.e === 'market' && App.S) { App.S.market = d.market; emit('market'); reload(); }
@@ -1816,7 +1843,7 @@ function flash(el, d) {
 // wallet math on the client, so totals tick with every price
 function equityNow(S = App.S) {
   if (!S || !S.wallet) return 0;
-  return S.wallet.cash + (S.pos || []).reduce((t, p) => t + p.qty * (live(p.sym) ?? p.avg), 0);
+  return S.wallet.cash + (S.pos || []).reduce((t, p) => t + p.qty * (live(p.sym) ?? p.avg), 0) + (S.options?.value || 0); // options: marked by the server
 }
 function dayNow(S = App.S) {
   let ch = 0, base = 0;
@@ -2444,7 +2471,7 @@ VIEWS.portfolio = {
       ${menuCell('chart', 'Performance', 'Returns, win rate, best and worst trades', 'performance')}
       ${menuCell('note', 'Monthly review', 'Your trades and journal, with coach\'s notes', 'review')}
       ${menuCell('clock', 'What if?', 'What a past buy would be worth today', 'whatif')}
-      ${menuCell('target', 'Options practice', 'Calls and puts with pretend money', 'options')}
+      ${menuCell('target', 'Options', S.options ? `${S.options.n} open · ${money(S.options.value)}` : 'Calls, puts and spreads in this wallet', 'options')}
       ${feature('taxes') ? menuCell('note', 'Taxes', 'Gains, losses, wash sales and a 1099-style summary', 'taxes') : ''}
       ${feature('statements') ? menuCell('calendar', 'Statements', 'Monthly account statements', 'statements') : ''}
       ${feature('divs') ? menuCell('gift', 'Dividends', 'Income from the stocks you hold', 'dividends') : ''}
@@ -4127,7 +4154,7 @@ ACT.nbSmall = () => {
   PAGES.newbot.draw(p); toast('Small account preset', { sub: 'Check the settings and money, then test it on past prices.' });
 };
 const hueOf = k => STRAT_HUE[k] || '#9C8FBF';
-const STRAT_SYMS = { rsi2: ['SPY', 'QQQ', 'IWM', 'DIA', 'XLK', 'XLF', 'XLV', 'XLE', 'XLY', 'XLI', 'SGOV'], tom: ['SPY', 'QQQ', 'IWM', 'SGOV'], snapback: ['SPY', 'QQQ', 'IWM', 'DIA', 'XLK', 'XLF', 'XLV', 'XLE', 'XLY', 'XLI', 'SGOV'], dual: ['SPY', 'QQQ', 'EFA', 'EEM', 'IEF', 'TLT', 'SGOV'], lowvol: ['KO', 'PG', 'JNJ', 'PEP', 'WMT', 'MCD', 'COST', 'MSFT', 'SGOV'], drift: ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'META', 'AVGO', 'TSLA', 'JPM', 'V', 'LLY', 'COST', 'NFLX', 'WMT', 'XOM', 'AMD', 'ORCL', 'CRM', 'ADBE', 'UNH', 'HD', 'MA', 'BAC', 'PG', 'SGOV'], momentum: ['SPY', 'QQQ', 'IWM', 'EFA', 'EEM', 'TLT', 'IEF', 'GLD', 'DBC', 'VNQ', 'SGOV'] };
+const STRAT_SYMS = { covcall: ['KO', 'PFE', 'VZ', 'T', 'CSCO', 'BAC', 'F', 'INTC'], rsi2: ['SPY', 'QQQ', 'IWM', 'DIA', 'XLK', 'XLF', 'XLV', 'XLE', 'XLY', 'XLI', 'SGOV'], tom: ['SPY', 'QQQ', 'IWM', 'SGOV'], snapback: ['SPY', 'QQQ', 'IWM', 'DIA', 'XLK', 'XLF', 'XLV', 'XLE', 'XLY', 'XLI', 'SGOV'], dual: ['SPY', 'QQQ', 'EFA', 'EEM', 'IEF', 'TLT', 'SGOV'], lowvol: ['KO', 'PG', 'JNJ', 'PEP', 'WMT', 'MCD', 'COST', 'MSFT', 'SGOV'], drift: ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'META', 'AVGO', 'TSLA', 'JPM', 'V', 'LLY', 'COST', 'NFLX', 'WMT', 'XOM', 'AMD', 'ORCL', 'CRM', 'ADBE', 'UNH', 'HD', 'MA', 'BAC', 'PG', 'SGOV'], momentum: ['SPY', 'QQQ', 'IWM', 'EFA', 'EEM', 'TLT', 'IEF', 'GLD', 'DBC', 'VNQ', 'SGOV'] };
 const strats = async () => STRATS || (STRATS = await api('strategies'));
 const pctF = (v, dp = 1) => v == null || !Number.isFinite(v) ? '–' : pct(v * 100, dp);
 const pctA = (v, dp = 1) => v == null || !Number.isFinite(v) ? '–' : pct0(Math.abs(v) * 100, dp);
@@ -8058,7 +8085,7 @@ ACT.letterNow = async el => { busy(el, true); try { await post('letters', {}); R
 function assetAiCells(sym) {
   return `<div class="group mt16"><button class="cell" data-act="askCouncil" data-sym="${h(sym)}"><div class="lead">${icon('flag')}</div><div class="main"><div class="title">Ask the Council</div><div class="sub">Would they buy ${h(sym)} today? Every member votes, with reasons</div></div>${icon('right', 'chev')}</button>
     <button class="cell" data-act="go" data-to="whatif/${h(sym)}"><div class="lead">${icon('clock')}</div><div class="main"><div class="title">What if?</div><div class="sub">What buying ${h(sym)} years ago would be worth now</div></div>${icon('right', 'chev')}</button>
-    ${isCrypto(sym) ? '' : `<button class="cell" data-act="go" data-to="options/${h(sym)}"><div class="lead">${icon('target')}</div><div class="main"><div class="title">Practice options</div><div class="sub">Calls and puts on ${h(sym)} with pretend money</div></div>${icon('right', 'chev')}</button>`}
+    ${isCrypto(sym) ? '' : `<button class="cell" data-act="go" data-to="options/${h(sym)}"><div class="lead">${icon('target')}</div><div class="main"><div class="title">Options</div><div class="sub">Calls, puts and spreads on ${h(sym)}</div></div>${icon('right', 'chev')}</button>`}
     ${feature('news') || feature('buzz') ? `<button class="cell" data-act="explainNews" data-sym="${h(sym)}"><div class="lead">${icon('sparkle')}</div><div class="main"><div class="title">Explain the news</div><div class="sub">${aiOn() && SET().aiExplain !== false ? 'What the headlines say and whether they explain the move' : 'A summary of this week\'s headlines and mood'}</div></div>${icon('right', 'chev')}</button>` : ''}</div>`;
 }
 ACT.askCouncil = async el => {
@@ -8120,7 +8147,7 @@ function briefsCard() {
 }
 
 // ===================================================================
-// Practice tools: the monthly review, the what-if machine, options practice, the dividend calendar
+// Practice tools: the monthly review, the what-if machine, the dividend calendar
 // and the Shortcuts widget link.
 // ===================================================================
 const monthName = m => new Date(m + '-15T12:00').toLocaleString('en-US', { month: 'long', year: 'numeric' });
@@ -8198,61 +8225,6 @@ PAGES.whatif = {
 };
 ACT.wiSym = async () => { const p = Router.pages().reverse().find(x => x.name === 'whatif'); if (!p) return; const s = await pickSymbol('What if I had bought…'); if (!s) return; p.st.sym = s; PAGES.whatif.draw(p); PAGES.whatif.run(p); };
 
-// ---------- options practice ----------
-const OPT_NOTE = 'Practice only. Prices are Black-Scholes estimates from recent volatility, not real quotes, and real options have wider spreads. The practice account is separate from your wallets.';
-PAGES.options = {
-  mount(p, [sym]) {
-    p.title('Options practice', true); p.sym = sym || store.get('optSym') || 'SPY'; p.kind = 'call'; p.exp = null;
-    p.load = async () => {
-      try {
-        const [a, c] = await Promise.all([api('options'), api(`options/chain/${p.sym}${p.exp ? '?exp=' + p.exp : ''}`)]); p.a = a; p.c = c; p.exp = c.exp; this.draw(p);
-      } catch (e) { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p><button class="btn btn-quiet mt12" data-act="optSym">Pick another stock</button></div>`; }
-    };
-    p.body.innerHTML = '<div class="sk sk-block mt16"></div>'; p.load();
-    p.timer(() => p.load(), 30e3);
-  },
-  refresh(p) { p.load && p.load(); },
-  draw(p) {
-    const a = p.a, c = p.c, keep = p.scroller.scrollTop;
-    p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Options practice</h1><p class="t-sub" style="margin:0 2px">Buy calls (a bet it goes up) and puts (a bet it goes down) with pretend money. The most you can lose is what you pay.</p>
-      <div class="tiles mt16"><div class="tile"><div class="k">Practice account</div><div class="v">${money(a.value)}</div><div class="s ${cls(a.ret)}">${pct(a.ret * 100)} since the start</div></div><div class="tile"><div class="k">Cash</div><div class="v">${money(a.cash)}</div><div class="s">${a.open.length} open</div></div></div>
-      ${a.open.length ? `<div class="section-h"><h2>Open</h2></div><div class="group">${a.open.map(o => `<button class="cell" data-act="optPos" data-id="${o.id}"><div class="lead opt-k ${o.kind}">${o.kind === 'call' ? 'C' : 'P'}</div><div class="main"><div class="title">${h(o.sym)} $${o.strike} ${o.kind} ×${o.qty}</div><div class="sub">${fmtDate(o.exp + 'T12:00')} · ${o.days} day${o.days === 1 ? '' : 's'} left${o.theta != null ? ` · time costs ${money(Math.abs(o.theta))}/day` : ''}</div></div><div class="trail col" style="align-items:flex-end"><b class="n">${o.value != null ? money(o.value) : '–'}</b><span class="n ${cls(o.pl || 0)}">${o.pl != null ? money(o.pl, { sign: true }) : ''}</span></div></button>`).join('')}</div>` : ''}
-      <div class="section-h"><h2>Chain</h2><button class="more" data-act="optSym">${h(c.sym)} ${icon('down')}</button></div>
-      <div class="t-foot" style="margin:0 2px 8px">${h(c.sym)} ${price(c.spot)} · volatility about ${Math.round(c.iv * 100)}% a year</div>
-      <div class="chips">${c.exps.map(x => `<button class="chip ${x === c.exp ? 'on' : ''}" data-exp="${x}">${h(new Date(x + 'T12:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }))}</button>`).join('')}</div>
-      <div class="mt12">${seg('optKind', [['call', 'Calls'], ['put', 'Puts']], p.kind)}</div>
-      <div class="group mt12 opt-chain"><div class="cell opt-hd"><span>Strike</span><span>Price</span><span>Chance-ish</span></div>${c.strikes.map(s => { const itm = p.kind === 'call' ? s.K < c.spot : s.K > c.spot, px = p.kind === 'call' ? s.call : s.put, d = p.kind === 'call' ? s.callD : s.putD; return `<button class="cell opt-row ${itm ? 'itm' : ''}" data-k="${s.K}"><span class="n">$${s.K}</span><span class="n">${money(px)}<small> ×100</small></span><span class="n">${Math.round(Math.abs(d) * 100)}%</span></button>`; }).join('')}</div>
-      <p class="note">"Chance-ish" is the delta: roughly the odds it ends in the money. Shaded rows are already in the money. ${OPT_NOTE}</p>
-      ${a.closed.length ? `<div class="section-h"><h2>Closed</h2></div><div class="group">${a.closed.slice(0, 15).map(o => `<div class="cell"><div class="lead opt-k ${o.kind}">${o.kind === 'call' ? 'C' : 'P'}</div><div class="main"><div class="title">${h(o.sym)} $${o.strike} ${o.kind} ×${o.qty}</div><div class="sub">${{ sold: 'Sold', exercised: 'Expired in the money', expired: 'Expired worthless' }[o.how] || o.how} · ${fmtDate(o.closed)}</div></div><b class="n ${cls(o.pl)}">${money(o.pl, { sign: true })}</b></div>`).join('')}</div>` : ''}
-      <button class="btn btn-quiet btn-block mt16" data-act="optReset">${icon('refresh')}Start over with $10,000</button>`;
-    p.scroller.scrollTop = keep;
-    p.body.querySelectorAll('[data-exp]').forEach(b => b.addEventListener('click', () => { p.exp = b.dataset.exp; p.load(); }));
-    onSeg(p.body, 'optKind', k => { p.kind = k; this.draw(p); });
-    p.body.querySelectorAll('.opt-row').forEach(b => b.addEventListener('click', () => optBuy(p, +b.dataset.k)));
-  },
-};
-function optBuy(p, K) {
-  const c = p.c, s = c.strikes.find(x => x.K === K), kind = p.kind, px = kind === 'call' ? s.call : s.put; let qty = 1;
-  const be = kind === 'call' ? K + px : K - px;
-  const sh = sheet({ title: `Buy ${c.sym} $${K} ${kind}`, html: '' });
-  const draw = () => {
-    sh.html(`<div class="t-foot">Expires ${fmtDate(c.exp + 'T12:00')} (${c.days} days) · ${c.sym} now ${price(c.spot)}</div>
-      <div class="field"><span>Contracts (each is 100 shares)</span>${seg('optQty', [['1', '1'], ['2', '2'], ['5', '5'], ['10', '10']], String(qty))}</div>
-      <div class="card mt12">${[['Cost', money(px * 100 * qty + 0.65 * qty)], ['Breaks even at', `${price(be)} (${pct((be / c.spot - 1) * 100)})`], ['Most you can lose', money(px * 100 * qty + 0.65 * qty)], ['If it ends at ' + price(kind === 'call' ? c.spot * 1.1 : c.spot * 0.9), money(Math.max(0, kind === 'call' ? c.spot * 1.1 - K : K - c.spot * 0.9) * 100 * qty)]].map(([k, v]) => `<div class="kv"><span class="k">${k}</span><span class="v">${v}</span></div>`).join('')}</div>
-      <p class="note">${kind === 'call' ? `You make money if ${c.sym} is above ${price(be)} at expiry, or rises fast enough before then.` : `You make money if ${c.sym} is below ${price(be)} at expiry, or falls fast enough before then.`} Every day that passes costs a little value (time decay). ${OPT_NOTE}</p>`);
-    sh.foot(`<button class="btn btn-primary btn-lg btn-block" id="ob-go">Buy for ${money(px * 100 * qty + 0.65 * qty)}</button>`);
-    onSeg(sh.body, 'optQty', v => { qty = +v; draw(); });
-    $('#ob-go', sh.footEl).addEventListener('click', async e => { busy(e.currentTarget, true); try { await post('options/buy', { sym: c.sym, kind, strike: K, exp: c.exp, qty }); sh.close(); toast('Bought', { sub: `${qty} ${c.sym} $${K} ${kind}${qty === 1 ? '' : 's'}` }); p.load(); } catch (err) { busy(e.currentTarget, false); toastErr(err); } });
-  };
-  draw();
-}
-ACT.optPos = async el => {
-  const p = Router.pages().reverse().find(x => x.name === 'options'), o = p?.a.open.find(x => x.id === +el.dataset.id); if (!o) return;
-  if (!(await confirmBox({ title: `Sell ${o.sym} $${o.strike} ${o.kind}?`, msg: `It's worth about ${money(o.value)} now (${money(o.pl, { sign: true })}). You paid ${money(o.paid * 100 * o.qty)}.`, ok: 'Sell' }))) return;
-  try { await post(`options/${o.id}/sell`, {}); toast('Sold'); p.load(); } catch (e) { toastErr(e); }
-};
-ACT.optSym = async () => { const p = Router.pages().reverse().find(x => x.name === 'options'); if (!p) return; const s = await pickSymbol('Options on…'); if (!s) return; if (isCrypto(s)) return toast('Options practice is for stocks and ETFs', { kind: 'err' }); p.sym = s; p.exp = null; store.set('optSym', s); p.load(); };
-ACT.optReset = async () => { const p = Router.pages().reverse().find(x => x.name === 'options'); if (!(await confirmBox({ title: 'Start over?', msg: 'Clears every options position and resets the practice account to $10,000.', ok: 'Start over', danger: true }))) return; await post('options/reset', {}); p?.load(); };
 
 // ---------- dividend calendar (added to the Dividends page) ----------
 const _divMount = PAGES.dividends.mount;
@@ -8420,6 +8392,40 @@ PAGES.costs = {
 // Newest first. Each release: version, date, a one-line headline and grouped notes.
 // ===================================================================
 const CHANGELOG = [
+  { v: '4.0.0', d: '2026-10-27', title: 'Options in your wallets', groups: [
+    ['Real options, in real wallets', [
+      'Options now live in your wallets instead of a separate sandbox. They count toward the wallet\'s value (ones you sold count against it), show up in its taxes, and use its cash and shares the way a broker does.',
+      'Calls and puts on any stock or ETF, plus SPX, the S&P 500 index (priced from SPY × 10). Each strike shows a bid and an ask that widen away from the money, and the delta.',
+      'Trading hours are 9:30 am to 4:00 pm Eastern. When a stock is halted, its options are halted too. Options are paid for with cash, never margin. Fees are about 4¢ a contract, like the regulatory and clearing fees that commission-free brokers pass on.',
+    ]],
+    ['Approval levels, like a broker', [
+      'Level 1: covered calls and cash-secured puts. Level 2: buying calls and puts. Level 3: spreads. Level 4: naked calls and puts.',
+      'Each level has a short quiz you need to get fully right. You can retry it, and a quiz you pass counts for every wallet.',
+      'Level 2 also needs 10 stock trades in the wallet. Level 3 needs a margin account. Level 4 needs a margin account with $25,000 or more. Every level needs you to be 18 or older.',
+      'Cash and Instant accounts can reach level 2. IRAs stay at level 1. Practice-rules wallets can\'t trade options. You can lower a wallet\'s level any time.',
+    ]],
+    ['Collateral', [
+      'A covered call holds 100 shares for each contract, and those shares can\'t be sold until you buy the call back. A cash-secured put holds the strike × 100 in cash.',
+      'A credit spread holds its width. A naked option holds FINRA\'s margin requirement: 20% of the stock (15% for an index) minus how far out of the money it is, at least 10%, plus the option\'s price. That requirement is recalculated as the price moves.',
+      'Before every order you see what you pay or receive, the fees, what gets held, the most you can make and lose, the breakeven, and what happens at expiration.',
+    ]],
+    ['Spreads', ['Switch the chain to Spread, tap the strike to buy, then the strike to sell. Vertical spreads: same type and expiration, debit or credit. Both legs close together, and closing only the long leg (which would leave the short one naked) is blocked below level 4.']],
+    ['Expiration and assignment, the OCC way', [
+      'At expiration, anything a cent or more in the money is exercised automatically, and options you sold that end in the money are assigned. Calls turn into 100 shares bought at the strike, puts into 100 shares sold at the strike.',
+      'The premium folds into the stock\'s cost or sale price, the way the IRS treats it. Options closed or expired on their own go on your tax records and Form 8949 (options you sold are always short-term).',
+      'If the wallet can\'t afford to exercise (not enough cash, or no shares to deliver for a put), Mango sells the option at 3:30 pm on the last day, like a broker would.',
+      'SPX settles in cash and is European style: no early exercise or assignment. Stock options are American style: you can exercise early from the position screen, and it tells you how much time value that would give up.',
+      'Early assignment: a call you sold that is in the money can be assigned the day before an ex-dividend date if the dividend is worth more than its time value left. Deep in-the-money puts with no time value left can be assigned early too.',
+      'Pin risk: on expiration day, a heads-up when the stock is within 1% of a strike you sold, because you won\'t know whether you were assigned until the next morning.',
+      'Spreads that end in the money are settled together in cash.',
+    ]],
+    ['New bot: Covered calls', [
+      'Buys steady stocks in 100-share lots (cheapest first, so smaller wallets still get a lot) and sells one call a month against each lot: about 30 delta, 30 to 45 days out.',
+      'Buys the call back once it has kept 80% of the premium, then sells the next one. It skips calls that would run past earnings or an ex-dividend date. Near expiration, it either lets the shares go or rolls to a later month (your pick).',
+      'Its own wallet gets level 1 automatically if you\'ve passed the level 1 quiz. Backtests show the stocks only, not the calls.',
+    ]],
+    ['Your old options sandbox', ['If you used it, it\'s now a wallet called "Options practice" with the same cash and open positions, already at level 2. Past trades are in its history.']],
+  ] },
   { v: '3.9.0', d: '2026-10-26', title: 'Taxes you can act on', groups: [
     ['Your tax setting', [
       'Add your filing status, income and state in Settings → Your profile, and every tax number becomes "what you would actually pay": 2026 federal brackets and standard deduction, the 0/15/20% long-term rates, the 3.8% investment income tax at high incomes, and your state.',
@@ -8959,6 +8965,175 @@ PAGES.form8949 = {
 ACT.print8949 = () => { document.documentElement.classList.add('printing'); setTimeout(() => { window.print(); document.documentElement.classList.remove('printing'); }, 60); };
 
 // ===================================================================
+// Options in your wallets: approval levels, the chain, orders, spreads, positions, expiration
+// ===================================================================
+const OPT_COLL = { covered: 'Covered by your shares', cash: 'Cash-secured', spread: 'Part of a spread', naked: 'Naked (margin)' };
+const OPT_ACT = { bto: 'Bought', sto: 'Sold', btc: 'Bought back', stc: 'Sold', exercised: 'Exercised', assigned: 'Assigned', expired: 'Expired', cash: 'Settled in cash' };
+const optPage = () => Router.pages().reverse().find(x => x.name === 'options');
+const expShort = e => new Date(e + 'T12:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+const dte = d => d <= 0 ? 'expires today' : `${d} day${d === 1 ? '' : 's'} left`;
+on('opt', () => { const p = optPage(); if (p?.load) p.load(); });
+PAGES.options = {
+  mount(p, [sym]) {
+    p.title('Options', true); p.sym = (sym || store.get('optSym') || 'SPY').toUpperCase(); p.kind = 'call'; p.side = 'buy'; p.exp = null; p.mode = 'one'; p.pick = null;
+    p.load = async () => {
+      try {
+        const [st, ch] = await Promise.all([api('opt/state'), api(`opt/chain/${encodeURIComponent(p.sym)}${p.exp ? '?exp=' + p.exp : ''}`).catch(e => ({ error: e.message }))]);
+        p.st = st; p.ch = ch; if (ch.exp) p.exp = ch.exp; this.draw(p);
+      } catch (e) { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; }
+    };
+    p.body.innerHTML = '<div class="sk sk-block mt16" style="height:420px"></div>'; p.load();
+    p.timer(() => p.load(), 20e3);
+  },
+  refresh(p) { p.load && p.load(); },
+  draw(p) {
+    const st = p.st, ch = p.ch, keep = p.scroller.scrollTop, wl = st.wallet;
+    const lvl = st.level, L = st.levels;
+    const ladder = `<div class="opt-ladder">${L.slice(1).map(l => `<div class="${l.n <= lvl ? 'on' : ''} ${l.n > st.cap ? 'off' : ''}"><b>${l.n}</b><span>${h(l.short || l.allows)}</span></div>`).join('')}</div>`;
+    const nx = st.next, needs = nx ? nx.needs.filter(x => !(x.ok && ((x.quiz && x.quiz < nx.n) || x.label === '18 or older'))) : [], ready = nx && needs.every(x => x.ok), quizNeed = needs.find(x => x.quiz && !x.ok);
+    const levelCard = !wl.real ? `<div class="callout warn mt16">${icon('lock')}<div><b>This wallet uses practice rules</b><br>Options need a wallet on Robinhood or Alpaca rules, like a real brokerage account. Change the rules in the wallet's settings, or switch wallets.</div></div>`
+      : wl.broker ? `<div class="callout mt16">${icon('lock')}<div>This wallet is linked to your broker, so options would go through the broker. Switch to a paper wallet to trade options here.</div></div>`
+      : `<div class="card mt16 opt-lvl"><div class="opt-rb"><div><div class="t-foot">Options approval</div><div class="opt-lvl-n">${lvl ? `Level ${lvl}` : 'Not approved yet'}</div></div>${lvl ? `<button class="btn btn-quiet btn-sm" data-act="optLower">Change</button>` : ''}</div>${ladder}
+        ${nx ? `<div class="opt-needs"><div class="t-foot">For level ${nx.n}: ${h(L[nx.n].allows.toLowerCase())}</div>${needs.map(x => `<div class="opt-need ${x.ok ? 'ok' : ''}">${icon(x.ok ? 'check' : 'dot')}<span>${h(x.label)}</span><em>${h(x.have)}</em></div>`).join('')}
+          <div class="btns mt12">${quizNeed ? `<button class="btn btn-primary" data-act="optQuiz" data-n="${quizNeed.quiz}">Take the level ${quizNeed.quiz} quiz</button>` : ''}${ready ? `<button class="btn btn-primary" data-act="optUnlock" data-n="${nx.n}">Approve level ${nx.n}</button>` : ''}</div></div>`
+          : st.cap < 4 && lvl >= st.cap ? `<p class="t-foot mt8">${wl.acct === 'ira' || wl.acct === 'roth' ? 'IRAs stop at level 1 here.' : 'Spreads and naked options need a margin account.'}</p>` : ''}
+        ${st.age ? `<div class="callout warn mt12">${icon('key')}<div>${h(st.age)}</div></div>` : ''}</div>`;
+    const open = st.open, groups = [], seen = new Set();
+    for (const o of open) { if (seen.has(o.id)) continue; if (o.spread) { const legs = open.filter(x => x.spread === o.spread); legs.forEach(x => seen.add(x.id)); groups.push(legs); } else { seen.add(o.id); groups.push([o]); } }
+    const posCell = g => {
+      const o = g[0], sp = g.length > 1, val = g.reduce((t, x) => t + x.value, 0), pl = g.reduce((t, x) => t + x.pl, 0);
+      const title = sp ? `${h(o.sym)} $${[...g].sort((a, b) => b.qty - a.qty).map(x => x.strike).join('/$')} ${o.kind} spread` : `${o.qty < 0 ? 'Short ' : ''}${h(o.label)}`;
+      const warn = g.some(x => x.pin) ? '<span class="opt-flag dn">Pin risk</span>' : g.some(x => x.qty < 0 && x.itm && x.days <= 7) ? '<span class="opt-flag">May be assigned</span>' : g.some(x => x.qty < 0 && x.itm && x.kind === 'call' && x.ext < 0.1) ? '<span class="opt-flag">Early assignment risk</span>' : '';
+      return `<button class="cell" data-act="optPos" data-id="${o.id}"><div class="lead opt-k ${o.kind} ${o.qty < 0 && !sp ? 'short' : ''}">${sp ? '⇅' : o.kind === 'call' ? 'C' : 'P'}</div><div class="main"><div class="title">${title} <small>×${Math.abs(o.qty)}</small></div><div class="sub">${dte(o.days)} · ${sp ? 'spread' : OPT_COLL[o.coll] || (o.itm ? 'in the money' : 'out of the money')}${o.bot ? ' · bot' : ''} ${warn}</div></div><div class="trail col" style="align-items:flex-end"><b class="n">${money(val)}</b><span class="n t-cap ${cls(pl)}">${money(pl, { sign: true })}</span></div></button>`;
+    };
+    const tiles = wl.real && !wl.broker ? `<div class="tiles mt16"><div class="tile"><div class="k">Options value</div><div class="v ${cls(st.value)}">${money(st.value)}</div><div class="s">${open.length} open</div></div><div class="tile"><div class="k">Held as collateral</div><div class="v">${money(st.holds.cash)}</div><div class="s">${Object.entries(st.holds.shares).map(([s, q]) => `${q} ${h(s)}`).join(', ') || 'no shares held'}</div></div></div><div class="t-foot" style="margin:8px 2px 0">${money(st.bp)} cash to use. Options are paid for with cash, not margin.</div>` : '';
+    // the chain
+    let chainHtml = '';
+    if (ch.error) chainHtml = `<div class="callout mt12">${icon('info')}<div>${h(ch.error)}</div></div>`;
+    else {
+      const kind = p.kind, K0 = ch.spot, pick = p.pick;
+      const warn = [ch.earnings ? `Earnings on ${fmtDate(ch.earnings + 'T12:00')}, before this expiration: prices often jump.` : '', ch.exDiv ? `Ex-dividend ${ch.exDiv.estimated ? 'about ' : ''}${fmtDate(ch.exDiv.date + 'T12:00')} (${money(ch.exDiv.amount)}): in-the-money calls you sold may be assigned the day before.` : ''].filter(Boolean);
+      chainHtml = `<div class="t-foot" style="margin:0 2px 8px">${ch.index ? `${h(ch.indexName)} ${price(ch.spot)} (from SPY × 10) · cash-settled, European style` : `${h(ch.sym)} ${price(ch.spot)} · American style, settles in shares`} · volatility about ${Math.round(ch.iv * 100)}% a year</div>
+        <div class="chips">${ch.exps.map(x => `<button class="chip ${x === ch.exp ? 'on' : ''}" data-exp="${x}">${expShort(x)}</button>`).join('')}</div>
+        <div class="opt-ctl mt12">${seg('optKind', [['call', 'Calls'], ['put', 'Puts']], kind)}${seg('optMode', [['one', 'One option'], ['spread', 'Spread']], p.mode)}</div>
+        ${p.mode === 'one' ? `<div class="mt8">${seg('optSide', [['buy', 'Buy'], ['sell', 'Sell']], p.side)}</div>` : `<p class="t-foot mt8">${pick ? `Buying the $${pick} ${kind}. Now tap the strike to sell.` : `Tap the strike to buy, then the one to sell. ${kind === 'call' ? 'Selling a higher strike is a debit spread (a cheaper bet it rises); a lower one is a credit spread.' : 'Selling a lower strike is a debit spread (a cheaper bet it falls); a higher one is a credit spread.'}`}</p>`}
+        ${warn.map(x => `<div class="callout warn mt8">${icon('calendar')}<div>${h(x)}</div></div>`).join('')}
+        <div class="group mt12 opt-chain"><div class="cell opt-hd"><span>Strike</span><span>Bid</span><span>Ask</span><span>Delta</span></div>${ch.strikes.map(s => { const q = s[kind], itm = kind === 'call' ? s.K < K0 : s.K > K0; return `<button class="cell opt-row ${itm ? 'itm' : ''} ${pick === s.K ? 'picked' : ''}" data-k="${s.K}"><span class="n">$${s.K}</span><span class="n">${q.bid.toFixed(2)}</span><span class="n">${q.ask.toFixed(2)}</span><span class="n">${q.delta.toFixed(2)}</span></button>`; }).join('')}</div>
+        <p class="note">Prices are per share; one contract is 100 shares. Delta is roughly the chance it ends in the money. Shaded strikes are in the money now. Prices come from a model of recent volatility, with a bid and ask that widen away from the money.</p>`;
+    }
+    p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Options</h1><button class="opt-wal" data-act="wallets">${h(wl.emoji)} ${h(wl.name)} ${icon('down')}</button>
+      ${levelCard}${tiles}
+      ${groups.length ? `<div class="section-h"><h2>Open</h2></div><div class="group">${groups.map(posCell).join('')}</div>` : ''}
+      <div class="section-h"><h2>Chain</h2><button class="more" data-act="optSym">${h(p.sym)} ${icon('down')}</button></div>
+      <div class="chips" style="margin-bottom:8px">${['SPY', 'QQQ', 'SPX', 'AAPL', 'TSLA', 'KO'].filter(s => s !== p.sym).map(s => `<button class="chip" data-osym="${s}">${s}</button>`).join('')}</div>
+      ${chainHtml}
+      ${st.history.length ? `<div class="section-h"><h2>History</h2></div><div class="group">${st.history.slice(0, 25).map(t => `<div class="cell"><div class="lead opt-k ${/Call$/.test(t.label) ? 'call' : 'put'}">${/Call$/.test(t.label) ? 'C' : 'P'}</div><div class="main"><div class="title">${OPT_ACT[t.action] || h(t.action)} ${t.qty} ${h(t.label)}</div><div class="sub">${fmtDate(t.ts)}${['bto', 'sto', 'btc', 'stc'].includes(t.action) ? ` · ${money(t.price)} a share` : ''}${t.note ? ' · ' + h(t.note) : ''}</div></div>${t.pnl != null ? `<b class="n ${cls(t.pnl)}">${money(t.pnl, { sign: true })}</b>` : ''}</div>`).join('')}</div>` : ''}
+      <p class="note">How it works: options trade 9:30 am to 4:00 pm Eastern. At expiration, anything a cent or more in the money is exercised automatically, and options you sold that end in the money are assigned. If the wallet can't afford to exercise, Mango sells the option at 3:30 pm on the last day, like a broker. Premiums you collect stay in your cash; the shares or cash behind what you sold are held until it closes.</p>`;
+    p.scroller.scrollTop = keep;
+    p.body.querySelectorAll('[data-exp]').forEach(b => b.addEventListener('click', () => { p.exp = b.dataset.exp; p.pick = null; p.load(); }));
+    p.body.querySelectorAll('[data-osym]').forEach(b => b.addEventListener('click', () => { p.sym = b.dataset.osym; p.exp = null; p.pick = null; store.set('optSym', p.sym); p.load(); }));
+    onSeg(p.body, 'optKind', k => { p.kind = k; p.pick = null; this.draw(p); });
+    onSeg(p.body, 'optSide', k => { p.side = k; this.draw(p); });
+    onSeg(p.body, 'optMode', k => { p.mode = k; p.pick = null; this.draw(p); });
+    p.body.querySelectorAll('.opt-row').forEach(b => b.addEventListener('click', () => {
+      const K = +b.dataset.k;
+      if (p.mode === 'one') return optOrder(p, [{ kind: p.kind, strike: K, exp: p.exp, side: p.side, qty: 1 }]);
+      if (!p.pick) { p.pick = K; this.draw(p); return; }
+      if (p.pick === K) { p.pick = null; this.draw(p); return; }
+      const legs = [{ kind: p.kind, strike: p.pick, exp: p.exp, side: 'buy', qty: 1 }, { kind: p.kind, strike: K, exp: p.exp, side: 'sell', qty: 1 }]; p.pick = null; this.draw(p); optOrder(p, legs);
+    }));
+  },
+};
+// what happens at expiration, in words
+function optOutcome(pv) {
+  const l = pv.legs[0], u = pv.und;
+  if (pv.spread) return pv.net > 0 ? `You make money if ${u} finishes past ${price(pv.be)}. The most you can lose is what you pay; the most you can make is capped by the other strike.` : `You keep the credit if ${u} stays on the safe side of $${pv.legs.find(x => x.side === 'sell').strike}. The most you can lose is the width minus the credit.`;
+  if (l.side === 'buy') return pv.index ? `If SPX ends above ${l.kind === 'call' ? 'the strike' : ''}${l.kind === 'put' ? 'below the strike' : ''} you get the difference in cash, × 100. Otherwise it expires worthless.` : `${l.kind === 'call' ? `If ${u} is above $${l.strike} at expiration, you buy 100 shares a contract at $${l.strike}` : `If ${u} is below $${l.strike} at expiration, you sell 100 shares a contract at $${l.strike}`} (or Mango sells it for you at 3:30 pm if the wallet can't). Below breakeven at ${price(pv.be)} it loses money, and every day costs a little time value.`;
+  if (l.kind === 'call') return l.coll === 'covered' ? `If ${u} is above $${l.strike} at expiration, your 100 shares a contract are sold at $${l.strike} (called away). Either way you keep the premium. Your shares can't be sold while the call is open.` : `Naked: if ${u} rises past $${l.strike}, you owe the difference × 100 with no limit. You keep the premium if it stays below.`;
+  return l.coll === 'cash' ? `If ${u} is below $${l.strike} at expiration, you buy 100 shares a contract at $${l.strike} with the cash being held. Either way you keep the premium.` : `Naked put on margin: if ${u} falls below $${l.strike}, you buy the shares at the strike, using margin if needed.`;
+}
+function optOrder(p, legs0) {
+  let legs = legs0.map(x => ({ ...x })), pv = null;
+  const sh = sheet({ title: legs.length > 1 ? 'Spread' : `${legs[0].side === 'buy' ? 'Buy' : 'Sell'} ${p.sym} $${legs[0].strike} ${legs[0].kind}`, html: '<div class="sk sk-block" style="height:260px"></div>' });
+  const go = async () => {
+    try { pv = await post('opt/preview', { sym: p.sym, legs }); } catch (e) { sh.html(`<div class="callout warn">${icon('info')}<div>${h(e.message)}</div></div>`); sh.foot(''); return; }
+    const credit = pv.net < 0, amt = Math.abs(pv.net), qty = legs[0].qty;
+    const row = (k, v) => `<div class="kv"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+    sh.html(`<div class="t-foot">${h(pv.und)} ${price(pv.spot)} · expires ${fmtDate(legs[0].exp + 'T12:00')} (${dte(pv.legs[0].days)})</div>
+      <div class="field"><span>Contracts (each is 100 shares)</span>${seg('oq', [['1', '1'], ['2', '2'], ['5', '5'], ['10', '10']], String(qty))}</div>
+      ${pv.legs.length === 1 && pv.legs[0].kind === 'put' && pv.legs[0].side === 'sell' && pv.level >= 4 ? `<div class="field"><span>Backed by</span>${seg('osec', [['cash', 'Cash'], ['naked', 'Margin (naked)']], legs[0].secure || 'cash')}</div>` : ''}
+      <div class="card mt12">${pv.legs.map(l => row(`${l.side === 'buy' ? 'Buy' : 'Sell'} ${l.qty} × $${l.strike} ${l.kind}`, `${money(l.px)} <small class="t-cap">bid ${l.bid.toFixed(2)} · ask ${l.ask.toFixed(2)}</small>`)).join('')}
+        ${row(credit ? 'You receive' : 'You pay', money(amt))}${row('Fees', money(pv.fees))}
+        ${pv.hold ? row('Held as collateral', money(pv.hold)) : ''}${pv.holdShares ? row('Shares held', `${pv.holdShares} ${h(pv.und)}`) : ''}
+        ${row('Most you can make', pv.unlimitedGain ? 'No limit' : money(pv.maxGain))}${row('Most you can lose', pv.unlimitedLoss ? '<b class="dn">No limit</b>' : pv.maxLoss == null ? 'The shares\' own risk' : money(pv.maxLoss))}
+        ${pv.be ? row('Breaks even at', `${price(pv.be)} (${pct((pv.be / pv.spot - 1) * 100)})`) : ''}</div>
+      <p class="note">${h(optOutcome(pv))}</p>
+      ${pv.notes.map(n => `<div class="callout mt8">${icon('info')}<div>${h(n)}</div></div>`).join('')}
+      ${pv.problems.map(n => `<div class="callout warn mt8">${icon('lock')}<div>${h(n)}</div></div>`).join('')}`);
+    sh.foot(`<button class="btn btn-primary btn-lg btn-block" id="oo-go" ${pv.ok ? '' : 'disabled'}>${pv.ok ? (credit ? `Sell for ${money(amt)} credit` : `Buy for ${money(amt + pv.fees)}`) : 'Not allowed yet'}</button>`);
+    onSeg(sh.body, 'oq', v => { legs = legs.map(x => ({ ...x, qty: +v })); go(); });
+    onSeg(sh.body, 'osec', v => { legs[0].secure = v; go(); });
+    $('#oo-go', sh.footEl)?.addEventListener('click', async e => {
+      busy(e.currentTarget, true);
+      try { const r = await post('opt/order', { sym: p.sym, legs }); sh.close(); toast(credit ? 'Sold' : 'Bought', { sub: r.legs.map(l => `${l.side === 'buy' ? 'Bought' : 'Sold'} ${l.qty} ${l.label}`).join(' · ') }); p.load(); loadState({ quiet: true }).catch(() => {}); }
+      catch (err) { busy(e.currentTarget, false); toastErr(err); }
+    });
+  };
+  go();
+}
+ACT.optPos = el => {
+  const p = optPage(), o = p?.st.open.find(x => x.id === +el.dataset.id); if (!o) return;
+  const legs = o.spread ? p.st.open.filter(x => x.spread === o.spread) : [o];
+  const val = legs.reduce((t, x) => t + x.value, 0), pl = legs.reduce((t, x) => t + x.pl, 0), row = (k, v) => `<div class="kv"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+  const sh = sheet({ title: o.spread ? `${o.sym} ${o.kind} spread` : o.label });
+  const canEx = !o.spread && o.qty > 0 && !o.index && o.itm;
+  const away = x => Math.abs(x.kind === 'call' ? x.strike - x.spot : x.spot - x.strike);
+  sh.html(`${legs.map(x => `<div class="card mt8"><div class="opt-rb"><b>${o.spread ? `${x.qty > 0 ? 'Bought' : 'Sold'} the $${x.strike} ${x.kind}` : `${x.qty > 0 ? 'Bought' : 'Sold'} ${Math.abs(x.qty)} contract${Math.abs(x.qty) > 1 ? 's' : ''}`}${o.spread ? ` ×${Math.abs(x.qty)}` : ''}</b><span class="t-cap">${dte(x.days)}</span></div>
+      ${row('Price now', `${money(x.mark)} <small class="t-cap">bid ${x.bid?.toFixed(2)} · ask ${x.ask?.toFixed(2)}</small>`)}${row(x.qty > 0 ? 'You paid' : 'You got', `${money(x.avg)} a share`)}
+      ${row(x.itm ? 'In the money by' : 'Out of the money by', `${money(x.itm ? x.intr : away(x))} <small class="t-cap">${h(x.und)} ${price(x.spot)}</small>`)}
+      ${row('Moves like', `${x.delta > 0 ? '' : '−'}${Math.abs(Math.round(x.delta))} shares of ${h(x.und)}`)}${row('Time decay', `<span class="${cls(x.theta)}">${money(x.theta, { sign: true })} a day</span>`)}
+      ${x.coll ? row('Backed by', x.coll === 'covered' ? `${x.holdShares} ${h(x.und)} shares` : x.hold ? `${money(x.hold)} ${x.coll === 'naked' ? 'margin requirement' : 'held'}` : OPT_COLL[x.coll]) : ''}</div>`).join('')}
+    <div class="card mt12">${val < 0 ? row('Cost to buy back', money(-val)) : row('Worth now', money(val))}${row('Profit or loss', `<b class="${cls(pl)}">${money(pl, { sign: true })}</b>`)}</div>
+    ${o.pin ? `<div class="callout warn mt12">${icon('flag')}<div><b>Pin risk.</b> It's expiration day and ${h(o.und)} is right by the strike. It might or might not be assigned, and you won't know until tomorrow. Buying it back now removes the doubt.</div></div>` : ''}
+    ${!o.spread && o.qty < 0 && o.itm && o.kind === 'call' && o.ext < 0.1 ? `<div class="callout mt12">${icon('info')}<div>Almost no time value is left, so the owner could exercise early, especially the day before an ex-dividend date.</div></div>` : ''}`);
+  sh.foot(`<div class="btns">${canEx ? `<button class="btn btn-quiet" id="op-ex">Exercise</button>` : ''}<button class="btn btn-primary" id="op-close">${o.spread ? 'Close the spread' : o.qty > 0 ? `Sell for ${money(Math.abs(o.qty) * 100 * (o.bid || 0))}` : `Buy back for ${money(Math.abs(o.qty) * 100 * (o.ask || 0))}`}</button></div>`);
+  $('#op-close', sh.footEl).addEventListener('click', async e => { busy(e.currentTarget, true); try { const r = await post('opt/close', { ids: legs.map(x => x.id) }); sh.close(); toast('Closed', { sub: money(r.closed.reduce((t, x) => t + x.pnl, 0), { sign: true }) }); p.load(); loadState({ quiet: true }).catch(() => {}); } catch (err) { busy(e.currentTarget, false); toastErr(err); } });
+  $('#op-ex', sh.footEl)?.addEventListener('click', async () => {
+    const cost = o.kind === 'call' ? `buy ${o.qty * 100} ${o.und} for ${money(o.strike * 100 * o.qty)}` : `sell ${o.qty * 100} ${o.und} at ${price(o.strike)}`;
+    if (!(await confirmBox({ title: 'Exercise early?', msg: `You'll ${cost}.${o.ext > 0.02 ? ` It still has about ${money(o.ext * 100 * o.qty)} of time value that exercising throws away; selling it usually gets more.` : ''}`, ok: 'Exercise' }))) return;
+    try { await post('opt/exercise', { id: o.id }); sh.close(); toast('Exercised'); p.load(); loadState({ quiet: true }).catch(() => {}); } catch (err) { toastErr(err); }
+  });
+};
+ACT.optSym = async () => { const p = optPage(); if (!p) return; const s = await pickSymbol('Options on…'); if (!s) return; if (isCrypto(s)) return toast('Options are for stocks, ETFs and SPX', { kind: 'err' }); p.sym = s; p.exp = null; p.pick = null; store.set('optSym', s); p.load(); };
+ACT.optUnlock = async el => { try { const r = await post('opt/unlock', { level: +el.dataset.n }); toast(`Level ${r.level} approved`); optPage()?.load(); loadState({ quiet: true }).catch(() => {}); } catch (e) { toastErr(e); } };
+ACT.optLower = async () => {
+  const p = optPage(); if (!p) return; const st = p.st;
+  const s = sheet({ title: 'Options level', html: `<p class="t-sub">You can lower the level any time. Going back up needs the same steps again (quizzes you've passed still count).</p><div class="group mt12">${st.levels.slice(0, st.level + 1).map(l => `<button class="cell" data-n="${l.n}"><div class="main"><div class="title">${l.n ? 'Level ' + l.n : 'Off'}${l.n === st.level ? ' · now' : ''}</div><div class="sub">${h(l.allows)}</div></div></button>`).join('')}</div>` });
+  s.body.onclick = async e => { const b = e.target.closest('[data-n]'); if (!b) return; try { await post('opt/unlock', { level: +b.dataset.n }); s.close(); p.load(); } catch (err) { toastErr(err); } };
+};
+ACT.optQuiz = async el => {
+  const n = +el.dataset.n; let q; try { q = await api('opt/quiz/' + n); } catch (e) { return toastErr(e); }
+  const picks = []; const s = sheet({ title: `Level ${n} quiz`, tall: true });
+  const draw = (fb = null) => {
+    s.html(`<p class="t-sub">Brokers check that you understand the risks before approving each level. Get all ${q.questions.length} right; you can try again.</p>
+      ${q.questions.map((x, i) => `<div class="quiz-q mt16 ${fb?.wrong.includes(i) ? 'wrong' : ''}"><b>${i + 1}. ${h(x.q)}</b>${x.a.map(a => `<button class="quiz-a ${picks[i] === a ? 'on' : ''}" data-i="${i}" data-a="${h(a)}">${h(a)}</button>`).join('')}${fb?.wrong.includes(i) ? `<div class="t-foot dn mt8">Right answer: ${h(fb.explain[fb.wrong.indexOf(i)].right)}</div>` : ''}</div>`).join('')}`);
+    s.foot(`<button class="btn btn-primary btn-lg btn-block" id="qz-go" ${picks.filter(Boolean).length === q.questions.length ? '' : 'disabled'}>Check my answers</button>`);
+    s.body.querySelectorAll('.quiz-a').forEach(b => b.addEventListener('click', () => { picks[+b.dataset.i] = b.dataset.a; const top = s.body.scrollTop; draw(fb); s.body.scrollTop = top; }));
+    $('#qz-go', s.footEl).addEventListener('click', async e => {
+      busy(e.currentTarget, true);
+      try {
+        const r = await post('opt/quiz/' + n, { answers: picks });
+        if (!r.ok) { draw(r); toast(`${r.wrong.length} wrong. The right answers are shown.`, { kind: 'err' }); return; }
+        s.close(); toast(`Level ${n} quiz passed`);
+        const p = optPage(); await p?.load();
+        if (p?.st.next?.needs.every(x => x.ok)) { try { const u = await post('opt/unlock', { level: p.st.next.n }); toast(`Level ${u.level} approved`); p.load(); } catch (err) { /* other steps still missing */ } }
+      } catch (err) { busy(e.currentTarget, false); toastErr(err); }
+    });
+  };
+  draw();
+};
+
+// ===================================================================
 // Settings
 // ===================================================================
 function applyLook(s) {
@@ -9038,7 +9213,7 @@ PAGES.settings = {
       <div class="section-h"><h2>Risk rules</h2></div><div class="group">
         ${rowNum('maxPos', 'Max size of one position', 'Percent of the wallet. 0 is off.', '%')}
         ${rowNum('reservePct', 'Always keep this much cash', 'Percent of the wallet. 0 is off.', '%')}</div>
-      <p class="note">Wallets on Robinhood or Alpaca rules use the real fees, spreads, hours and settlement instead of the practice fees and closed-market options. Confirmations, automatic protection, interest and risk rules apply to every wallet.</p>`;
+      <p class="note">Wallets on Robinhood or Alpaca rules use the real fees, spreads, hours and settlement instead of the practice fees, and can trade options once approved. Confirmations, automatic protection, interest and risk rules apply to every wallet.</p>`;
   },
   notifications() {
     const S = SET();

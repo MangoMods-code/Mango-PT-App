@@ -2,7 +2,7 @@
 
 A paper trading app for iPhone with real market prices. It runs from the Home Screen and is built on Node and Postgres.
 
-**⬇️ [Download the latest version](https://github.com/MangoMods-code/Mango-PT-App/releases/latest)** · Current: [V3.9.0, Taxes you can act on](https://github.com/MangoMods-code/Mango-PT-App/releases/tag/V3.9.0) · [All releases](https://github.com/MangoMods-code/Mango-PT-App/releases)
+**⬇️ [Download the latest version](https://github.com/MangoMods-code/Mango-PT-App/releases/latest)** · Current: [V4.0.0, Options in your wallets](https://github.com/MangoMods-code/Mango-PT-App/releases/tag/V4.0.0) · [All releases](https://github.com/MangoMods-code/Mango-PT-App/releases)
 
 Trade stocks, ETFs and crypto with practice money. You can also put strategies to work as bots, let Autopilot run a mix of them, and watch it all happen in **Mango HQ**: a small isometric world where your bots walk around and a Council of up to ten members votes on every trade. If you connect an Alpaca account, the same app can trade it, on paper or with real money, on a separate side with its own safeguards.
 
@@ -71,7 +71,7 @@ Trade stocks, ETFs and crypto with practice money. You can also put strategies t
 - **Chart-signal alerts**: RSI levels, crossing the 50- or 200-day average, golden and death crosses, new 52-week highs and lows, and volume spikes. Checked every 5 minutes with the live price.
 - **Monthly review** of your trades and journal: return against the S&P 500, win rate, average hold, best and worst trades, results by tag and weekday, and coach's notes (AI, or a plain summary). A notification on the 1st of each month.
 - **What if?**: what a past buy would be worth today (adjusted for splits and dividends) against the S&P 500, with the worst drop along the way, plus what your own sells would be worth if you'd held.
-- **Options practice**: buy calls and puts on any stock or ETF with a separate $10,000 practice account. Prices are Black-Scholes estimates from recent volatility (clearly labeled, not real quotes). Positions settle at expiry.
+- **Options**: calls, puts, vertical spreads and SPX in any wallet on Robinhood or Alpaca rules, behind broker-style approval levels (1 covered calls and cash-secured puts, 2 buying, 3 spreads, 4 naked with $25,000+) with a short quiz for each. Shares and cash are held as collateral, positions count toward the wallet, and expiration follows OCC rules: automatic exercise a cent in the money, assignment, early assignment before dividends, cash settlement for SPX, pin-risk warnings. Prices are Black-Scholes estimates from recent volatility with a modeled bid and ask (clearly labeled, not real quotes). A **Covered calls** bot sells monthly calls on 100-share lots.
 - **Dividend calendar**: upcoming ex-dividend dates for what you hold and watch, estimated from each company's pattern, with the expected payment.
 - **Home Screen widget** via the Shortcuts app: a secret read-only link (text or JSON) with your balance, today's change and top movers. You can make a new link at any time.
 - New weekly challenges for these tools in Games.

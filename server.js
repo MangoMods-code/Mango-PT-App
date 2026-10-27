@@ -303,6 +303,18 @@ const MIGRATIONS = [
       create table if not exists contrib(id serial primary key, wid int not null, year int not null, amount numeric not null, kind text not null, note text, penalty numeric, tax numeric, ts timestamptz not null default now());
     `);
   },
+  // 9: options in wallets
+  async c => {
+    await c.query(`
+      alter table wallets add column if not exists opt_level int not null default 0;
+      create table if not exists optpos(id serial primary key, wid int not null, sym text not null, kind text not null, strike numeric not null, exp text not null, qty int not null, avg numeric not null,
+        coll text, spread int, why text, bot_id int, opened timestamptz not null default now(), closed timestamptz, close_px numeric, how text, pnl numeric);
+      create index if not exists optpos_w on optpos(wid) where closed is null;
+      create table if not exists opttrd(id serial primary key, wid int not null, ts timestamptz not null default now(), pos_id int, sym text not null, kind text not null, strike numeric not null, exp text not null,
+        action text not null, qty int not null, price numeric not null, fee numeric not null default 0, pnl numeric, why text, note text, bid numeric, ask numeric);
+      create index if not exists opttrd_w on opttrd(wid, id desc);
+    `);
+  },
 ];
 
 async function migrate() {
@@ -554,6 +566,7 @@ async function refreshUserSyms() {
     rows('select distinct p.sym from pos p join wallets w on w.id=p.wid where not w.archived'), rows('select distinct sym from ord'), rows('select distinct sym from lim'),
     rows('select distinct sym from alert where not fired'), rows('select sym from watch'), rows('select sym, kind from extra'), rows('select distinct sym from preds where result is null'), rows("select syms from bots where status<>'killed'").catch(() => [])]);
   userSyms = { pos: new Set(p.map(x => x.sym)), orders: new Set([...o, ...l].map(x => x.sym).concat(bt.flatMap(x => { try { return JSON.parse(x.syms); } catch (e) { return []; } }))), alerts: new Set([...a, ...pr].map(x => x.sym)), watch: new Set(w.map(x => x.sym)), extra: new Set(e.map(x => x.sym)) };
+  for (const l of OPTBOOK.values()) for (const o of l) userSyms.orders.add(undOf(o.sym));
   for (const x of e) addAsset(x.sym, x.kind);
   for (const s of [...userSyms.pos, ...userSyms.orders, ...userSyms.alerts, ...userSyms.watch]) if (!assets.has(s)) addAsset(s, kindOf(s));
   cbSync(); fhSync();
@@ -1363,12 +1376,14 @@ const walletJson = w => ({
   id: w.id, name: w.name, emoji: w.emoji, color: w.color, cash: +w.cash, start: +w.start_bal, created: tsMs(w.created), seasonStart: tsMs(w.season_start),
   archived: w.archived, sort: w.sort, profile: w.profile || 'robinhood', acct: w.acct || 'instant', gold: !!w.gold, drip: !!w.drip, lotMethod: w.lot_method || 'fifo',
   cryptoRoute: w.crypto_route || 'mm', marginMax: w.margin_max == null ? null : +w.margin_max, broker: w.broker || null, brokerEnv: w.broker ? (BROKER?.env || null) : null,
-  call: +w.call_amt > 0 ? { amount: +w.call_amt, since: tsMs(w.call_since) } : null,
+  call: +w.call_amt > 0 ? { amount: +w.call_amt, since: tsMs(w.call_since) } : null, optLevel: +w.opt_level || 0,
 });
 async function positions(wid, c = null) {
-  return ((await (c || pool).query('select * from pos where wid=$1 order by sym', [wid])).rows).map(p => ({ sym: p.sym, qty: +p.qty, avg: +p.avg, since: tsMs(p.since) }));
+  const out = ((await (c || pool).query('select * from pos where wid=$1 order by sym', [wid])).rows).map(p => ({ sym: p.sym, qty: +p.qty, avg: +p.avg, since: tsMs(p.since) }));
+  if (OPTBOOK.has(wid)) Object.defineProperty(out, 'optVal', { value: optMark(wid) }); // options count toward the wallet (short ones against it)
+  return out;
 }
-const marketValue = pos => pos.reduce((t, x) => t + x.qty * (priceOf(x.sym) || x.avg), 0);
+const marketValue = pos => pos.reduce((t, x) => t + x.qty * (priceOf(x.sym) || x.avg), 0) + (pos.optVal || 0);
 // Profile, account type and broker link for every wallet, kept in memory for the order engine.
 const walletMeta = new Map();
 async function loadWalletMeta() { walletMeta.clear(); for (const w of await rows('select * from wallets')) walletMeta.set(w.id, w); }
@@ -1388,6 +1403,9 @@ function holdsFor(wid, pos, exclude = null) {
       out.shares[l.sym] = (out.shares[l.sym] || 0) + q;
     }
   }
+  // options: shares behind covered calls, cash behind puts and spreads, the requirement on naked ones
+  const oh = optHolds(wid); out.cash += oh.cash; out.optCash = oh.cash; out.optShares = oh.shares;
+  for (const [s, q] of Object.entries(oh.shares)) out.shares[s] = (out.shares[s] || 0) + q;
   return out;
 }
 async function accountInfo(wid, { c = pool, w = null, pos = null, exclude = null } = {}) {
@@ -1399,7 +1417,7 @@ async function accountInfo(wid, { c = pool, w = null, pos = null, exclude = null
   const holds = real ? holdsFor(wid, pos, exclude) : { cash: 0, shares: {} };
   let lmv = 0, lmvM = 0, maint = 0;
   for (const p of pos) { const px = priceOf(p.sym) || p.avg, v = p.qty * px; lmv += v; if (marginable(p.sym, px)) lmvM += v; maint += v * maintRate(prof, p.sym, px) / 100; }
-  const equity = cash + lmv, debit = Math.max(0, -cash), avail = cash - holds.cash;
+  const equity = cash + lmv + (pos.optVal || 0), debit = Math.max(0, -cash), avail = cash - holds.cash;
   let bp, bpCrypto, withdrawable, marginOn = false;
   if (w.broker && BROKER?.account) { // the broker's own numbers
     const a = BROKER.account;
@@ -1420,7 +1438,7 @@ async function accountInfo(wid, { c = pool, w = null, pos = null, exclude = null
     withdrawable = debit > 0 ? 0 : Math.max(0, Math.min(cash - unsettled - holds.cash, equity - maint));
   } else { bp = bpCrypto = Math.max(0, avail); withdrawable = Math.max(0, cash - unsettled - holds.cash); }
   return {
-    profile: prof.key, acct: w.acct, restricted, cash, settled: cash - unsettled, unsettled, nextSettle, pendingDeposits: pending, holdsCash: holds.cash, holdsShares: holds.shares,
+    profile: prof.key, acct: w.acct, restricted, cash, settled: cash - unsettled, unsettled, nextSettle, pendingDeposits: pending, holdsCash: holds.cash, holdsShares: holds.shares, optHold: holds.optCash || 0, optShares: holds.optShares || {}, optVal: pos.optVal || 0,
     lmv, lmvMarginable: lmvM, equity, debit, maint, excess: equity - maint, bp, bpCrypto, withdrawable, marginOn,
     marginRate: debit > 0 ? marginRate(prof, debit) : marginRate(prof, 0), accrued: +w.margin_accrued || 0, call: +w.call_amt > 0 ? +w.call_amt : 0,
   };
@@ -1463,6 +1481,8 @@ async function planOrder(c, w, pos, acct, sym, side, o = {}) {
   if (prof.minUsd && !o.drip && !o.auto && notional < prof.minUsd - 1e-9 && !(side === 'sell' && qty === p?.qty)) fail(`The smallest order is ${money(prof.minUsd)}`);
   if (side === 'sell' && !o.force) {
     const held = acct.holdsShares[sym] || 0, avail = p.qty - held;
+    const oc = acct.optShares?.[sym] || 0;
+    if (qty > avail + 1e-9 && oc > 0) fail(`${oc} of your ${sym} shares cover calls you sold${held > oc ? `, and ${+(held - oc).toFixed(6)} are held for open sell orders` : ''}. You can sell up to ${+Math.max(0, avail).toFixed(6)}, or buy the calls back first.`);
     if (qty > avail + 1e-9) fail(held > 0 ? `${+held.toFixed(6)} of your ${sym} ${crypto ? '' : 'shares '}are held for open sell orders. You can sell up to ${+Math.max(0, avail).toFixed(6)} ${unit}, or cancel an order first.` : `You only have ${+p.qty.toFixed(6)} ${unit}`);
   }
   const vol30 = crypto ? await cryptoVolume30(w.id, c) : 0;
@@ -1478,8 +1498,8 @@ async function planOrder(c, w, pos, acct, sym, side, o = {}) {
       fail(why);
     }
     const equity = acct.equity;
-    if (S.maxPos > 0 && !o.bot && ((p ? p.qty : 0) + qty) * px > equity * S.maxPos / 100 + 0.01) fail(`One position can be at most ${S.maxPos}% of this wallet (${money(equity * S.maxPos / 100)}). Change this in Settings → Trading.`);
-    if (S.reservePct > 0 && !o.bot && cashAfter < equity * S.reservePct / 100 - 0.01) fail(`That would leave less than your ${S.reservePct}% cash reserve (${money(equity * S.reservePct / 100)}).`);
+    if (S.maxPos > 0 && !o.bot && !o.optx && ((p ? p.qty : 0) + qty) * px > equity * S.maxPos / 100 + 0.01) fail(`One position can be at most ${S.maxPos}% of this wallet (${money(equity * S.maxPos / 100)}). Change this in Settings → Trading.`);
+    if (S.reservePct > 0 && !o.bot && !o.optx && cashAfter < equity * S.reservePct / 100 - 0.01) fail(`That would leave less than your ${S.reservePct}% cash reserve (${money(equity * S.reservePct / 100)}).`);
   }
   const pnl = side === 'sell' ? (px - p.avg) * qty - fees.total : null;
   return {
@@ -1610,6 +1630,7 @@ async function loadOrders() {
     const x = { id: r.id, wid: r.wid, sym: r.sym, side: r.side, kind: r.kind || 'limit', price: +r.price, lpx: r.lpx == null ? null : +r.lpx, amt: +r.amt, units: r.units || 'auto', sl: r.sl == null ? null : +r.sl, tp: r.tp == null ? null : +r.tp, expires: tsMs(r.expires), ts: tsMs(r.ts), tif: r.tif || 'gtc', sess: r.sess || 'regular', rested: !!r.rested, trig: !!r.trig, why: r.why || null };
     (limOrders.get(x.sym) || limOrders.set(x.sym, []).get(x.sym)).push(x);
   }
+  await loadOptBook();
 }
 const orderJson = o => ({ ...o, stop: o.kind === 'trail' ? o.peak * (1 - o.trail / 100) : o.price });
 async function addCondOrder(wid, sym, kind, { price, pct = 100, trail = null }) {
@@ -3790,6 +3811,31 @@ STRATEGIES.autopilot = {
     { k: 'park', label: 'Idle money', def: 'SGOV', choices: [['SGOV', 'SGOV (T-bills)'], ['cash', 'Cash']] }, { k: 'minSleeveUsd', label: 'Smallest slice per strategy ($)', def: 50, min: 5, max: 10000 }, { k: 'aiReview', label: 'Analyst reviews each plan', def: 'on', choices: [['on', 'On'], ['off', 'Off']] }],
   grid: {}, need: () => 2, decide() { fail('Autopilot decides through its tryouts'); },
 };
+// Covered calls: own 100-share lots, sell a call against each one every month for income (the calls are handled in 09i-options.js)
+STRATEGIES.covcall = {
+  name: 'Covered calls', short: 'Covered calls', icon: 'target', rebalance: 'monthly', markets: 'stocks', optLevel: 1,
+  overlays: { council: 'off', mood: false, corr: false, exits: false, tighten: false, news: 'none', review: false, stops: false },
+  desc: 'Buys steady stocks in 100-share lots and sells one call a month against each lot for extra income: about 30 delta, 30 to 45 days out. When a call has made 80% of what it can, it buys it back early and sells the next one. It skips calls that would run past earnings or an ex-dividend date. If the stock climbs past the strike, the shares get called away at the strike and it buys a new lot. Needs options level 1 on its wallet. Backtests show the stocks only, not the calls.',
+  params: [{ k: 'delta', label: 'How far out (delta × 100, lower is safer)', def: 30, min: 10, max: 50 }, { k: 'dteMin', label: 'Days to expiration, at least', def: 30, min: 7, max: 90 }, { k: 'dteMax', label: 'Days to expiration, at most', def: 45, min: 7, max: 120 },
+    { k: 'takePct', label: 'Buy back early at this % of the premium earned (0 = never)', def: 80, min: 0, max: 100 }, { k: 'skipEarn', label: 'Around earnings', def: 'on', choices: [['on', 'Skip'], ['off', 'Sell anyway']] },
+    { k: 'skipDiv', label: 'Around ex-dividend dates', def: 'on', choices: [['on', 'Skip'], ['off', 'Sell anyway']] }, { k: 'atExp', label: 'In the money near expiration', def: 'assign', choices: [['assign', 'Let the shares go'], ['roll', 'Roll to a later month']] }],
+  grid: {}, need: () => 64,
+  decide(ctx) {
+    // round lots: as many 100-share lots as the money buys, cheapest first, what it already owns first
+    const out = { weights: {}, stops: {}, notes: {} }, cap = ctx.capital || 0, all = ctx.syms.filter(s => ctx.idx[s] != null);
+    const px = s => ctx.data[s].c[ctx.idx[s]], lot = s => px(s) * 100 * 1.003;
+    const order = [...all.filter(s => ctx.held[s]), ...all.filter(s => !ctx.held[s]).sort((a, b) => px(a) - px(b))];
+    let left = cap; const lots = {};
+    for (const s of order) { const have = Math.floor((ctx.held[s]?.qty || 0) / 100 + 1e-9); if (have && left >= have * lot(s)) { lots[s] = have; left -= have * lot(s); } }
+    for (let more = true; more;) { more = false; for (const s of order) if (left >= lot(s)) { lots[s] = (lots[s] || 0) + 1; left -= lot(s); more = true; } }
+    for (const s of all) { const n = lots[s] || 0; out.weights[s] = n ? (n * 100 + 0.2) * px(s) * 1.001 / cap : 0; out.notes[s] = n ? `${n} lot${n > 1 ? 's' : ''} of 100 shares: ${n} call${n > 1 ? 's' : ''} a month.` : `A lot of 100 costs about $${Math.round(lot(s))}.`; }
+    const cheapest = Math.min(...all.map(lot));
+    if (!Object.keys(lots).length) { out.regime = `Covered calls need 100 shares. The cheapest lot here costs about $${Math.round(cheapest)} and the bot has $${Math.round(cap)}, so it waits in cash. Add cheaper stocks or more money.`; out.weights = {}; }
+    else out.regime = `${Object.values(lots).reduce((t, n) => t + n, 0)} lot${Object.values(lots).reduce((t, n) => t + n, 0) > 1 ? 's' : ''} of 100 shares; $${Math.round(left)} left in cash.`;
+    out.noTrim = true; // never sells part of a lot (that would uncover a call)
+    return out;
+  },
+};
 const UNIVERSES = {
   megacap: { name: 'Big US stocks', syms: ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'META', 'AVGO', 'TSLA', 'JPM', 'V', 'LLY', 'COST', 'NFLX', 'WMT', 'XOM', 'AMD'] },
   etfs: { name: 'Index and sector ETFs', syms: ['SPY', 'QQQ', 'IWM', 'DIA', 'XLK', 'XLF', 'XLE', 'XLV', 'XLY', 'XLP', 'XLI', 'XLU', 'XLB', 'XLC', 'XLRE'] },
@@ -3798,6 +3844,7 @@ const UNIVERSES = {
   mixed: { name: 'Stocks and crypto', syms: ['SPY', 'QQQ', 'GLD', 'TLT', 'BTC', 'ETH', 'SOL'] },
   dual: { name: 'Stocks vs bonds', syms: ['SPY', 'QQQ', 'EFA', 'EEM', 'IEF', 'TLT'] },
   defensive: { name: 'Calm, steady stocks', syms: ['KO', 'PG', 'JNJ', 'PEP', 'WMT', 'MCD', 'COST', 'MSFT'] },
+  income: { name: 'Steady stocks for covered calls', syms: ['KO', 'PFE', 'VZ', 'T', 'CSCO', 'BAC', 'F', 'INTC'] },
 };
 function cleanParams(key, p = {}) {
   const st = STRATEGIES[key]; if (!st) fail('Unknown strategy');
@@ -4367,6 +4414,7 @@ async function runBotInner(id, { manual, dry, night }) {
       try { await addCondOrder(bot.wid, p.sym, 'stop', { price: stopPx, pct: 100 }); state[p.sym] = { ...(state[p.sym] || {}), stopPx }; } catch (e) { log.skips.push(`${p.sym} stop: ${e.message}`); }
     }
   }
+  if (bot.strategy === 'covcall' && !night && !brk) await covcallRun(bot, w, log, dry).catch(e => log.skips.push('Options step: ' + e.message));
   // ---- remember what it holds and why ----
   if (!dry) {
     const pnow = await positions(bot.wid);
@@ -4377,7 +4425,8 @@ async function runBotInner(id, { manual, dry, night }) {
     for (const s of Object.keys(state)) if (!s.startsWith('_') && !pnow.some(p => p.sym === s)) delete state[s];
     if (rebalanceDue && st.rebalance !== 'none' && !night) state._lastRebalance = today;
     const bought = log.orders.filter(o => o.side === 'buy').map(o => o.sym), sold = log.orders.filter(o => o.side === 'sell').map(o => o.sym);
-    const summary = log.orders.length ? [bought.length ? 'Bought ' + bought.join(', ') : '', sold.length ? 'sold ' + sold.join(', ') : ''].filter(Boolean).join('; ') : 'No changes';
+    const optLines = log.orders.filter(o => o.side === 'opt').map(o => o.short);
+    const summary = log.orders.length ? [bought.length ? 'Bought ' + bought.join(', ') : '', sold.length ? 'sold ' + sold.join(', ') : '', ...optLines].filter(Boolean).join('; ').replace(/^./, c => c.toUpperCase()) : 'No changes';
     state._health = { t: Date.now(), missing, noPrice: bot.syms.filter(x => !priceOf(x)), news: m.newsFilter && S.f_buzz !== false ? { checked: Object.keys(buzz).length, wanted: Math.min(24, new Set([...wantBuy.map(([x]) => x), ...Object.keys(held), ...tradable]).size) } : null, problems: log.skips.length, saved: dataHealth.saved.syms.filter(x => bot.syms.includes(x)) };
     // a night run doesn't count as the day's decision, so the day crew still meets at its usual time
     if (night) await Q('update bots set state=$1, last_run=now(), peak=$2, day_start=$3, day_date=$4, summary=$5 where id=$6', [JSON.stringify(state), peak, dayStart, today, summary, id]);
@@ -5136,7 +5185,7 @@ GET('/api/whatif/sells', auth, async req => {
   return list.map(t => { const now = priceOf(t.sym); return { id: t.id, sym: t.sym, ts: tsMs(t.ts), qty: +t.qty, sold: +t.price, now, diff: now ? (now - +t.price) * +t.qty : null, pct: now ? now / +t.price - 1 : null }; }).filter(x => x.now);
 });
 
-// ---------- options practice: long calls and puts, priced with Black-Scholes from recent volatility ----------
+// ---------- option pricing: Black-Scholes from recent volatility (the options themselves live in 09i-options.js) ----------
 const OPT_START = 10000, OPT_FEE = 0.65, RATE = 0.04;
 const ncdf = x => { const t = 1 / (1 + 0.2316419 * Math.abs(x)), d = 0.3989423 * Math.exp(-x * x / 2), p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274)))); return x > 0 ? 1 - p : p; };
 function bs(kind, S0, K, T, iv) {
@@ -5157,46 +5206,6 @@ function expiries() {
   return out;
 }
 const strikeStep = px => px < 25 ? 1 : px < 100 ? 2.5 : px < 250 ? 5 : px < 1000 ? 10 : 25;
-async function optQuote(o) { const S0 = priceOf(o.sym); if (!S0) return null; const iv = ivAt(await baseVol(o.sym), S0, +o.strike); return { ...bs(o.kind, S0, +o.strike, yearsTo(o.exp), iv), iv, spot: S0 }; }
-const optCash = async () => num(await kvGet('opt_cash').catch(() => null), OPT_START);
-GET('/api/options/chain/:sym', auth, async req => {
-  const sym = cleanSym(req.params.sym); if (!sym || isCrypto(sym)) fail('Options practice is for stocks and ETFs');
-  if (!assets.has(sym)) await trackAsset(sym);
-  const S0 = priceOf(sym); if (!S0) fail('No live price yet for ' + sym);
-  const exps = expiries(), exp = exps.includes(req.query.exp) ? req.query.exp : exps[2] || exps[0], iv = await baseVol(sym), st = strikeStep(S0), mid = Math.round(S0 / st) * st, T = yearsTo(exp);
-  const strikes = []; for (let k = -8; k <= 8; k++) { const K = round(mid + k * st, 2); if (K <= 0) continue; const c = bs('call', S0, K, T, ivAt(iv, S0, K)), p = bs('put', S0, K, T, ivAt(iv, S0, K)); strikes.push({ K, call: round(c.px, 2), callD: round(c.delta, 2), put: round(p.px, 2), putD: round(p.delta, 2) }); }
-  return { sym, spot: S0, iv: round(iv, 3), exp, exps, days: Math.round(T * 365.25), strikes, cash: await optCash() };
-});
-GET('/api/options', auth, async () => {
-  const open = await rows('select * from opt_pos where closed is null order by id desc'), done = await rows('select * from opt_pos where closed is not null order by closed desc limit 30');
-  const pos = await Promise.all(open.map(async o => { const q = await optQuote(o).catch(() => null), val = q ? q.px * 100 * o.qty : null; return { id: o.id, sym: o.sym, kind: o.kind, strike: +o.strike, exp: o.exp, qty: o.qty, paid: +o.prem, now: q ? round(q.px, 2) : null, delta: q ? round(q.delta, 2) : null, theta: q?.theta != null ? round(q.theta * 100 * o.qty, 2) : null, spot: q?.spot || null, value: val, pl: val != null ? val - +o.prem * 100 * o.qty : null, days: Math.ceil(yearsTo(o.exp) * 365.25), opened: tsMs(o.opened) }; }));
-  const cash = await optCash(), value = cash + pos.reduce((t, p) => t + (p.value || 0), 0);
-  return { cash, value, start: OPT_START, ret: value / OPT_START - 1, open: pos, closed: done.map(o => ({ id: o.id, sym: o.sym, kind: o.kind, strike: +o.strike, exp: o.exp, qty: o.qty, paid: +o.prem, close: +o.close_px, pl: (+o.close_px - +o.prem) * 100 * o.qty, how: o.how, closed: tsMs(o.closed) })) };
-});
-POST('/api/options/buy', auth, async req => {
-  const b = req.body || {}, sym = cleanSym(b.sym), kind = b.kind === 'put' ? 'put' : 'call', K = num(b.strike), exp = String(b.exp || ''), qty = clamp(Math.round(num(b.qty, 1)), 1, 100);
-  if (!sym || isCrypto(sym)) fail('Options practice is for stocks and ETFs'); if (!expiries().includes(exp)) fail('Pick an expiry from the list'); if (!(K > 0)) fail('Pick a strike');
-  const q = await optQuote({ sym, kind, strike: K, exp }); if (!q) fail('No live price yet');
-  const cost = q.px * 100 * qty + OPT_FEE * qty, cash = await optCash(); if (cost > cash) fail(`That costs $${cost.toFixed(2)} and the practice account has $${cash.toFixed(2)}.`);
-  await kvSet('opt_cash', String(round(cash - cost, 2)));
-  const r = await row('insert into opt_pos(sym,kind,strike,exp,qty,prem,iv) values($1,$2,$3,$4,$5,$6,$7) returning id', [sym, kind, K, exp, qty, round(q.px, 4), q.iv]);
-  return { id: r.id, price: q.px, cost };
-});
-async function closeOpt(o, px, how) { await Q('update opt_pos set closed=now(), close_px=$1, how=$2 where id=$3', [round(px, 4), how, o.id]); await kvSet('opt_cash', String(round(await optCash() + px * 100 * o.qty - (how === 'sold' ? OPT_FEE * o.qty : 0), 2))); }
-POST('/api/options/:id/sell', auth, async req => {
-  const o = await row('select * from opt_pos where id=$1 and closed is null', [+req.params.id]); if (!o) fail('That position is closed', 404);
-  const q = await optQuote(o); if (!q) fail('No live price yet'); await closeOpt(o, q.px, 'sold'); return { ok: true, price: q.px };
-});
-POST('/api/options/reset', auth, async () => { await Q('delete from opt_pos'); await kvSet('opt_cash', String(OPT_START)); return { ok: true }; });
-async function optionsExpiryJob() {
-  for (const o of await rows('select * from opt_pos where closed is null and exp <= $1', [etDate()]).catch(() => [])) {
-    if (o.exp === etDate() && etParts().h < 16) continue;
-    let S1 = null; try { const b = await dailyBars(o.sym), i = lastIndexOnOrBefore(b.d, o.exp); S1 = i >= 0 ? b.c[i] : null; } catch (e) {} S1 ||= priceOf(o.sym); if (!S1) continue;
-    const pay = Math.max(0, o.kind === 'call' ? S1 - +o.strike : +o.strike - S1); await closeOpt(o, pay, pay > 0 ? 'exercised' : 'expired');
-    await notify('order', `${o.sym} $${+o.strike} ${o.kind} ${pay > 0 ? 'expired in the money' : 'expired worthless'}`, pay > 0 ? `Closed at $${pay.toFixed(2)} a share ($${(pay * 100 * o.qty).toFixed(0)}). Practice account.` : `It closed at $0. You paid $${(+o.prem * 100 * o.qty).toFixed(0)}. Practice account.`, { url: '/#/options' });
-  }
-}
-
 // ---------- dividend calendar ----------
 const weekdayOf = t => { const wd = new Date(t).getUTCDay(); return t - (wd === 6 ? 1 : wd === 0 ? 2 : 0) * 864e5; }; // estimated dates land on a weekday
 GET('/api/dividends/calendar', auth, async req => {
@@ -5230,6 +5239,554 @@ GET('/api/widget/:token', async (req, res) => {
   if (req.query.f === 'text') { res.setHeader('content-type', 'text/plain; charset=utf-8'); res.end(`🥭 ${out.wallet} $${out.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${out.dayPct != null ? ` (${out.dayPct >= 0 ? '+' : ''}${out.dayPct.toFixed(2)}% today)` : ''}\n${movers.map(m => `${m.sym} ${m.pct >= 0 ? '+' : ''}${m.pct.toFixed(1)}%`).join('  ')}\n${out.bots} bot${out.bots === 1 ? '' : 's'} running · market ${out.market}`); return; }
   return out;
 });
+// =====================================================================
+// Options in wallets: approval levels, collateral, OCC expiration and assignment
+// =====================================================================
+// Prices are Black-Scholes estimates from recent volatility (bs, baseVol, ivAt, expiries, strikeStep live in the
+// practice file), with a bid and ask that widen away from the money. Positions live in real wallets, count toward
+// the wallet's value, and tie up shares or cash the way a broker does.
+const OPT_MULT = 100;
+const OPT_LEVELS = [
+  { n: 0, name: 'No options', allows: 'Options trading is off for this wallet' },
+  { n: 1, name: 'Level 1', short: 'Covered calls and secured puts', allows: 'Covered calls and cash-secured puts' },
+  { n: 2, name: 'Level 2', short: 'Buy calls and puts', allows: 'Buying calls and puts' },
+  { n: 3, name: 'Level 3', short: 'Spreads', allows: 'Spreads: buy one strike, sell another' },
+  { n: 4, name: 'Level 4', short: 'Naked options', allows: 'Naked calls and puts: selling without shares or cash behind them' },
+];
+const NAKED_MIN_EQ = 25000, L2_TRADES = 10;
+// cash-settled index options (European style, never assigned early). The index level comes from SPY × 10.
+const INDEX_OPT = { SPX: { base: 'SPY', mult: 10, name: 'S&P 500 index' } };
+const undOf = sym => INDEX_OPT[sym]?.base || sym;
+const spotOf = sym => INDEX_OPT[sym] ? (priceOf(INDEX_OPT[sym].base) ? priceOf(INDEX_OPT[sym].base) * INDEX_OPT[sym].mult : null) : priceOf(sym);
+const isIndexOpt = sym => !!INDEX_OPT[sym];
+// regulatory and clearing fees per contract (commission-free brokers still pass these on); sells add the FINRA fee
+const optFee = (n, side) => Math.max(0.01, round(n * 0.04 + (side === 'sell' ? n * 0.00279 : 0), 2));
+const IVC = new Map(); // volatility per symbol, so wallet values can be marked without waiting
+async function ivFor(sym) { const v = await baseVol(undOf(sym)); IVC.set(sym, v); return v; }
+const fmtExp = exp => { const [y, m, d] = exp.split('-'); return `${m}/${d}/${y.slice(2)}`; };
+const optLabel = o => `${o.sym} ${fmtExp(o.exp)} $${+o.strike} ${o.kind === 'call' ? 'Call' : 'Put'}`;
+const occCode = o => `${o.sym.padEnd(6, ' ')}${o.exp.slice(2).replace(/-/g, '')}${o.kind === 'call' ? 'C' : 'P'}${String(Math.round(+o.strike * 1000)).padStart(8, '0')}`;
+// a quote for one contract: the model's middle, and a bid and ask around it
+function optQuote2(sym, kind, K, exp) {
+  const S0 = spotOf(sym); if (!S0) return null;
+  const base = IVC.get(sym) || 0.3, iv = ivAt(base, S0, K), T = yearsTo(exp), g = bs(kind, S0, K, T, iv);
+  const intr = Math.max(0, kind === 'call' ? S0 - K : K - S0);
+  const mid = Math.max(T > 0 ? g.px : intr, intr + (isIndexOpt(sym) ? 0 : 0)); // American options never trade under what exercising pays
+  const m = Math.abs(Math.log(K / S0)), adv = assets.get(undOf(sym))?.adv || 0, liq = isIndexOpt(sym) || adv > 2e7 ? 0.3 : adv > 5e6 ? 0.6 : 1; // busy underlyings have tight option markets
+  const half = clamp((0.005 + 0.012 * Math.max(0, mid - intr) + 0.004 * mid * (1 + 4 * m)) * liq, 0.005, Math.max(0.03, mid * 0.2));
+  let bid = Math.max(0, round(mid - half, 2)), ask = round(Math.max(mid + half, bid + 0.01), 2);
+  if (mid < 0.015) { bid = 0; ask = Math.max(0.01, ask); }
+  return { spot: S0, iv, T, mid, bid, ask, delta: g.delta, theta: g.theta || 0, intr, ext: Math.max(0, mid - intr), days: Math.ceil(T * 365.25) };
+}
+
+// ---------- the book: every open contract, kept in memory so wallet values stay instant ----------
+const OPTBOOK = new Map(); // wid -> [rows]
+const optRow = r => ({ id: r.id, wid: r.wid, sym: r.sym, kind: r.kind, strike: +r.strike, exp: r.exp, qty: +r.qty, avg: +r.avg, coll: r.coll || null, spread: r.spread || null, opened: tsMs(r.opened), why: r.why || null, bot: r.bot_id || null });
+async function loadOptBook() {
+  OPTBOOK.clear();
+  for (const r of await rows('select * from optpos where closed is null order by id').catch(() => [])) { const o = optRow(r); (OPTBOOK.get(o.wid) || OPTBOOK.set(o.wid, []).get(o.wid)).push(o); }
+  for (const s of new Set([...OPTBOOK.values()].flat().map(o => o.sym))) if (!IVC.has(s)) ivFor(s).catch(() => {});
+}
+const optOpen = wid => OPTBOOK.get(wid) || [];
+// what the wallet's options are worth right now (short contracts count against it)
+function optMark(wid) {
+  let v = 0;
+  for (const o of optOpen(wid)) { const q = optQuote2(o.sym, o.kind, o.strike, o.exp); v += o.qty * OPT_MULT * (q ? q.mid : o.avg); }
+  return v;
+}
+// what each short contract ties up: shares for covered calls, cash for puts and spreads, a margin requirement for naked ones
+function optReq(o, list = null) {
+  if (o.qty >= 0) return { cash: 0, shares: 0 };
+  const n = -o.qty, S0 = spotOf(o.sym) || o.strike;
+  if (o.coll === 'covered') return { cash: 0, shares: n * OPT_MULT, sym: undOf(o.sym) };
+  if (o.coll === 'cash') return { cash: o.strike * OPT_MULT * n, shares: 0 };
+  if (o.coll === 'spread') {
+    const leg = (list || optOpen(o.wid)).find(x => x.spread === o.spread && x.id !== o.id);
+    if (!leg) return nakedReq(o, S0, n);
+    const width = o.kind === 'call' ? Math.max(0, leg.strike - o.strike) : Math.max(0, o.strike - leg.strike);
+    return { cash: width * OPT_MULT * Math.min(n, leg.qty), shares: 0 };
+  }
+  return nakedReq(o, S0, n);
+}
+// FINRA's rule for uncovered options: 20% of the stock (15% for broad indexes) minus how far out of the money it is, at least 10% of the strike, plus the option's value
+function nakedReq(o, S0, n) {
+  const q = optQuote2(o.sym, o.kind, o.strike, o.exp), mark = q ? q.mid : o.avg, pct = isIndexOpt(o.sym) ? 0.15 : 0.20;
+  const otm = Math.max(0, o.kind === 'call' ? o.strike - S0 : S0 - o.strike);
+  const per = Math.max(pct * S0 - otm, 0.10 * (o.kind === 'call' ? S0 : o.strike)) + mark;
+  return { cash: per * OPT_MULT * n, shares: 0, naked: true };
+}
+function optHolds(wid) {
+  const out = { cash: 0, shares: {} }, list = optOpen(wid);
+  for (const o of list) { const r = optReq(o, list); out.cash += r.cash; if (r.shares) out.shares[r.sym] = (out.shares[r.sym] || 0) + r.shares; }
+  return out;
+}
+
+// ---------- approval levels ----------
+const quizPassed = async () => jsonOr(await kvGet('opt_quiz', '{}').catch(() => '{}'), {});
+function optCap(w) {
+  if (!w || !isReal(w) || w.broker) return 0;
+  if (isIra(w)) return 1;
+  return w.acct === 'margin' ? 4 : 2;
+}
+const optLevel = w => Math.min(+w.opt_level || 0, optCap(w));
+function ageProblem() {
+  const a = ageOn(); if (a == null) return 'Add your date of birth first (Settings → Your profile). Options need you to be 18 or older.';
+  if (a < 18) return 'Options need you to be 18 or older.'; return null;
+}
+async function levelNeeds(w, n) {
+  const quiz = await quizPassed(), out = [];
+  const age = ageProblem(); out.push({ label: '18 or older', ok: !age, have: age ? (ageOn() == null ? 'No date of birth yet' : 'Under 18') : 'Yes' });
+  if (!isReal(w)) out.push({ label: 'Wallet on broker rules', ok: false, have: 'Practice rules' });
+  if (n >= 1) out.push({ label: 'Level 1 quiz', ok: !!quiz[1], have: quiz[1] ? 'Passed' : 'Not yet', quiz: 1 });
+  if (n >= 2) {
+    if (isIra(w)) out.push({ label: 'Not an IRA', ok: false, have: 'Mango keeps IRAs at level 1' });
+    const t = +(await row("select count(*) n from trd where wid=$1 and side in ('buy','sell')", [w.id])).n;
+    out.push({ label: `${L2_TRADES} stock trades in this wallet`, ok: t >= L2_TRADES, have: `${t} so far` });
+    out.push({ label: 'Level 2 quiz', ok: !!quiz[2], have: quiz[2] ? 'Passed' : 'Not yet', quiz: 2 });
+  }
+  if (n >= 3) { out.push({ label: 'Margin account', ok: w.acct === 'margin', have: ACCT_LABEL(w.acct) }); out.push({ label: 'Level 3 quiz', ok: !!quiz[3], have: quiz[3] ? 'Passed' : 'Not yet', quiz: 3 }); }
+  if (n >= 4) {
+    const eq = (await accountInfo(w.id, { w })).equity;
+    out.push({ label: `${money(NAKED_MIN_EQ)} or more in the wallet`, ok: eq >= NAKED_MIN_EQ, have: money(eq) });
+    out.push({ label: 'Level 4 quiz', ok: !!quiz[4], have: quiz[4] ? 'Passed' : 'Not yet', quiz: 4 });
+  }
+  return out;
+}
+const ACCT_LABEL = a => ({ cash: 'Cash account', margin: 'Margin account', instant: 'Instant account', ira: 'Traditional IRA', roth: 'Roth IRA' }[a] || a);
+// four questions per level; every answer has to be right (you can retry)
+const OPT_QUIZ = {
+  1: [
+    ['You sell 1 covered call on your 100 KO shares at a $65 strike. KO closes at $70 on expiration day. What happens?', ['Your 100 shares are sold at $65 each, and you keep the premium', 'You keep the shares and the premium', 'You pay $500 and keep the shares', 'Nothing, it just expires'], 0],
+    ['What does a cash-secured put tie up in your wallet?', ['Enough cash to buy 100 shares at the strike, for each contract', 'Only the premium', '100 shares of the stock', 'Nothing until it expires'], 0],
+    ['How many shares does one stock option contract usually cover?', ['100', '1', '10', '1,000'], 0],
+    ['You sell a call for $1.20. What is the premium you collect?', ['$120 (1.20 × 100), yours to keep whatever happens', '$1.20', '$12', '$1,200'], 0],
+  ],
+  2: [
+    ['You buy a call for $2.00. What is the most you can lose?', ['$200, what you paid', '$2', 'Unlimited', 'The price of 100 shares'], 0],
+    ['If the stock does not move, what happens to an option\'s value as expiration gets closer?', ['It shrinks a little every day (time decay)', 'It grows', 'It stays the same', 'It doubles on the last day'], 0],
+    ['Your call ends $0.50 in the money and you don\'t close it. What happens at expiration?', ['It\'s exercised automatically: you buy 100 shares at the strike', 'It expires worthless', 'You get $0.50 in cash', 'The broker cancels it'], 0],
+    ['A delta of 0.30 roughly means…', ['About a 30% chance of ending in the money, and the option moves about $0.30 per $1 in the stock', 'It costs 30% of the stock', 'You make 30% if the stock rises', 'It expires in 30 days'], 0],
+  ],
+  3: [
+    ['You buy the $100 call and sell the $105 call (same expiration) for $2.00. What is the most you can lose?', ['$200', '$500', '$300', 'Unlimited'], 0],
+    ['Same spread: what is the most you can make?', ['$300: the $5 width minus the $2 you paid, × 100', '$500', '$200', 'Unlimited'], 0],
+    ['You sell the $50 put and buy the $45 put for a $1.50 credit. What does the broker hold?', ['$500, the width, of which $150 came from the credit, so $350 is yours at risk', '$5,000', '$150', 'Nothing'], 0],
+    ['Your short leg gets assigned early. What still protects you?', ['The long leg: you can sell it or exercise it', 'Nothing', 'The premium', 'The broker reverses it'], 0],
+  ],
+  4: [
+    ['You sell a call without owning the shares (naked). How much can you lose?', ['There is no limit: the stock can keep rising', 'The premium', 'The strike × 100', '$25,000'], 0],
+    ['Why do brokers want a margin account and money behind naked options?', ['Losses can be far bigger than the premium, so the account needs a cushion', 'To pay the commission', 'It\'s a tax rule', 'They don\'t'], 0],
+    ['The money held for a naked put changes when…', ['The stock moves: it\'s recalculated all the time', 'Never', 'Only at expiration', 'Only on Mondays'], 0],
+    ['A stock you sold naked $50 calls on jumps to $80 overnight on a buyout. Roughly what do you owe per contract?', ['About $3,000 (the $30 above the strike × 100), minus the premium you got', 'The premium only', '$50', 'Nothing until expiration'], 0],
+  ],
+};
+GET('/api/opt/quiz/:n', auth, async req => {
+  const n = clamp(Math.round(num(req.params.n)), 1, 4), q = OPT_QUIZ[n];
+  // shuffle each question's answers so the right one isn't always first; the client sends back the text it picked
+  return { level: n, questions: q.map(([t, a]) => ({ q: t, a: a.map((x, i) => ({ x, r: Math.random() + i * 0 })).sort((p, q2) => p.r - q2.r).map(y => y.x) })) };
+});
+POST('/api/opt/quiz/:n', auth, async req => {
+  const n = clamp(Math.round(num(req.params.n)), 1, 4), q = OPT_QUIZ[n], picks = Array.isArray(req.body?.answers) ? req.body.answers : [];
+  const wrong = q.map(([t, a, k], i) => (picks[i] === a[k] ? null : i)).filter(x => x != null);
+  if (wrong.length) return { ok: false, wrong, explain: wrong.map(i => ({ q: q[i][0], right: q[i][1][q[i][2]] })) };
+  const done = await quizPassed(); done[n] = Date.now(); await kvSet('opt_quiz', JSON.stringify(done));
+  return { ok: true };
+});
+POST('/api/opt/unlock', auth, async req => {
+  const w = await walletRow(await activeWalletId(req)), n = clamp(Math.round(num(req.body?.level)), 0, 4);
+  if (n <= optLevel(w)) { await Q('update wallets set opt_level=$1 where id=$2', [n, w.id]); await loadWalletMeta(); return { ok: true, level: n }; } // stepping down is always fine
+  if (n > optCap(w)) fail(!isReal(w) ? 'Options need a wallet on Robinhood or Alpaca rules.' : w.broker ? 'Options on a wallet linked to your broker go through the broker.' : isIra(w) ? 'Mango keeps IRA wallets at level 1: covered calls and cash-secured puts.' : `Level ${n} needs a margin account. Change the account type in the wallet's settings.`);
+  const need = await levelNeeds(w, n), miss = need.filter(x => !x.ok);
+  if (miss.length) fail(`Not yet: ${miss.map(x => `${x.label.replace(/^./, c => c.toLowerCase())} (${x.have.toLowerCase()})`).join('; ')}.`);
+  await Q('update wallets set opt_level=$1 where id=$2', [n, w.id]); await loadWalletMeta();
+  return { ok: true, level: n };
+});
+
+// ---------- the chain ----------
+function optExps(sym) {
+  const out = expiries();
+  if (isIndexOpt(sym)) return out; // SPX lists Fridays like stocks here (the real one also has daily expirations)
+  return out;
+}
+GET('/api/opt/chain/:sym', auth, async req => {
+  const sym = cleanSym(req.params.sym); if (!sym || isCrypto(sym)) fail('Options are for stocks, ETFs and the S&P 500 index (SPX)');
+  const und = undOf(sym); if (!assets.has(und)) await trackAsset(und);
+  const S0 = spotOf(sym); if (!S0) fail('No live price yet for ' + sym);
+  await ivFor(sym);
+  const exps = optExps(sym), exp = exps.includes(req.query.exp) ? req.query.exp : exps.find(e => yearsTo(e) * 365.25 >= 25) || exps[exps.length - 1];
+  const st = isIndexOpt(sym) ? 25 : strikeStep(S0), mid = Math.round(S0 / st) * st, T = yearsTo(exp);
+  const strikes = [];
+  for (let k = -10; k <= 10; k++) {
+    const K = round(mid + k * st, 2); if (K <= 0) continue;
+    const c = optQuote2(sym, 'call', K, exp), p = optQuote2(sym, 'put', K, exp);
+    strikes.push({ K, call: { bid: c.bid, ask: c.ask, mid: round(c.mid, 2), delta: round(c.delta, 2) }, put: { bid: p.bid, ask: p.ask, mid: round(p.mid, 2), delta: round(p.delta, 2) } });
+  }
+  const earn = isIndexOpt(sym) ? null : (await earningsFor(sym).catch(() => null))?.next || null;
+  const div = isIndexOpt(sym) ? null : await nextExDiv(sym).catch(() => null);
+  return { sym, und, index: isIndexOpt(sym), indexName: INDEX_OPT[sym]?.name || null, spot: S0, iv: round(IVC.get(sym), 3), exp, exps, days: Math.ceil(T * 365.25), strikes, step: st,
+    earnings: earn && earn.date <= exp ? earn.date : null, exDiv: div && div.date <= exp ? div : null, settle: isIndexOpt(sym) ? 'cash' : 'shares', style: isIndexOpt(sym) ? 'European' : 'American' };
+});
+// the next ex-dividend date, estimated from the payment history (tests can pin one)
+const OPT_TEST_DIV = new Map();
+async function nextExDiv(sym) {
+  if (OPT_TEST_DIV.has(sym)) return OPT_TEST_DIV.get(sym);
+  const ins = (await Promise.race([assetInsights(sym), sleep(4000).then(() => null)]).catch(() => null)) || {}, divs = (ins.dividends || []).slice().sort((a, b) => a.date - b.date);
+  const yr = divs.filter(d => d.date > Date.now() - 400 * 864e5); if (yr.length < 2) return null;
+  const gaps = []; for (let k = 1; k < yr.length; k++) gaps.push(yr[k].date - yr[k - 1].date);
+  const gap = gaps.reduce((t, x) => t + x, 0) / gaps.length, last = yr[yr.length - 1];
+  let t = last.date + gap; while (t < Date.now() - 864e5) t += gap;
+  return { date: etDate(t), amount: last.amount, estimated: true };
+}
+
+// ---------- pricing an order before it goes in ----------
+// legs: [{ kind, strike, exp, side: 'buy'|'sell', qty, secure: 'cash'|'naked' }] — one leg, or two for a vertical spread
+async function optPlan(w, sym, legsIn) {
+  if (!Array.isArray(legsIn) || !legsIn.length || legsIn.length > 2) fail('Pick one option, or two for a spread');
+  sym = cleanSym(sym); if (!sym || isCrypto(sym)) fail('Options are for stocks, ETFs and SPX');
+  if (!isReal(w)) fail('Options need a wallet on Robinhood or Alpaca rules. Switch the rules in the wallet\'s settings.');
+  if (w.broker) fail('Options on a wallet linked to your broker go through the broker.');
+  if (w.archived) fail('That wallet is archived. Restore it first.');
+  const age = ageProblem(); if (age) fail(age);
+  const sess = sessionAt(profOf(w)); if (sess !== 'regular') fail('Options trade only in regular hours, 9:30 am to 4:00 pm Eastern.');
+  const halt = haltOf(undOf(sym)); if (halt) fail(halt.why + ' Its options are halted too.');
+  await ivFor(sym);
+  const exps = optExps(sym), legs = legsIn.map(l => ({ kind: l.kind === 'put' ? 'put' : 'call', strike: round(num(l.strike), 2), exp: String(l.exp || ''), side: l.side === 'sell' ? 'sell' : 'buy', qty: clamp(Math.round(num(l.qty, 1)), 1, 500), secure: l.secure === 'naked' ? 'naked' : 'cash' }));
+  for (const l of legs) { if (!exps.includes(l.exp)) fail('Pick an expiration from the list'); if (!(l.strike > 0)) fail('Pick a strike'); }
+  const level = optLevel(w), pos = await positions(w.id), acct = await accountInfo(w.id, { w, pos }), open = optOpen(w.id);
+  for (const l of legs) { const ex = open.find(o => o.sym === sym && o.kind === l.kind && o.strike === l.strike && o.exp === l.exp && (o.qty > 0) !== (l.side === 'buy')); if (ex) fail(`You ${ex.qty > 0 ? 'own' : 'are short'} the ${optLabel(ex)}. Close it from your positions instead.`); }
+  let spread = null;
+  if (legs.length === 2) {
+    const [a, b] = legs;
+    if (a.kind !== b.kind || a.exp !== b.exp || a.side === b.side || a.qty !== b.qty || a.strike === b.strike) fail('A spread here is two strikes of the same type and expiration: buy one, sell the other, same number of contracts.');
+    const long = a.side === 'buy' ? a : b, short = a.side === 'buy' ? b : a;
+    const credit = long.kind === 'call' ? short.strike < long.strike : short.strike > long.strike;
+    spread = { long, short, width: Math.abs(long.strike - short.strike), credit };
+  }
+  // price each leg: buys at the ask, sells at the bid
+  let debit = 0, credit = 0, fees = 0, needLevel = 0, hold = 0, holdShares = 0, notes = [];
+  for (const l of legs) {
+    const q = optQuote2(sym, l.kind, l.strike, l.exp); if (!q) fail('No live price yet');
+    l.q = q; l.px = l.side === 'buy' ? q.ask : q.bid; l.fee = optFee(l.qty, l.side);
+    if (l.side === 'sell' && !(l.px > 0)) fail(`The ${sym} $${l.strike} ${l.kind} has no bid (it's nearly worthless), so there's nothing to sell.`);
+    if (l.side === 'buy') debit += l.px * OPT_MULT * l.qty; else credit += l.px * OPT_MULT * l.qty;
+    fees += l.fee;
+    if (l.side === 'buy') { if (!spread) needLevel = Math.max(needLevel, 2); continue; }
+    if (spread) { l.coll = 'spread'; needLevel = Math.max(needLevel, 3); continue; }
+    if (l.kind === 'call') {
+      const und = undOf(sym), p = pos.find(x => x.sym === und), free = (p ? p.qty : 0) - (acct.holdsShares[und] || 0);
+      if (!isIndexOpt(sym) && free >= l.qty * OPT_MULT - 1e-9) { l.coll = 'covered'; needLevel = Math.max(needLevel, 1); holdShares += l.qty * OPT_MULT; }
+      else { l.coll = 'naked'; needLevel = Math.max(needLevel, 4); notes.push(isIndexOpt(sym) ? 'Index calls can\'t be covered with shares, so selling one alone is naked.' : `Covering ${l.qty} call${l.qty > 1 ? 's' : ''} needs ${l.qty * OPT_MULT} ${und} shares that aren't already tied up (you have ${+Math.max(0, free).toFixed(4)}). Without them it's a naked call.`); }
+    } else if (l.secure === 'naked' && level >= 4) { l.coll = 'naked'; needLevel = Math.max(needLevel, 4); }
+    else { l.coll = 'cash'; needLevel = Math.max(needLevel, 1); }
+    const r = optReq({ wid: w.id, sym, kind: l.kind, strike: l.strike, exp: l.exp, qty: -l.qty, coll: l.coll });
+    hold += r.cash;
+  }
+  if (spread && spread.credit) hold += spread.width * OPT_MULT * spread.short.qty;
+  // best and worst case, and where it breaks even (per the whole order)
+  const net = debit - credit; let maxLoss, maxGain, be = null;
+  const one = legs[0], n = one.qty;
+  if (spread) {
+    const w0 = spread.width * OPT_MULT * n;
+    if (net > 0) { maxLoss = net + fees; maxGain = w0 - net - fees; } else { maxGain = -net - fees; maxLoss = w0 + net + fees; }
+    const perSh = net / (OPT_MULT * n); be = spread.long.kind === 'call' ? (net > 0 ? spread.long.strike + perSh : spread.short.strike - perSh) : (net > 0 ? spread.long.strike - perSh : spread.short.strike + perSh);
+  } else if (one.side === 'buy') { maxLoss = debit + fees; maxGain = one.kind === 'call' ? Infinity : (one.strike - one.px) * OPT_MULT * n - fees; be = one.kind === 'call' ? one.strike + one.px : one.strike - one.px; }
+  else if (one.kind === 'call') { maxGain = credit - fees; maxLoss = one.coll === 'covered' ? null : Infinity; be = one.strike + one.px; }
+  else { maxGain = credit - fees; maxLoss = (one.strike - one.px) * OPT_MULT * n + fees; be = one.strike - one.px; }
+  // money check: options can't be bought on margin, so only cash counts
+  const need = Math.max(0, hold + debit + fees - credit), have = acct.bpCrypto;
+  const problems = [];
+  if (needLevel > level) problems.push(level === 0 ? `This wallet isn't approved for options yet. ${needLevel === 1 ? 'Level 1' : 'Level ' + needLevel} is needed.` : `This needs options level ${needLevel}: ${OPT_LEVELS[needLevel].allows.replace(/^./, c => c.toLowerCase())}. The wallet is at level ${level}.`);
+  if (needLevel === 4 && acct.equity < NAKED_MIN_EQ) problems.push(`Naked options need at least ${money(NAKED_MIN_EQ)} in the wallet (it has ${money(acct.equity)}).`);
+  if (need > have + 0.005) problems.push(`Not enough cash. This needs ${money(need)}${hold ? ` (${money(hold)} held as collateral)` : ''} and the wallet has ${money(have)} to use. Options can't be bought with margin.`);
+  return { sym, und: undOf(sym), index: isIndexOpt(sym), spot: one.q.spot, legs: legs.map(l => ({ kind: l.kind, strike: l.strike, exp: l.exp, side: l.side, qty: l.qty, px: l.px, bid: l.q.bid, ask: l.q.ask, mid: round(l.q.mid, 2), delta: round(l.q.delta, 2), fee: l.fee, coll: l.coll || null, days: l.q.days, label: optLabel({ sym, ...l }) })),
+    spread: spread ? { width: spread.width, credit: spread.credit } : null, debit, credit, net, fees, hold, holdShares, need, have, maxLoss: maxLoss === Infinity ? null : maxLoss, maxGain: maxGain === Infinity ? null : maxGain, unlimitedLoss: maxLoss === Infinity, unlimitedGain: maxGain === Infinity,
+    be, level, needLevel, notes, problems, ok: !problems.length, _legs: legs };
+}
+POST('/api/opt/preview', auth, async req => { const w = await walletRow(await activeWalletId(req)), p = await optPlan(w, req.body?.sym, req.body?.legs); delete p._legs; return p; });
+async function optOpenOrder(wid, sym, legsIn, o = {}) {
+  const w = await walletRow(wid), plan = await optPlan(w, sym, legsIn);
+  if (!plan.ok) fail(plan.problems.join(' '));
+  sym = plan.sym;
+  const prof = profOf(w), made = [];
+  await tx(async c => {
+    await c.query('select 1 from wallets where id=$1 for update', [wid]);
+    let spreadId = null;
+    for (const l of plan._legs) {
+      const signed = l.side === 'buy' ? l.qty : -l.qty;
+      // premium per share, with the fee folded in (paid adds to the cost, received is net of it)
+      const avg = l.side === 'buy' ? (l.px * OPT_MULT * l.qty + l.fee) / (OPT_MULT * l.qty) : (l.px * OPT_MULT * l.qty - l.fee) / (OPT_MULT * l.qty);
+      const same = !plan.spread ? (await c.query('select * from optpos where wid=$1 and sym=$2 and kind=$3 and strike=$4 and exp=$5 and closed is null and spread is null and sign(qty)=sign($6::int) and coalesce(coll,\'\')=coalesce($7,\'\') for update', [wid, sym, l.kind, l.strike, l.exp, signed, l.coll || null])).rows[0] : null;
+      let id;
+      if (same) { const nq = +same.qty + signed, na = (Math.abs(+same.qty) * +same.avg + l.qty * avg) / Math.abs(nq); await c.query('update optpos set qty=$1, avg=$2 where id=$3', [nq, na, same.id]); id = same.id; }
+      else id = (await c.query('insert into optpos(wid,sym,kind,strike,exp,qty,avg,coll,spread,why,bot_id) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning id', [wid, sym, l.kind, l.strike, l.exp, signed, avg, l.coll || null, spreadId, o.why || 'manual', o.bot || null])).rows[0].id;
+      if (plan.spread && !spreadId) { spreadId = id; await c.query('update optpos set spread=$1 where id=$1', [id]); }
+      const cash = l.side === 'buy' ? -(l.px * OPT_MULT * l.qty + l.fee) : l.px * OPT_MULT * l.qty - l.fee;
+      await c.query('update wallets set cash=cash+$1 where id=$2', [round(cash, 6), wid]);
+      if (l.side === 'sell' && w.acct === 'cash') await c.query('insert into settle(wid,amount,settles) values($1,$2,$3)', [wid, round(cash, 6), new Date(settleTime(prof))]);
+      const t = (await c.query('insert into opttrd(wid,pos_id,sym,kind,strike,exp,action,qty,price,fee,why,note,bid,ask) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning id', [wid, id, sym, l.kind, l.strike, l.exp, l.side === 'buy' ? 'bto' : 'sto', l.qty, l.px, l.fee, o.why || 'manual', o.note ? String(o.note).slice(0, 300) : null, l.q.bid, l.q.ask])).rows[0];
+      made.push({ id, trade: t.id, label: optLabel({ sym, ...l }), side: l.side, qty: l.qty, px: l.px, fee: l.fee, coll: l.coll || null });
+    }
+  });
+  await loadOptBook(); refreshUserSyms().catch(() => {}); broadcast({ t: 'evt', e: 'opt', wid });
+  return { ok: true, legs: made, net: plan.net, fees: plan.fees, hold: plan.hold };
+}
+POST('/api/opt/order', auth, async req => { const wid = await activeWalletId(req); return optOpenOrder(wid, req.body?.sym, req.body?.legs, { note: req.body?.note }); });
+
+// ---------- closing, exercising, and what happens at expiration ----------
+// tax lots for options: closing a long is a sale, closing a short is the purchase that ends it (always short-term)
+async function optRealize(c, o, n, closePx, fee, how) {
+  const gross = closePx * OPT_MULT * n;
+  const long = o.qty > 0, opened = new Date(o.opened || Date.now()), now = new Date();
+  const proceeds = long ? gross - fee : o.avg * OPT_MULT * n, basis = long ? o.avg * OPT_MULT * n : gross + fee;
+  const term = long && now - opened > 365 * 864e5 ? 'long' : 'short';
+  await c.query('insert into realized(wid,sym,qty,proceeds,basis,acquired,sold,term,crypto) values($1,$2,$3,$4,$5,$6,$7,$8,false)', [o.wid, optLabel(o), n, round(proceeds, 6), round(basis, 6), opened, now, term]);
+  return proceeds - basis;
+}
+// shrink or close one position inside a transaction; returns the profit
+async function optReduce(c, o, n, closePx, fee, action, note = null) {
+  const pnl = await optRealize(c, o, n, closePx, fee, action);
+  const left = Math.abs(o.qty) - n;
+  if (left <= 0) await c.query('update optpos set closed=now(), close_px=$1, how=$2, pnl=coalesce(pnl,0)+$3, qty=$4 where id=$5', [closePx, action, round(pnl, 6), o.qty, o.id]);
+  else await c.query('update optpos set qty=$1, pnl=coalesce(pnl,0)+$2 where id=$3', [o.qty > 0 ? left : -left, round(pnl, 6), o.id]);
+  const q = optQuote2(o.sym, o.kind, o.strike, o.exp);
+  await c.query('insert into opttrd(wid,pos_id,sym,kind,strike,exp,action,qty,price,fee,pnl,note,bid,ask) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)', [o.wid, o.id, o.sym, o.kind, o.strike, o.exp, action, n, closePx, fee, round(pnl, 6), note, q?.bid ?? null, q?.ask ?? null]);
+  return pnl;
+}
+async function optClose(wid, ids, o = {}) {
+  const list = optOpen(wid).filter(x => ids.includes(x.id)); if (!list.length) fail('That position is already closed', 404);
+  const w = await walletRow(wid);
+  if (!o.force) {
+    const sess = sessionAt(profOf(w)); if (sess !== 'regular') fail('Options trade only in regular hours, 9:30 am to 4:00 pm Eastern.');
+    const halt = haltOf(undOf(list[0].sym)); if (halt) fail(halt.why + ' Its options are halted too.');
+  }
+  // closing the long half of a spread on its own would leave the short one naked
+  for (const x of list) if (x.spread && x.qty > 0) { const sh = optOpen(wid).find(y => y.spread === x.spread && y.id !== x.id); if (sh && !ids.includes(sh.id) && optLevel(w) < 4) fail('Closing only the bought leg would leave the sold one naked. Close both legs together, or the sold leg first.'); }
+  const out = [];
+  await tx(async c => {
+    await c.query('select 1 from wallets where id=$1 for update', [wid]);
+    for (const x of list) {
+      const q = optQuote2(x.sym, x.kind, x.strike, x.exp); if (!q) fail('No live price yet');
+      const n = Math.abs(x.qty), side = x.qty > 0 ? 'sell' : 'buy', px = o.px != null ? o.px : side === 'sell' ? q.bid : q.ask, fee = px > 0 ? optFee(n, side) : 0;
+      const cash = side === 'sell' ? px * OPT_MULT * n - fee : -(px * OPT_MULT * n + fee);
+      await c.query('update wallets set cash=cash+$1 where id=$2', [round(cash, 6), wid]);
+      if (side === 'sell' && w.acct === 'cash' && cash > 0) await c.query('insert into settle(wid,amount,settles) values($1,$2,$3)', [wid, round(cash, 6), new Date(settleTime(profOf(w)))]);
+      const pnl = await optReduce(c, x, n, px, fee, o.action || (side === 'sell' ? 'stc' : 'btc'), o.note || null);
+      out.push({ id: x.id, label: optLabel(x), side, px, fee, pnl });
+    }
+  });
+  await loadOptBook(); broadcast({ t: 'evt', e: 'opt', wid });
+  return out;
+}
+POST('/api/opt/close', auth, async req => { const wid = await activeWalletId(req), ids = (Array.isArray(req.body?.ids) ? req.body.ids : [req.body?.id]).map(Number).filter(Boolean); return { ok: true, closed: await optClose(wid, ids) }; });
+// Turn one contract into shares (or cash for SPX). Used for exercise, assignment and expiration.
+// The premium folds into the stock's cost or sale price, the way the IRS treats it.
+async function optDeliver(x, S, how, o = {}) {
+  const n = Math.abs(x.qty), w = await walletRow(x.wid), long = x.qty > 0, intr = Math.max(0, x.kind === 'call' ? S - x.strike : x.strike - S);
+  const cashSettle = async (why) => {
+    await tx(async c => {
+      const amt = (long ? 1 : -1) * intr * OPT_MULT * n;
+      await c.query('update wallets set cash=cash+$1 where id=$2', [round(amt, 6), x.wid]);
+      await optReduce(c, x, n, intr, 0, how === 'expired' ? 'expired' : 'cash', why);
+    });
+    return { how: 'cash', amount: (long ? 1 : -1) * intr * OPT_MULT * n, why };
+  };
+  if (intr <= 0) { await tx(async c => { await optReduce(c, x, n, 0, 0, 'expired', null); }); return { how: 'expired', amount: 0 }; }
+  if (isIndexOpt(x.sym)) return cashSettle(`${x.sym} options settle in cash: ${money(intr)} a share × 100.`);
+  if (x.coll === 'spread' || (long && x.spread)) return cashSettle('Both legs of the spread were settled together, so the shares in and out net to cash.');
+  const und = undOf(x.sym), shares = n * OPT_MULT, prem = x.avg; // per share, net of fees
+  // stock side: who buys and who sells at the strike
+  const buys = (long && x.kind === 'call') || (!long && x.kind === 'put');
+  if (!buys) { // selling shares at the strike: long put exercised, or short call assigned
+    const p = (await positions(x.wid)).find(y => y.sym === und);
+    if (!p || p.qty < shares - 1e-9) return cashSettle(long ? `You didn't own ${shares} ${und} shares to deliver, so it was settled at what it's worth (${money(intr)} a share).` : `Mango doesn't hold short stock, so it bought ${shares} ${und} at ${pxStr(S)} and delivered them at the ${pxStr(x.strike)} strike right away.`);
+  }
+  // close the contract first so its collateral is free, then trade the shares at the strike
+  await tx(async c => { await c.query('update optpos set closed=now(), close_px=$1, how=$2, pnl=0 where id=$3', [intr, how, x.id]); await c.query('insert into opttrd(wid,pos_id,sym,kind,strike,exp,action,qty,price,fee,pnl,note) values($1,$2,$3,$4,$5,$6,$7,$8,$9,0,null,$10)', [x.wid, x.id, x.sym, x.kind, x.strike, x.exp, how, n, x.strike, `${buys ? 'Bought' : 'Sold'} ${shares} ${und} at ${pxStr(x.strike)}`]); });
+  await loadOptBook();
+  let fill;
+  try { fill = await execTrade(x.wid, und, buys ? 'buy' : 'sell', { qty: shares, px: x.strike, force: true, auto: true, optx: true, noImp: true, why: how === 'exercised' ? 'exercise' : 'assigned', otype: 'option', note: optLabel(x) }); }
+  catch (e) { // couldn't take the shares (no money for them): undo and settle the value instead
+    await Q("update optpos set closed=null, close_px=null, how=null where id=$1", [x.id]); await Q("delete from opttrd where pos_id=$1 and action=$2 and ts > now() - interval '1 minute'", [x.id, how]); await loadOptBook();
+    return cashSettle(`There wasn't enough money to ${buys ? 'buy' : 'sell'} the shares (${e.message.replace(/\.$/, '')}), so it was settled at what it's worth.`);
+  }
+  // fold the premium into the stock: paid premium raises a purchase's cost or lowers a sale; received premium does the reverse
+  const adj = prem * shares * (long ? 1 : -1); // + adds cost / removes proceeds
+  await tx(async c => {
+    if (buys) {
+      await c.query('update lots set basis=basis+$1 where trd_id=$2', [adj / shares, fill.id]);
+      const pr = (await c.query('select qty, avg from pos where wid=$1 and sym=$2', [x.wid, und])).rows[0];
+      if (pr) await c.query('update pos set avg=avg+$1 where wid=$2 and sym=$3', [adj / +pr.qty, x.wid, und]);
+    } else {
+      const rs = (await c.query('select id, qty from realized where trd_id=$1', [fill.id])).rows, tot = rs.reduce((t, r) => t + +r.qty, 0) || 1;
+      for (const r of rs) await c.query('update realized set proceeds=proceeds-$1 where id=$2', [adj * +r.qty / tot, r.id]);
+      await c.query('update trd set pnl=coalesce(pnl,0)-$1 where id=$2', [adj, fill.id]);
+    }
+  });
+  return { how: 'shares', side: buys ? 'buy' : 'sell', shares, price: x.strike, fill: fill.id };
+}
+POST('/api/opt/exercise', auth, async req => {
+  const wid = await activeWalletId(req), x = optOpen(wid).find(o => o.id === +req.body?.id); if (!x) fail('That position is closed', 404);
+  if (x.qty <= 0) fail('Only options you bought can be exercised.');
+  if (isIndexOpt(x.sym)) fail('SPX options are European style: they can only be exercised at expiration, and they settle in cash.');
+  const S = spotOf(x.sym), q = optQuote2(x.sym, x.kind, x.strike, x.exp);
+  if (!(q.intr > 0)) fail('It\'s out of the money, so exercising would mean paying more than the market price.');
+  if (sessionAt(profOf(await walletRow(wid))) !== 'regular') fail('Exercise requests go in during regular hours.');
+  const r = await optDeliver(x, S, 'exercised');
+  await notify('order', `Exercised ${optLabel(x)}`, r.how === 'shares' ? `You ${r.side === 'buy' ? 'bought' : 'sold'} ${r.shares} ${undOf(x.sym)} at ${pxStr(x.strike)}.${q.ext > 0.05 ? ` It still had ${money(q.ext * OPT_MULT * x.qty)} of time value that exercising gave up.` : ''}` : r.why, { wid, url: '/#/options' });
+  broadcast({ t: 'evt', e: 'opt', wid });
+  return { ok: true, ...r, gaveUp: q.ext * OPT_MULT * x.qty };
+});
+// the closing price on the expiration day
+async function settlePx(sym, exp) {
+  const und = undOf(sym), mult = INDEX_OPT[sym]?.mult || 1;
+  if (exp < etDate()) { try { const b = await dailyBars(und), i = lastIndexOnOrBefore(b.d, exp); if (i >= 0 && b.d[i] === exp) return b.c[i] * mult; } catch (e) {} }
+  return spotOf(sym);
+}
+async function optExpire(x, S) {
+  const n = Math.abs(x.qty), intr = Math.max(0, x.kind === 'call' ? S - x.strike : x.strike - S), label = optLabel(x);
+  if (intr < 0.01) {
+    await optDeliver(x, S, 'expired');
+    await notify('order', `${label} expired worthless`, x.qty > 0 ? `${x.sym} closed at ${pxStr(S)}. You paid ${money(x.avg * OPT_MULT * n)}.` : `${x.sym} closed at ${pxStr(S)}, so it wasn't assigned. You keep the ${money(x.avg * OPT_MULT * n)} premium.`, { wid: x.wid, url: '/#/options' });
+    return 'expired';
+  }
+  // OCC exercises anything a cent or more in the money; short contracts in the money get assigned
+  const r = await optDeliver(x, S, x.qty > 0 ? 'exercised' : 'assigned');
+  const und = undOf(x.sym);
+  await notify('order', `${label} ${x.qty > 0 ? 'was exercised' : 'was assigned'}`, r.how === 'shares' ? `${x.sym} closed at ${pxStr(S)}, in the money. You ${r.side === 'buy' ? 'bought' : 'sold'} ${r.shares} ${und} at ${pxStr(x.strike)}.` : `${x.sym} closed at ${pxStr(S)}. ${r.why} ${r.amount >= 0 ? 'You got' : 'It cost'} ${money(Math.abs(r.amount))}.`, { wid: x.wid, url: '/#/options' });
+  return r.how;
+}
+// Each afternoon: pin-risk warnings, selling what can't be exercised, then expiration after the close and any early assignment.
+async function optJob({ force = false, asOf = null } = {}) {
+  if (!OPTBOOK.size) return;
+  const today = asOf || etDate(), p = etParts(), mins = p.h * 60 + p.mi, after = force || mins >= 16 * 60 + 5 || today < etDate();
+  for (const s of new Set([...OPTBOOK.values()].flat().map(o => o.sym))) await ivFor(s).catch(() => {});
+  const all = [...OPTBOOK.values()].flat();
+  // 1. on the last day: warn about pin risk, and sell anything in the money that the wallet can't afford to exercise
+  if (!force && mins >= 14 * 60 && mins < 16 * 60) for (const x of all.filter(o => o.exp === today)) {
+    const S = spotOf(x.sym); if (!S) continue;
+    if (x.qty < 0 && Math.abs(S / x.strike - 1) < 0.01 && (await kvGet('pin:' + x.id)) !== today) {
+      await kvSet('pin:' + x.id, today);
+      await notify('order', `Pin risk · ${optLabel(x)}`, `${x.sym} is at ${pxStr(S)}, right by the strike, on expiration day. It might or might not be assigned, and you won't know until tomorrow. Buying it back now removes the doubt.`, { wid: x.wid, url: '/#/options' });
+    }
+    if (x.qty > 0 && mins >= 15 * 60 + 30 && !isIndexOpt(x.sym)) {
+      const q = optQuote2(x.sym, x.kind, x.strike, x.exp); if (!(q?.intr >= 0.01) || x.spread) continue;
+      const n = x.qty, acct = await accountInfo(x.wid), und = undOf(x.sym), have = (await positions(x.wid)).find(y => y.sym === und)?.qty || 0;
+      const can = x.kind === 'call' ? acct.bp >= x.strike * OPT_MULT * n : have >= n * OPT_MULT;
+      if (can) continue;
+      try { const r = await optClose(x.wid, [x.id], { note: 'Sold before expiration: not enough to exercise' }); await notify('order', `Sold ${optLabel(x)} before it expired`, `It's in the money, but the wallet ${x.kind === 'call' ? `doesn't have ${money(x.strike * OPT_MULT * n)} to buy the shares` : `doesn't own the ${n * OPT_MULT} shares to sell`}, so Mango sold it at ${money(r[0].px)} a share like a broker would.`, { wid: x.wid, url: '/#/options' }); } catch (e) { warn('opt pre-expiry', e.message); }
+    }
+  }
+  if (!after) return;
+  // 2. expiration: everything that expired today (after the close) or earlier
+  for (const x of [...OPTBOOK.values()].flat().filter(o => o.exp < today || (o.exp === today && after))) {
+    const S = await settlePx(x.sym, x.exp); if (!S) continue;
+    try { await optExpire(x, S); } catch (e) { warn('opt expire', x.id, e.message); }
+    await loadOptBook();
+  }
+  // 3. early assignment (American options only): short calls the day before an ex-dividend date when the dividend is worth more than the time value left, and deep short puts with no time value
+  if ((await kvGet('opt_early')) === today && !force) return;
+  await kvSet('opt_early', today);
+  const [ny, nm, nd] = nextTradingDay(p.y, p.m, p.d), tomorrow = ymd([ny, nm, nd]);
+  for (const x of [...OPTBOOK.values()].flat().filter(o => o.qty < 0 && !isIndexOpt(o.sym) && o.exp > today)) {
+    const q = optQuote2(x.sym, x.kind, x.strike, x.exp); if (!q || q.intr < 0.01) continue;
+    let why = null;
+    if (x.kind === 'call') { const d = await nextExDiv(x.sym).catch(() => null); if (d && d.date === tomorrow && d.amount > q.ext) why = `${x.sym} goes ex-dividend tomorrow (${money(d.amount)} a share), and that's worth more than the ${money(q.ext)} of time value left, so the owner exercised early to collect it.`; }
+    else if (q.ext < 0.02 && q.intr > x.strike * 0.05) why = `It's deep in the money with almost no time value left, so the owner exercised early.`;
+    if (!why) continue;
+    const label = optLabel(x), r = await optDeliver(x, q.spot, 'assigned').catch(e => { warn('early assign', e.message); return null; }); if (!r) continue;
+    await notify('order', `Assigned early · ${label}`, `${why} ${r.how === 'shares' ? `You ${r.side === 'buy' ? 'bought' : 'sold'} ${r.shares} ${undOf(x.sym)} at ${pxStr(x.strike)}.` : r.why}`, { wid: x.wid, url: '/#/options' });
+    await loadOptBook();
+  }
+}
+
+// ---------- the options screen ----------
+function optPosJson(o, list) {
+  const q = optQuote2(o.sym, o.kind, o.strike, o.exp), n = Math.abs(o.qty), mark = q ? q.mid : o.avg, val = o.qty * OPT_MULT * mark;
+  const cost = o.qty * OPT_MULT * o.avg, req = optReq(o, list), today = etDate(), S = q?.spot;
+  return { id: o.id, sym: o.sym, und: undOf(o.sym), kind: o.kind, strike: o.strike, exp: o.exp, qty: o.qty, avg: o.avg, label: optLabel(o), occ: occCode(o), coll: o.coll, spread: o.spread,
+    bid: q?.bid ?? null, ask: q?.ask ?? null, mark: round(mark, 4), value: val, pl: val - cost, plPct: cost ? (val - cost) / Math.abs(cost) : 0, delta: q ? round(q.delta * o.qty * OPT_MULT, 1) : null, theta: q ? round(q.theta * o.qty * OPT_MULT, 2) : null,
+    days: q ? q.days : 0, spot: S, itm: q ? q.intr > 0 : false, intr: q ? q.intr : 0, ext: q ? q.ext : 0, hold: req.cash, holdShares: req.shares, naked: !!req.naked,
+    pin: o.exp === today && o.qty < 0 && S ? Math.abs(S / o.strike - 1) < 0.01 : false, index: isIndexOpt(o.sym), opened: o.opened, bot: o.bot };
+}
+GET('/api/opt/state', auth, async req => {
+  const w = await walletRow(await activeWalletId(req)), list = optOpen(w.id);
+  for (const s of new Set(list.map(o => o.sym))) await ivFor(s).catch(() => {});
+  const lvl = optLevel(w), next = Math.min(optCap(w), lvl + 1), quiz = await quizPassed();
+  const acct = isReal(w) && !w.broker ? await accountInfo(w.id, { w }) : null;
+  const hist = await rows('select * from opttrd where wid=$1 order by id desc limit 40', [w.id]);
+  return {
+    wallet: { id: w.id, name: w.name, emoji: w.emoji, acct: w.acct, real: isReal(w), broker: !!w.broker }, level: lvl, cap: optCap(w), levels: OPT_LEVELS, quiz,
+    next: next > lvl ? { n: next, needs: await levelNeeds(w, next) } : null, age: ageProblem(),
+    open: list.map(o => optPosJson(o, list)), value: optMark(w.id), holds: optHolds(w.id), bp: acct ? acct.bpCrypto : 0, equity: acct ? acct.equity : null,
+    history: hist.map(t => ({ id: t.id, ts: tsMs(t.ts), label: optLabel(t), action: t.action, qty: +t.qty, price: +t.price, fee: +t.fee || 0, pnl: t.pnl == null ? null : +t.pnl, note: t.note, why: t.why })),
+    nakedMin: NAKED_MIN_EQ, l2Trades: L2_TRADES, indexes: Object.keys(INDEX_OPT),
+  };
+});
+// every wallet's options in one list (for the home screen)
+const optSummary = wid => { const l = optOpen(wid); return l.length ? { n: l.length, value: optMark(wid) } : null; };
+
+// ---------- one time: the old options sandbox becomes a real wallet ----------
+async function migrateOptSandbox() {
+  if (await kvGet('opt_migrated')) return;
+  const old = await rows('select * from opt_pos order by id').catch(() => []), cash0 = await kvGet('opt_cash').catch(() => null);
+  if (old.length || cash0 != null) {
+    const cash = num(cash0, OPT_START);
+    await tx(async c => {
+      const w = (await c.query(`insert into wallets(name,emoji,color,cash,start_bal,sort,profile,acct,opt_level) values('Options practice','🎯','sky',$1,$2,(select coalesce(max(sort),0)+1 from wallets),'robinhood','margin',2) returning *`, [cash, OPT_START])).rows[0];
+      for (const o of old) {
+        if (o.closed) { await c.query("insert into opttrd(wid,ts,sym,kind,strike,exp,action,qty,price,fee,pnl,note) values($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10,'From the old options sandbox')", [w.id, o.closed, o.sym, o.kind, o.strike, o.exp, o.how === 'sold' ? 'stc' : o.how === 'exercised' ? 'cash' : 'expired', o.qty, +o.close_px || 0, (+o.close_px - +o.prem) * 100 * o.qty]); continue; }
+        await c.query("insert into optpos(wid,sym,kind,strike,exp,qty,avg,opened,why) values($1,$2,$3,$4,$5,$6,$7,$8,'sandbox')", [w.id, o.sym, o.kind, o.strike, o.exp, o.qty, +o.prem, o.opened]);
+      }
+    });
+    log(`Moved the options sandbox (${old.filter(o => !o.closed).length} open) into a new "Options practice" wallet`);
+  }
+  await kvSet('opt_migrated', '1');
+}
+if (ENV.MANGO_FAST_JOBS) {
+  POST('/api/test/opt-job', auth, async req => { await optJob({ force: true, asOf: req.body?.asOf || null }); return { ok: true }; });
+  POST('/api/test/opt-div', auth, async req => { const p = etParts(), t = ymd(nextTradingDay(p.y, p.m, p.d)); OPT_TEST_DIV.set(req.body.sym, { date: req.body.date || t, amount: num(req.body.amount) }); return { tomorrow: t }; });
+}
+
+// ---------- the covered-call bot's options step (runs after it buys or holds its lots) ----------
+async function covcallRun(bot, w, log, dry) {
+  const p = bot.params, lvl = optLevel(w), today = etDate();
+  if (lvl < 1) { log.skips.push(ageProblem() || 'Covered calls need options level 1 on this wallet: open Options, pass the level 1 quiz and approve the wallet.'); return; }
+  if (sessionAt(profOf(w)) !== 'regular') { log.skips.push('Calls are sold in regular hours; the shares are handled, the calls wait for the next session.'); return; }
+  for (const s of bot.syms) await ivFor(s).catch(() => {});
+  // 1. manage the calls it already sold: take profit early, roll or let go near expiration, drop ones on stocks it no longer trades
+  for (const o of optOpen(bot.wid).filter(x => x.kind === 'call' && x.qty < 0 && x.coll === 'covered')) {
+    const q = optQuote2(o.sym, o.kind, o.strike, o.exp); if (!q) continue;
+    const earned = o.avg > 0 ? 1 - q.ask / o.avg : 0, label = optLabel(o);
+    let why = null;
+    if (!bot.syms.includes(o.sym)) why = `${o.sym} isn't in the bot's list any more`;
+    else if (p.takePct > 0 && earned >= p.takePct / 100) why = `it kept ${Math.round(earned * 100)}% of the premium already`;
+    else if (p.atExp === 'roll' && q.days <= 5 && q.intr > 0) why = `it's in the money with ${q.days} day${q.days === 1 ? '' : 's'} left, so it rolls to a later month instead of giving up the shares`;
+    if (!why) { if (q.days <= 5 && q.intr > 0) log.skips.push(`${label} is in the money: the shares will likely be called away at ${pxStr(o.strike)}.`); continue; }
+    if (dry) { log.skips.push(`Would buy back ${label}: ${why}.`); continue; }
+    try { const r = await optClose(bot.wid, [o.id], { note: 'Bot: ' + why }); log.orders.push({ sym: o.sym, side: 'opt', short: `bought back ${o.sym} call`, text: `Bought back ${label} at ${money(r[0].px)} a share`, label: `because ${why} (${money(r[0].pnl, { sign: true })})` }); }
+    catch (e) { log.skips.push(`Couldn't buy back ${label}: ${e.message}`); }
+  }
+  // 2. sell a call on every free lot of 100
+  const pos = await positions(bot.wid), acct = await accountInfo(bot.wid, { w, pos }), exps = expiries();
+  const mid = (p.dteMin + p.dteMax) / 2, dte = e => yearsTo(e) * 365.25;
+  const inWin = exps.filter(e => dte(e) >= p.dteMin && dte(e) <= p.dteMax), exp = (inWin.length ? inWin : exps.filter(e => dte(e) >= p.dteMin)).sort((a, b) => Math.abs(dte(a) - mid) - Math.abs(dte(b) - mid))[0];
+  for (const s of bot.syms) {
+    const ps = pos.find(x => x.sym === s); if (!ps) continue;
+    const n = Math.floor((ps.qty - (acct.holdsShares[s] || 0)) / 100 + 1e-9);
+    if (n < 1) { if (ps.qty < 100) log.skips.push(`${s}: ${+ps.qty.toFixed(2)} shares; a covered call needs 100.`); continue; }
+    if (!exp) { log.skips.push('No expiration in range.'); break; }
+    if (p.skipEarn === 'on') { const e = (await earningsFor(s).catch(() => null))?.next; if (e && e.date >= today && e.date <= exp) { log.skips.push(`${s}: earnings on ${e.date}, before the ${exp} expiration, so no call this time.`); continue; } }
+    if (p.skipDiv === 'on') { const d = await nextExDiv(s).catch(() => null); if (d && d.date > today && d.date <= exp) { log.skips.push(`${s}: ex-dividend about ${d.date}, before expiration. A call in the money then could be assigned early to take the dividend, so it waits.`); continue; } }
+    const S0 = spotOf(s), st = strikeStep(S0), want = p.delta / 100;
+    let best = null;
+    for (let K = Math.ceil(S0 / st) * st, k = 0; k < 25; k++, K = round(K + st, 2)) { const q = optQuote2(s, 'call', K, exp); if (!q || q.bid < 0.05) break; const d = Math.abs(q.delta - want); if (!best || d < best.d) best = { K, d, q }; }
+    if (!best) { log.skips.push(`${s}: no out-of-the-money call worth selling.`); continue; }
+    const label = optLabel({ sym: s, kind: 'call', strike: best.K, exp });
+    if (dry) { log.skips.push(`Would sell ${n} ${label} for about ${money(best.q.bid * 100 * n)}.`); continue; }
+    try { await optOpenOrder(bot.wid, s, [{ kind: 'call', strike: best.K, exp, side: 'sell', qty: n }], { why: 'bot', bot: bot.id }); log.orders.push({ sym: s, side: 'opt', short: `sold ${n} ${s} call${n > 1 ? 's' : ''}`, text: `Sold ${n} ${label} for ${money(best.q.bid * 100 * n)}`, label: `delta ${best.q.delta.toFixed(2)}, ${Math.round(dte(exp))} days` }); }
+    catch (e) { log.skips.push(`Couldn't sell the ${s} call: ${e.message}`); }
+  }
+}
 
 // =====================================================================
 // Login
@@ -5333,7 +5890,7 @@ GET('/api/state', auth, async req => {
   const eq = await equitySeries(wid, '1D').catch(() => null);
   const out = {
     v: BUILD, appVersion: APP_VERSION, now: Date.now(), market: market(), mstate: mstateJson(), calNote: calendarNote(), profile: profileJson(), user: APP_USER,
-    wallet: w, wallets, pos, ord, lims, account, xfers, rules: rulesJson(wr), broker: brokerJson(), trd: trd.map(tradeJson), watch: watch.map(x => x.sym), alerts: alerts.map(alertJson),
+    wallet: w, wallets, pos, ord, lims, account, xfers, options: optSummary(wid), rules: rulesJson(wr), broker: brokerJson(), trd: trd.map(tradeJson), watch: watch.map(x => x.sym), alerts: alerts.map(alertJson),
     preds: preds.map(p => ({ id: p.id, sym: p.sym, dir: p.dir, start: +p.start_px, startTs: tsMs(p.start_ts), end: tsMs(p.end_ts) })),
     assets: assetsJson(syms), prices: pricesJson(), spark: sp, eq1d: eq,
     lists: { stocks: STOCK_DEFAULT, indexes: INDEXES, crypto: CRYPTO_DEFAULT, extra: [...userSyms.extra] },
@@ -5659,7 +6216,7 @@ async function resetWallet(wid, start) {
   const tr = await row("select count(*) n, count(*) filter (where side='sell') closed, count(*) filter (where side='sell' and pnl>0) wins from trd where wid=$1 and side in ('buy','sell')", [wid]);
   await tx(async c => {
     if (+tr.n > 0) await c.query('insert into seasons(wid,started,start_bal,final_bal,trades,wins,closed,name) values($1,$2,$3,$4,$5,$6,$7,$8)', [wid, w.season_start, w.start_bal, v, +tr.n, +tr.wins, +tr.closed, `${w.name} · ${new Date(tsMs(w.season_start)).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`]);
-    for (const t of ['pos', 'ord', 'lim', 'trd', 'snap', 'divpaid', 'lots', 'realized', 'settle', 'xfer', 'splits']) await c.query(`delete from ${t} where wid=$1`, [wid]);
+    for (const t of ['pos', 'ord', 'lim', 'trd', 'snap', 'divpaid', 'lots', 'realized', 'settle', 'xfer', 'splits', 'optpos', 'opttrd']) await c.query(`delete from ${t} where wid=$1`, [wid]);
     await c.query('update wallets set cash=$1, start_bal=$1, season_start=now(), margin_accrued=0, call_amt=0, call_since=null where id=$2', [start, wid]);
   });
   lastSnap.delete(wid); await loadOrders(); await snapshot(wid); await refreshUserSyms();
@@ -5669,7 +6226,7 @@ POST('/api/reset', auth, async req => { const wid = await activeWalletId(req); c
 DEL('/api/wallets/:id', auth, async req => {
   const w = await walletRow(+req.params.id);
   if (+(await row('select count(*) n from wallets where id<>$1', [w.id])).n === 0) fail("You can't delete your only wallet");
-  await tx(async c => { for (const t of ['pos', 'ord', 'lim', 'trd', 'snap', 'divpaid', 'seasons', 'lots', 'realized', 'settle', 'xfer', 'splits']) await c.query(`delete from ${t} where wid=$1`, [w.id]); await c.query('delete from wallets where id=$1', [w.id]); });
+  await tx(async c => { for (const t of ['pos', 'ord', 'lim', 'trd', 'snap', 'divpaid', 'seasons', 'lots', 'realized', 'settle', 'xfer', 'splits', 'optpos', 'opttrd']) await c.query(`delete from ${t} where wid=$1`, [w.id]); await c.query('delete from wallets where id=$1', [w.id]); });
   if (w.broker) await Q("delete from kv where k='alpaca_after'");
   if (S.defaultWallet === w.id) await saveSettings({ defaultWallet: (await row('select id from wallets order by archived, sort, id limit 1')).id });
   await loadOrders(); await refreshUserSyms();
@@ -5744,7 +6301,7 @@ GET('/api/status', auth, async () => ({
 }));
 
 // ---------- backup ----------
-const BACKUP_TABLES = ['wallets', 'pos', 'ord', 'lim', 'trd', 'snap', 'extra', 'watch', 'alert', 'divpaid', 'seasons', 'preds', 'achv', 'meta', 'lots', 'realized', 'settle', 'xfer', 'splits'];
+const BACKUP_TABLES = ['wallets', 'pos', 'ord', 'lim', 'trd', 'snap', 'extra', 'watch', 'alert', 'divpaid', 'seasons', 'preds', 'achv', 'meta', 'lots', 'realized', 'settle', 'xfer', 'splits', 'optpos', 'opttrd'];
 GET('/api/export', auth, async (req, res) => {
   const wid = await activeWalletId(req);
   if (req.query.fmt === 'csv') {
@@ -5772,7 +6329,7 @@ POST('/api/import', auth, async req => {
         await c.query(`insert into ${t}(${keys.join(',')}) select ${keys.join(',')} from json_populate_recordset(null::${t}, $1::json)`, [JSON.stringify(chunk)]);
       }
     }
-    for (const t of ['wallets', 'ord', 'lim', 'trd', 'alert', 'seasons', 'preds', 'notifs', 'lots', 'realized', 'settle', 'xfer']) await c.query(`select setval(pg_get_serial_sequence('${t}','id'), greatest((select coalesce(max(id),1) from ${t}),1))`);
+    for (const t of ['wallets', 'ord', 'lim', 'trd', 'alert', 'seasons', 'preds', 'notifs', 'lots', 'realized', 'settle', 'xfer', 'optpos', 'opttrd']) await c.query(`select setval(pg_get_serial_sequence('${t}','id'), greatest((select coalesce(max(id),1) from ${t}),1))`);
   });
   if (b.settings) await saveSettings(b.settings);
   lastSnap.clear(); await loadAssets(); await loadOrders(); await loadAlerts(); await refreshUserSyms();
@@ -5940,7 +6497,7 @@ POST('/api/bots', auth, async req => {
   if (+(await row('select count(*) n from bots')).n >= 20) fail('You can have up to 20 bots');
   const name = String(b.name || st.name).trim().slice(0, 30) || st.name;
   if (FINNHUB_KEY && S.f_buzz !== false) earningsCal().catch(() => {});
-  const params = cleanParams(b.strategy, b.params), mandate = cleanMandate({ ...(st.auto ? { maxTradesDay: 30, maxPosPct: 20 } : {}), ...(b.mandate || {}) });
+  const params = cleanParams(b.strategy, b.params), mandate = cleanMandate({ ...(st.auto ? { maxTradesDay: 30, maxPosPct: 20 } : {}), ...(st.optLevel ? { maxPosPct: 100 } : {}), ...(b.mandate || {}) });
   let syms;
   if (st.auto) { // Autopilot trades the tryouts' symbols; prices are fetched in the background
     syms = apSyms(params.markets);
@@ -5953,7 +6510,9 @@ POST('/api/bots', auth, async req => {
     const start = clamp(num(b.start, 10000), 100, 1e9);
     const w = await row(`insert into wallets(name,emoji,color,cash,start_bal,sort,profile,acct,lot_method,crypto_route) values($1,'🤖',$2,$3,$3,(select coalesce(max(sort),0)+1 from wallets),$4,$5,'fifo','mm') returning *`,
       [name.slice(0, 30), COLORS.includes(b.color) ? b.color : 'grape', start, PROFILE_KEYS.includes(b.profile) ? b.profile : 'robinhood', ACCTS.includes(b.acct) ? b.acct : 'instant']);
-    wid = w.id; await loadWalletMeta(); await snapshot(wid);
+    wid = w.id;
+    if (st.optLevel && !ageProblem() && (await quizPassed())[st.optLevel] && optCap(w) >= st.optLevel) await Q('update wallets set opt_level=$1 where id=$2', [st.optLevel, wid]); // its own wallet gets the options level it needs, if you've passed that quiz
+    await loadWalletMeta(); await snapshot(wid);
   } else {
     const w = await walletRow(wid); if (w.archived) fail('That wallet is archived');
     if (w.broker) {
@@ -7366,7 +7925,7 @@ function startJobs() {
   every(fast ? 10e3 : 10 * 60e3, () => { if (!standbyPaused()) return postmortemJob(); }, 'post-mortems');
   // practice tools: chart-signal alerts, options expiry, the monthly review
   every(fast ? 5e3 : 5 * 60e3, () => indAlertJob(), 'chart alerts');
-  every(fast ? 10e3 : 30 * 60e3, () => optionsExpiryJob(), 'options expiry');
+  every(fast ? 10e3 : 60e3, () => optJob(), 'options');
   every(fast ? 10e3 : 30 * 60e3, () => reviewJob(), 'monthly review');
   // safety: offsite backup (nightly), uptime watch between main and standby
   every(fast ? 10e3 : 10 * 60e3, () => offsiteJob(), 'offsite backup');
@@ -7461,7 +8020,7 @@ const ICONS = {};
 const icon = (name, fn) => ICONS[name] || (ICONS[name] = fn());
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD646"/><stop offset=".5" stop-color="#FFA028"/><stop offset="1" stop-color="#FA5256"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="#1E1430"/><ellipse cx="31" cy="36" rx="18" ry="22" transform="rotate(30 31 36)" fill="url(#g)"/><path d="M20 41l6.5-6 5 3.5 9.5-10" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37 28.5h4.5V33" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="45" cy="11.5" rx="9" ry="4.6" transform="rotate(-24 45 11.5)" fill="#3BD68A"/></svg>`;
 let BUILD = 'dev', INDEX = null, INDEX_GZ = null;
-const APP_VERSION = '3.9.0'; // stamped by build.sh from package.json
+const APP_VERSION = '4.0.0'; // stamped by build.sh from package.json
 function loadIndex() {
   const file = path.join(__dirname, 'index.html');
   let html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<!doctype html><title>Mango</title><p>index.html is missing next to server.js.</p>';
@@ -7570,7 +8129,7 @@ process.on('unhandledRejection', e => warn('unhandled', e && (e.stack || e.messa
   loadIndex();
   await migrate();
   tokenSalt = (await kvGet('token_salt', '')) || '';
-  await loadSettings(); await refreshPasskeysOn(); await loadAssets(); await loadPriceCache(); await loadOrders(); await loadMstate(); await loadProfile(); await loadAlerts(); await initPush();
+  await loadSettings(); await refreshPasskeysOn(); await loadAssets(); await loadPriceCache(); await migrateOptSandbox().catch(e => warn('options sandbox', e.message)); await loadOrders(); await loadMstate(); await loadProfile(); await loadAlerts(); await initPush();
   await refreshUserSyms(); await walletsSummary();
   server.listen(PORT, () => log(`🥭 Mango is running on port ${PORT} · v${APP_VERSION} (build ${BUILD}) · ${FINNHUB_KEY ? 'stocks on' : 'stocks off (no FINNHUB_KEY)'}${BROKER ? ` · Alpaca ${BROKER.env}` : ''}`));
   cbConnect(); fhConnect(); if (BROKER) adConnect(); startJobs();
