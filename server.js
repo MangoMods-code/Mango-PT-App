@@ -315,6 +315,8 @@ const MIGRATIONS = [
       create index if not exists opttrd_w on opttrd(wid, id desc);
     `);
   },
+  // 10: the daily call
+  async c => { await c.query('create table if not exists dcall(d text primary key, pick text not null, made timestamptz not null default now(), close numeric, prev numeric, result text, house text)'); },
 ];
 
 async function migrate() {
@@ -3145,7 +3147,7 @@ const WEEKLY = [
   ['w_protect', 'Add a stop loss to a position', c => c.wStops, 1], ['w_notes', 'Write notes on 2 trades', c => c.wNotes, 2],
   ['w_green', 'End a day in profit', c => c.wGreenDays, 1], ['w_alerts', 'Set 2 price alerts', c => c.wAlerts, 2],
   ['w_ask', 'Ask the Council about 3 stocks', c => c.wAsk, 3], ['w_whatif', 'Try the what-if machine twice', c => c.wWhatif, 2],
-  ['w_opts', 'Make an options practice trade', c => c.wOpts, 1], ['w_signal', 'Set a chart-signal alert', c => c.wSignal, 1],
+  ['w_opts', 'Make an options trade', c => c.wOpts, 1], ['w_signal', 'Set a chart-signal alert', c => c.wSignal, 1],
   ['w_review', 'Read your monthly review', c => c.wReview, 1], ['w_bot', 'Start a new bot', c => c.wBot, 1],
 ];
 async function challenges(wid, a) {
@@ -3161,7 +3163,7 @@ async function challenges(wid, a) {
     wStops: +(await row("select count(*) n from ord where wid=$1 and kind in ('stop','trail') and created >= $2", [wid, new Date(ws)])).n,
     wAlerts: +(await row('select count(*) n from alert where ts >= $1', [new Date(ws)])).n,
     wAsk: await chalCount('ask'), wWhatif: await chalCount('whatif'), wReview: await chalCount('review'),
-    wOpts: +(await row('select count(*) n from opt_pos where opened >= $1', [new Date(ws)]).catch(() => ({ n: 0 }))).n,
+    wOpts: +(await row('select count(*) n from opttrd where ts >= $1', [new Date(ws)]).catch(() => ({ n: 0 }))).n,
     wSignal: +(await row("select count(*) n from alert where kind='ind' and ts >= $1", [new Date(ws)])).n,
     wBot: +(await row('select count(*) n from bots where created >= $1', [new Date(ws)])).n,
     wGreenDays: (a.daily || []).filter(d => tsMs(d.d + 'T12:00:00Z') >= ws && d.ch > 0).length,
@@ -6005,7 +6007,7 @@ function monteCarlo(curve, { sims = 1000, block = 10, ppyN = 252, R = Math.rando
 }
 const labCache = new Map();
 const labCached = async (k, fn) => { const h0 = labCache.get(k); if (h0 && Date.now() - h0.t < 30 * 60e3) return h0.v; const v = await fn(); labCache.set(k, { t: Date.now(), v }); if (labCache.size > 30) labCache.delete(labCache.keys().next().value); return v; };
-POST('/api/lab/walkforward', auth, async req => { botsOn(); const b = req.body || {}; return labCached(JSON.stringify(['wf', b.strategy, b.params, b.syms, b.years, b.capital, b.train, b.test]), () => walkForward(b)); });
+POST('/api/lab/walkforward', auth, async req => { botsOn(); const b = req.body || {}; learnSeen('walkforward'); return labCached(JSON.stringify(['wf', b.strategy, b.params, b.syms, b.years, b.capital, b.train, b.test]), () => walkForward(b)); });
 POST('/api/lab/montecarlo', auth, async req => {
   botsOn(); const b = req.body || {};
   return labCached(JSON.stringify(['mc', b.strategy, b.params, b.syms, b.years, b.capital]), async () => {
@@ -6080,6 +6082,310 @@ POST('/api/lab/vs', auth, async req => {
     lead, verdict: Math.abs(lead) < Math.max(5, cap0 * 0.002) ? 'Neck and neck.' : lead > 0 ? `You're ahead of the bot by ${money(lead)}.` : `The bot is ahead of you by ${money(-lead)}.`,
     note: `The bot starts with ${money(cap0)} on ${new Date(from + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}, the day ${w.name}'s current season started, and gets your deposits and withdrawals on the days they arrived. It trades at each day's close with the same fees and spreads.` };
 });
+// =====================================================================
+// Learning and fun: story mode (Academy chapters and the Time machine), compound interest and DCA,
+// the risk profile meter, the daily call, new achievements, and the days HQ celebrates
+// =====================================================================
+// ---------- things you've looked at (for lessons that ask you to try a tool) ----------
+let SEEN = null;
+async function learnSeen(k) { if (!SEEN) SEEN = jsonOr(await kvGet('learn_seen', '{}').catch(() => '{}'), {}); if (SEEN[k]) return; SEEN[k] = Date.now(); await kvSet('learn_seen', JSON.stringify(SEEN)).catch(() => {}); }
+const seenAll = async () => SEEN || (SEEN = jsonOr(await kvGet('learn_seen', '{}').catch(() => '{}'), {}));
+POST('/api/learn/seen', auth, async req => { const k = String(req.body?.k || '').replace(/[^a-z0-9_]/g, '').slice(0, 30); if (k) await learnSeen(k); return { ok: true }; });
+
+// ---------- Academy: chapters you finish by doing the real thing ----------
+const BONDS = new Set(['TLT', 'IEF', 'SHY', 'BND', 'AGG', 'SGOV', 'BIL', 'TIP', 'VGIT', 'VGLT', 'GOVT', 'SCHO']);
+const ACADEMY = [
+  { k: 'basics', title: 'Your first trades', icon: 'sparkle', steps: [
+    { k: 'buy', t: 'Buy your first stock or fund', go: 'search', lesson: 'A share is a tiny slice of a company. Its price moves as people buy and sell it. Buying in dollars ("$50 of Apple") works the same as buying in shares.', test: c => c.buys >= 1 },
+    { k: 'watch', t: 'Add something to your watchlist', go: 'market', lesson: 'Watching before buying is free. Star a few things you\'re curious about and see how they move for a week.', test: c => c.watch >= 1 },
+    { k: 'note', t: 'Write a note on one of your trades', go: 'activity', lesson: 'Write down why you bought. Later, compare it with what happened. It\'s the fastest way to learn what works for you.', test: c => c.notes >= 1 },
+  ] },
+  { k: 'diversify', title: 'Don\'t put all your eggs in one basket', icon: 'pie', steps: [
+    { k: 'index', t: 'Buy an index fund, like SPY or VOO', go: 'asset/SPY', lesson: 'An index fund owns hundreds of companies at once. If one fails, it barely matters. Most professional investors don\'t beat it over time.', test: c => c.fundBuy },
+    { k: 'three', t: 'Hold 3 or more different things at once', go: 'portfolio', lesson: 'Different things go up and down at different times, so together they swing less than any one of them.', test: c => c.maxHeld >= 3 },
+    { k: 'bond', t: 'Own a bond or T-bill fund (TLT, IEF, BND, AGG or SGOV)', go: 'asset/SGOV', lesson: 'Bonds are loans that pay interest. They usually move less than stocks, and often hold up when stocks fall.', test: c => c.bond },
+  ] },
+  { k: 'protect', title: 'Protect your downside', icon: 'shield', steps: [
+    { k: 'stop', t: 'Set a stop loss on something you own', go: 'portfolio', lesson: 'A stop loss sells automatically if the price falls to a level you choose, so one bad day can\'t turn into a disaster while you\'re not looking.', test: c => c.stops },
+    { k: 'alert', t: 'Set a price alert', go: 'portfolio', lesson: 'An alert doesn\'t trade, it just tells you. Handy for "buy if it drops to $X" without watching the screen.', test: c => c.alerts >= 1 },
+    { k: 'take', t: 'Set a take profit', go: 'portfolio', lesson: 'A take profit sells when the price reaches your target. Deciding in advance beats deciding in the excitement of the moment.', test: c => c.takes },
+  ] },
+  { k: 'orders', title: 'Order types', icon: 'list', steps: [
+    { k: 'limit', t: 'Place a limit order', go: 'search', lesson: 'A limit order only fills at your price or better. You may not get filled, but you never pay more than you meant to.', test: c => c.limits },
+    { k: 'ext', t: 'Trade before the open or after the close', go: 'search', lesson: 'Extended hours have fewer traders, so spreads are wider and prices jumpier. Limit orders only.', test: c => c.ext },
+    { k: 'frac', t: 'Buy a fraction of a share', go: 'search', lesson: 'With fractions, $10 buys a slice of even the most expensive stock. They trade as market or day orders, in regular hours.', test: c => c.frac },
+  ] },
+  { k: 'patience', title: 'Time in the market', icon: 'clock', steps: [
+    { k: 'hold30', t: 'Hold one position for 30 days', go: 'portfolio', lesson: 'The market\'s best days often come right after its worst. Missing a handful of them cuts long-run returns a lot.', test: c => c.longestHold >= 30 * 864e5 },
+    { k: 'div', t: 'Get paid a dividend', go: 'dividends', lesson: 'Many companies pay you a share of their profits just for owning them. Reinvested, dividends have been a big part of the market\'s long-run return.', test: c => c.divs > 0 },
+    { k: 'compound', t: 'Try the compound interest calculator', go: 'compound', lesson: 'Money that earns money, which then earns money too. Time does most of the work, which is why starting early matters more than starting big.', test: c => c.seen.compound },
+  ] },
+  { k: 'risk', title: 'Know your risk', icon: 'radar', steps: [
+    { k: 'profile', t: 'Take the risk profile quiz', go: 'risk', lesson: 'How much of a drop could you sit through without selling? Your answer should shape what you own.', test: c => c.riskDone },
+    { k: 'overlap', t: 'Compare two funds for overlap', go: 'overlap', lesson: 'Owning three tech funds isn\'t diversification if they hold the same stocks.', test: c => c.seen.overlap },
+    { k: 'research', t: 'Read a stock\'s research', go: 'asset/AAPL', lesson: 'Insider buys, earnings history and dividend safety are public. Checking them takes a minute.', test: c => c.seen.research },
+  ] },
+  { k: 'bots', title: 'Put a robot to work', icon: 'bot', steps: [
+    { k: 'backtest', t: 'Backtest a strategy', go: 'lab', lesson: 'A backtest replays a set of rules over past prices. It shows how rules behaved, not what will happen next.', test: c => c.seen.backtest },
+    { k: 'bot', t: 'Start a bot', go: 'newbot', lesson: 'A bot follows its rules every day without fear or greed. You set the limits it can\'t cross.', test: c => c.bots >= 1 },
+    { k: 'wf', t: 'Run a walk-forward test', go: 'lab', lesson: 'It\'s easy to find rules that fit the past perfectly and fail tomorrow. Testing on data the rules never saw shows if they\'re real.', test: c => c.seen.walkforward },
+  ] },
+  { k: 'options', title: 'Options, carefully', icon: 'target', steps: [
+    { k: 'quiz', t: 'Pass the level 1 options quiz', go: 'options', lesson: 'An option is the right to buy or sell 100 shares at a set price by a set date. Brokers make you show you understand the risks first.', test: c => c.optQuiz },
+    { k: 'sell', t: 'Sell a covered call or a cash-secured put', go: 'options', lesson: 'Selling an option pays you now, in exchange for an obligation later. Covered by shares or cash, the risk is the same as owning the stock.', test: c => c.optSold },
+    { k: 'close', t: 'Close an option or let one expire', go: 'options', lesson: 'Most options are closed before expiration. If one expires in the money, it turns into shares automatically.', test: c => c.optClosed },
+  ] },
+  { k: 'history', title: 'Learn from history', icon: 'calendar', steps: [
+    { k: 'replay', t: 'Finish a Time machine replay', go: 'replay', lesson: 'Trading through a real crash, one day at a time and without knowing the ending, teaches more than reading about it.', test: c => c.replays >= 1 },
+    { k: 'beat', t: 'Beat buy-and-hold in a replay', go: 'replay', lesson: 'Beating "just buy and hold" is harder than it looks. Try it and see what you were tempted to do.', test: c => c.replayBeat },
+    { k: 'calls', t: 'Make 5 daily calls', go: 'games', lesson: 'Guess whether the S&P 500 closes up or down. After a few dozen, most people land near 50/50, which is the point.', test: c => c.calls >= 5 },
+  ] },
+];
+const ACH_BASE = achievementContext; // the original facts; the version with the new ones is set below
+async function learnCtx(base = null) {
+  const c = base || await ACH_BASE(), s = await seenAll(), quiz = jsonOr(await kvGet('opt_quiz', '{}').catch(() => '{}'), {});
+  const buys = await rows("select sym, qty, sess from trd where side='buy'");
+  const optT = await rows('select action from opttrd').catch(() => []), rp = await replayStats();
+  return { ...c, seen: s, buys: buys.length, fundBuy: buys.some(b => FUNDS.has(b.sym)), frac: buys.some(b => !isCrypto(b.sym) && Math.abs(+b.qty - Math.round(+b.qty)) > 1e-6), ext: buys.some(b => b.sess && !['regular', 'closed'].includes(b.sess)) || (await row("select 1 from trd where side='sell' and sess in ('pre','post','overnight') limit 1")) != null,
+    bond: (await rows('select distinct sym from pos')).some(r => BONDS.has(r.sym)) || buys.some(b => BONDS.has(b.sym)),
+    watch: +(await row('select count(*) n from watch')).n, stops: (c.why['stop loss'] || 0) > 0 || (await row("select 1 from ord where kind in ('stop','trail') limit 1")) != null,
+    takes: (c.why['take profit'] || 0) > 0 || (await row("select 1 from ord where kind='take' limit 1")) != null, limits: (c.why['limit order'] || 0) > 0 || (await row('select 1 from lim limit 1')) != null,
+    riskDone: !!(await kvGet('risk_profile').catch(() => null)), bots: +(await row('select count(*) n from bots')).n, optQuiz: !!quiz[1],
+    optSold: optT.some(t => t.action === 'sto'), optClosed: optT.some(t => ['btc', 'stc', 'expired', 'assigned', 'exercised', 'cash'].includes(t.action)), optTrades: optT.length,
+    replays: rp.done, replayBeat: rp.beat, calls: +(await row("select count(*) n from dcall").catch(() => ({ n: 0 }))).n, callBest: await dcallBest() };
+}
+async function academy() {
+  const c = await learnCtx();
+  const ch = ACADEMY.map(x => { const steps = x.steps.map(s => ({ k: s.k, t: s.t, lesson: s.lesson, go: s.go, done: !!s.test(c) })); return { k: x.k, title: x.title, icon: x.icon, steps, done: steps.every(s => s.done), n: steps.filter(s => s.done).length }; });
+  const next = ch.find(x => !x.done);
+  return { chapters: ch, done: ch.filter(x => x.done).length, next: next ? { k: next.k, title: next.title, step: next.steps.find(s => !s.done) } : null };
+}
+GET('/api/learn', auth, async () => academy());
+const learnDone = async () => (await academy().catch(() => ({ done: 0 }))).done;
+
+// ---------- the Time machine: trade through a real market, one day at a time ----------
+const REPLAYS = {
+  covid: { name: 'The 2020 crash', blurb: 'February to June 2020: a new virus, the fastest bear market ever, and an even faster rebound.', start: '2020-02-14', end: '2020-06-30', syms: ['SPY', 'QQQ', 'TLT', 'GLD', 'AAPL', 'AMZN', 'ZM', 'AAL', 'XOM', 'JPM'],
+    events: [['2020-02-19', 'The S&P 500 closes at a record high.'], ['2020-02-24', 'Coronavirus spreads outside China. The Dow falls more than 1,000 points.'], ['2020-03-03', 'The Fed makes an emergency half-point rate cut.'], ['2020-03-09', 'Oil crashes and stocks fall 7% at the open: the first market-wide circuit breaker since 1997.'], ['2020-03-11', 'The World Health Organization declares a pandemic.'], ['2020-03-12', 'Another circuit breaker. The worst day since 1987.'], ['2020-03-16', 'The Fed cut rates to zero on Sunday. Stocks fall 12% anyway, with a third circuit breaker.'], ['2020-03-23', 'The Fed says it will buy bonds without limit.'], ['2020-03-27', 'The $2 trillion CARES Act is signed.'], ['2020-04-20', 'US oil futures go below zero for the first time.'], ['2020-05-08', 'The jobs report shows 20 million jobs lost in April.'], ['2020-06-05', 'A surprise: the economy added jobs in May.']] },
+  gfc: { name: 'The 2008 financial crisis', blurb: 'September 2008 to June 2009: Lehman falls, banks wobble, and stocks lose half their value before the bottom.', start: '2008-09-02', end: '2009-06-30', syms: ['SPY', 'QQQ', 'TLT', 'GLD', 'AAPL', 'JPM', 'C', 'XOM', 'WMT', 'AMZN'],
+    events: [['2008-09-08', 'The government takes over Fannie Mae and Freddie Mac.'], ['2008-09-15', 'Lehman Brothers files for bankruptcy. Merrill Lynch sells itself to Bank of America.'], ['2008-09-16', 'The Fed rescues AIG.'], ['2008-09-29', 'The House votes down the bank bailout. The Dow falls 778 points.'], ['2008-10-03', 'The $700 billion bailout (TARP) becomes law.'], ['2008-10-08', 'Central banks around the world cut rates together.'], ['2008-10-13', 'The Dow jumps 936 points, its biggest point gain yet.'], ['2008-11-20', 'The S&P 500 closes at its lowest since 1997.'], ['2008-11-24', 'The government steps in to save Citigroup.'], ['2008-12-16', 'The Fed cuts rates to near zero.'], ['2009-02-17', 'A $787 billion stimulus is signed.'], ['2009-03-09', 'Stocks are down more than 50% from the 2007 peak.'], ['2009-03-18', 'The Fed says it will buy $1 trillion more in bonds.'], ['2009-05-07', 'The bank stress test results are out.']] },
+  dotcom: { name: 'The dot-com bust', blurb: 'March 2000 to March 2001: the internet bubble pops and the Nasdaq loses more than half.', start: '2000-03-01', end: '2001-03-30', syms: ['SPY', 'QQQ', 'MSFT', 'CSCO', 'INTC', 'ORCL', 'AMZN', 'WMT', 'XOM', 'JNJ'],
+    events: [['2000-03-10', 'The Nasdaq closes above 5,000 for the first time.'], ['2000-04-14', 'The Nasdaq falls almost 10% in a day, ending its worst week ever.'], ['2000-05-16', 'The Fed raises rates by half a point.'], ['2000-11-08', 'The presidential election is too close to call.'], ['2000-12-13', 'The election is settled after the Supreme Court ruling.'], ['2001-01-03', 'The Fed makes a surprise half-point rate cut.'], ['2001-03-12', 'The Nasdaq falls below 2,000.']] },
+  bear22: { name: 'The 2022 bear market', blurb: 'All of 2022: inflation at a 40-year high, the fastest rate hikes in decades, and stocks and bonds falling together.', start: '2022-01-03', end: '2022-12-30', syms: ['SPY', 'QQQ', 'TLT', 'GLD', 'SGOV', 'AAPL', 'META', 'TSLA', 'XOM', 'NFLX'],
+    events: [['2022-01-03', 'The S&P 500 closes at a record high.'], ['2022-02-24', 'Russia invades Ukraine.'], ['2022-03-16', 'The Fed raises rates for the first time since 2018.'], ['2022-05-04', 'The Fed raises rates by half a point.'], ['2022-06-13', 'The S&P 500 enters a bear market: 20% below its high.'], ['2022-06-15', 'The Fed raises rates by three quarters of a point, the most since 1994.'], ['2022-08-26', 'Powell warns that fighting inflation will bring "some pain".'], ['2022-09-13', 'Inflation comes in hotter than expected. The S&P 500 falls 4%.'], ['2022-11-10', 'Inflation comes in cooler than expected. The S&P 500 jumps 5.5%.']] },
+};
+const RP_SPREAD = 0.0005; // half a cent on the dollar each way, no commissions
+async function replayData(k) {
+  const sc = REPLAYS[k];
+  return cached('replay:' + k, 7 * 864e5, async () => {
+    const p1 = Math.floor(Date.parse(addIso(sc.start, -120) + 'T00:00:00Z') / 1000), p2 = Math.floor(Date.parse(addIso(sc.end, 3) + 'T00:00:00Z') / 1000), data = {};
+    for (const s of sc.syms) { try { const b = parseYahooDaily(await yahooChart(s, `period1=${p1}&period2=${p2}&interval=1d&events=div,split`), s); if (b.d.length > 20) data[s] = b; } catch (e) {} }
+    if (!data.SPY) fail('Couldn\'t load the price history for this replay. Try again in a minute.');
+    const days = data.SPY.d.filter(d => d >= sc.start && d <= sc.end);
+    return { data, days };
+  });
+}
+const RP_BLANK = { k: null };
+async function replayState() { return jsonOr(await kvGet('replay').catch(() => null), RP_BLANK) || RP_BLANK; }
+const pxOnDay = (b, d) => { const i = lastIndexOnOrBefore(b.d, d); return i >= 0 ? b.c[i] : null; };
+async function replayView(g) {
+  if (!g.k) return { game: null };
+  const sc = REPLAYS[g.k], { data, days } = await replayData(g.k), day = days[g.i], last = g.i >= days.length - 1;
+  const value = g.cash + Object.entries(g.pos).reduce((t, [s, h]) => t + h.qty * (pxOnDay(data[s], day) || 0), 0);
+  const spy0 = pxOnDay(data.SPY, days[0]), spyNow = pxOnDay(data.SPY, day);
+  const assets = sc.syms.filter(s => data[s]).map(s => {
+    const b = data[s], i = lastIndexOnOrBefore(b.d, day), prev = i > 0 ? b.c[i - 1] : b.c[i], i0 = Math.max(0, i - 60);
+    return { sym: s, px: b.c[i], day: b.c[i] / prev - 1, since: b.c[i] / pxOnDay(b, days[0]) - 1, held: g.pos[s]?.qty || 0, cost: g.pos[s]?.cost || 0, spark: b.c.slice(i0, i + 1).filter((_, j, a) => j % 2 === 0 || j === a.length - 1) };
+  });
+  const news = sc.events.filter(([d]) => d <= day).reverse().slice(0, 5).map(([d, t]) => ({ d, t, fresh: d > (g.lastSeen || '') }));
+  return { game: { k: g.k, name: sc.name, day, i: g.i, of: days.length, start: days[0], end: days[days.length - 1], cash: g.cash, value, ret: value / g.start - 1, spy: spyNow / spy0 - 1, assets, news, trades: g.trades.slice(-12).reverse(), done: !!g.result, result: g.result || null, last } };
+}
+GET('/api/replay', auth, async () => {
+  const g = await replayState(), best = jsonOr(await kvGet('replay_best', '{}').catch(() => '{}'), {});
+  return { scenarios: Object.entries(REPLAYS).map(([k, s]) => ({ k, name: s.name, blurb: s.blurb, start: s.start, end: s.end, best: best[k] || null })), ...(await replayView(g)) };
+});
+POST('/api/replay/start', auth, async req => {
+  const k = req.body?.k; if (!REPLAYS[k]) fail('Pick a replay');
+  await replayData(k);
+  const g = { k, i: 0, cash: 10000, start: 10000, pos: {}, trades: [], started: Date.now(), lastSeen: '' };
+  await kvSet('replay', JSON.stringify(g)); return replayView(g);
+});
+POST('/api/replay/trade', auth, async req => {
+  const g = await replayState(); if (!g.k || g.result) fail('Start a replay first');
+  const { data, days } = await replayData(g.k), day = days[g.i], sym = cleanSym(req.body?.sym), side = req.body?.side === 'sell' ? 'sell' : 'buy';
+  const b = data[sym]; if (!b) fail('That isn\'t in this replay'); const px = pxOnDay(b, day); if (!px) fail(`${sym} has no price on this day`);
+  let usd = num(req.body?.usd);
+  if (side === 'buy') {
+    if (req.body?.all) usd = g.cash; if (!(usd > 0)) fail('Enter an amount'); usd = Math.min(usd, g.cash); if (usd < 1) fail('Not enough cash');
+    const fill = px * (1 + RP_SPREAD), qty = usd / fill, h = g.pos[sym] || { qty: 0, cost: 0 };
+    h.qty += qty; h.cost += usd; g.pos[sym] = h; g.cash -= usd; g.trades.push({ d: day, sym, side, qty, px: fill, usd });
+  } else {
+    const h = g.pos[sym]; if (!h) fail(`You don't own ${sym}`);
+    const fill = px * (1 - RP_SPREAD), qty = req.body?.all || !(usd > 0) ? h.qty : Math.min(h.qty, usd / fill), part = qty / h.qty, got = qty * fill;
+    g.trades.push({ d: day, sym, side, qty, px: fill, usd: got, pnl: got - h.cost * part }); h.qty -= qty; h.cost -= h.cost * part; g.cash += got; if (h.qty < 1e-9) delete g.pos[sym];
+  }
+  await kvSet('replay', JSON.stringify(g)); return replayView(g);
+});
+POST('/api/replay/next', auth, async req => {
+  const g = await replayState(); if (!g.k || g.result) fail('Start a replay first');
+  const { data, days } = await replayData(g.k), step = clamp(Math.round(num(req.body?.days, 1)), 1, 66);
+  g.lastSeen = days[g.i]; g.i = Math.min(days.length - 1, g.i + step);
+  if (g.i >= days.length - 1 || req.body?.finish) { // the end: how did you do against just holding the S&P 500, and against cash?
+    g.i = days.length - 1; const end = days[g.i];
+    const value = g.cash + Object.entries(g.pos).reduce((t, [s, h]) => t + h.qty * (pxOnDay(data[s], end) || 0), 0), ret = value / g.start - 1, spy = pxOnDay(data.SPY, end) / pxOnDay(data.SPY, days[0]) - 1;
+    const beat = ret > spy, grade = ret > spy + 0.1 ? 'A' : ret > spy ? 'B' : ret > spy - 0.1 ? 'C' : 'D';
+    g.result = { value, ret, spy, beat, grade, trades: g.trades.length, worst: g.trades.filter(t => t.side === 'sell' && t.pnl < 0).sort((a, b) => a.pnl - b.pnl)[0] || null };
+    const best = jsonOr(await kvGet('replay_best', '{}').catch(() => '{}'), {}); if (!best[g.k] || ret > best[g.k].ret) best[g.k] = { ret, spy, grade, ts: Date.now() };
+    await kvSet('replay_best', JSON.stringify(best));
+    const done = jsonOr(await kvGet('replay_done', '[]').catch(() => '[]'), []); done.push({ k: g.k, ret, spy, beat, ts: Date.now() }); await kvSet('replay_done', JSON.stringify(done.slice(-50)));
+    checkAchievementsSoon();
+  }
+  await kvSet('replay', JSON.stringify(g)); return replayView(g);
+});
+POST('/api/replay/quit', auth, async () => { await kvSet('replay', JSON.stringify(RP_BLANK)); return { game: null }; });
+async function replayStats() { const d = jsonOr(await kvGet('replay_done', '[]').catch(() => '[]'), []); return { done: d.length, beat: d.some(x => x.beat), kinds: new Set(d.map(x => x.k)).size }; }
+
+// ---------- compound interest, and dollar-cost averaging on real prices ----------
+GET('/api/learn/dca', auth, async req => {
+  const sym = cleanSym(req.query.sym || 'SPY'), years = clamp(num(req.query.years, 10), 1, 10), monthly = clamp(num(req.query.monthly, 500), 1, 1e6);
+  learnSeen('compound');
+  const b = await dailyBars(sym), end = b.d[b.d.length - 1], start = addIso(end, -Math.round(years * 365.25));
+  const i0 = b.d.findIndex(d => d >= start); if (i0 < 0) fail('Not enough history');
+  // buy on the first trading day of each month; the lump sum puts the same total in on day one
+  let units = 0, put = 0, month = null; const curve = [], months = [];
+  for (let i = i0; i < b.d.length; i++) { const m = b.d[i].slice(0, 7); if (m !== month) { month = m; units += monthly / b.c[i]; put += monthly; months.push(i); } if (i % 5 === 0 || i === b.d.length - 1) curve.push([b.d[i], units * b.c[i], put]); }
+  const total = put, lumpUnits = total / b.c[i0], lump = []; for (let i = i0; i < b.d.length; i += 5) lump.push([b.d[i], lumpUnits * b.c[i]]); lump.push([end, lumpUnits * b.c[b.d.length - 1]]);
+  const dcaEnd = units * b.c[b.d.length - 1], lumpEnd = lumpUnits * b.c[b.d.length - 1];
+  let worst = 0, peak = 0; for (const [, v, p0] of curve) { peak = Math.max(peak, v / p0); worst = Math.min(worst, v / p0 / peak - 1); }
+  return { sym, years, monthly, start: b.d[i0], end, invested: total, dca: dcaEnd, lump: lumpEnd, months: months.length, curve: curve.map(([d, v, p0]) => [d, v, p0]), lumpCurve: lump, lumpWins: lumpEnd > dcaEnd };
+});
+
+// ---------- the risk profile meter: what you can stomach vs what you own ----------
+const RISK_Q = [
+  ['When will you need this money?', [['Within 2 years', 1], ['In 2 to 5 years', 4], ['In 5 to 10 years', 7], ['In more than 10 years', 10]]],
+  ['Your investments fall 25% in a month. What do you do?', [['Sell everything', 1], ['Sell some', 4], ['Wait it out', 7], ['Buy more', 10]]],
+  ['Which matters more to you?', [['Not losing money', 1], ['Mostly safety, some growth', 4], ['Mostly growth, some safety', 7], ['Growth, even with big swings', 10]]],
+  ['How steady is your income?', [['Not steady', 2], ['Somewhat steady', 5], ['Very steady', 8], ['Steady, with savings for emergencies', 10]]],
+  ['How much investing have you done?', [['None', 3], ['A little', 5], ['Some, through ups and downs', 8], ['A lot', 10]]],
+];
+const RISK_LABEL = s => s <= 2.5 ? 'Very careful' : s <= 4.5 ? 'Careful' : s <= 6.5 ? 'Balanced' : s <= 8.5 ? 'Growth' : 'Aggressive';
+async function portfolioRisk(wid) {
+  const pos = await positions(wid), w = await walletRow(wid), acct = await accountInfo(wid, { w, pos }).catch(() => null);
+  const eq = acct?.equity || (+w.cash + marketValue(pos)); if (!(eq > 0)) return null;
+  let vol = 0, crypto = 0, top = 0, topSym = null;
+  for (const p of pos) {
+    const v = p.qty * (priceOf(p.sym) || p.avg), wt = v / eq; if (wt > top) { top = wt; topSym = p.sym; }
+    if (isCrypto(p.sym)) crypto += wt;
+    let sv = null; try { const b = await dailyBars(p.sym); sv = IND.vol(b.c, 63, b.c.length - 1) * Math.sqrt(isCrypto(p.sym) ? 365 : 252); } catch (e) {}
+    vol += wt * (sv ?? (isCrypto(p.sym) ? 0.7 : 0.3));
+  }
+  const lev = acct?.debit > 0 ? acct.debit / eq : 0, shortOpt = optOpen(wid).filter(o => o.qty < 0 && o.coll === 'naked').length;
+  vol *= 0.85; // holdings don't all move together; a rough allowance for diversification
+  vol *= 1 + lev;
+  // a 1-10 score: 5% a year swing is 1, 50% is 10
+  const score = clamp(1 + (vol - 0.05) / 0.05, 1, 10) + (shortOpt ? 1 : 0), cash = Math.max(0, (acct?.cash ?? +w.cash) / eq);
+  return { score: Math.min(10, score), label: RISK_LABEL(Math.min(10, score)), vol, crypto, top, topSym, cash, lev, naked: shortOpt, n: pos.length };
+}
+GET('/api/learn/risk', auth, async req => {
+  const saved = jsonOr(await kvGet('risk_profile').catch(() => null), null), wid = await activeWalletId(req), pr = await portfolioRisk(wid).catch(() => null);
+  const you = saved ? { score: saved.score, label: RISK_LABEL(saved.score), ts: saved.ts } : null;
+  const gap = you && pr ? pr.score - you.score : null;
+  return { questions: RISK_Q.map(([q, a]) => ({ q, a: a.map(x => x[0]) })), answers: saved?.answers || null, you, portfolio: pr, gap,
+    verdict: gap == null ? null : gap > 2 ? `This wallet is riskier than you said you're comfortable with. ${pr.top > 0.3 ? `${pr.topSym} alone is ${Math.round(pr.top * 100)}% of it. ` : ''}${pr.crypto > 0.2 ? `Crypto is ${Math.round(pr.crypto * 100)}%. ` : ''}Spreading out or adding bonds would bring it closer.` : gap < -2 ? 'You\'re playing it safer than you need to for your goals. That\'s fine, but a little more in stocks could grow more over time.' : 'What you own fits what you said you\'re comfortable with.' };
+});
+POST('/api/learn/risk', auth, async req => {
+  const a = Array.isArray(req.body?.answers) ? req.body.answers : []; if (a.length !== RISK_Q.length) fail('Answer every question');
+  const pts = a.map((x, i) => { const o = RISK_Q[i][1].find(o2 => o2[0] === x); if (!o) fail('Answer every question'); return o[1]; });
+  // the drop question counts double: it's what decides whether people sell at the bottom
+  const score = (pts.reduce((t, x) => t + x, 0) + pts[1]) / (RISK_Q.length + 1);
+  await kvSet('risk_profile', JSON.stringify({ answers: a, score: round(score, 2), ts: Date.now() })); checkAchievementsSoon();
+  return { ok: true, score, label: RISK_LABEL(score) };
+});
+
+// ---------- the daily call: will the S&P 500 close up or down? ----------
+// A call made before 9:30 am is for today's close; after the open it's for the next trading day.
+// Three house bots call too: Trend (above its 20-day average means up), Contrarian (the opposite of yesterday) and Always up.
+function callDay(t = Date.now()) {
+  const p = etParts(t), today = ymd([p.y, p.m, p.d]), open = isTradingDay(p.y, p.m, p.d) && p.h * 60 + p.mi < 570;
+  return open ? today : ymd(nextTradingDay(p.y, p.m, p.d));
+}
+POST('/api/dcall', auth, async req => {
+  const pick = req.body?.pick === 'down' ? 'down' : req.body?.pick === 'up' ? 'up' : null; if (!pick) fail('Pick up or down');
+  const d = callDay();
+  const ex = await row('select * from dcall where d=$1', [d]); if (ex?.result) fail('That day is already decided');
+  await Q('insert into dcall(d,pick) values($1,$2) on conflict(d) do update set pick=excluded.pick, made=now()', [d, pick]);
+  return dcallJson();
+});
+async function houseCalls(d) {
+  const b = await dailyBars('SPY').catch(() => null); if (!b) return {};
+  const i = lastIndexOnOrBefore(b.d, addIso(d, -1)); if (i < 21) return {};
+  const sma = IND.sma(b.c, 20, i), y = b.c[i] / b.c[i - 1] - 1;
+  return { trend: b.c[i] > sma ? 'up' : 'down', contra: y >= 0 ? 'down' : 'up', bull: 'up' };
+}
+async function dcallJob() {
+  const p = etParts(), today = etDate(), after = p.h * 60 + p.mi >= 16 * 60 + 5;
+  for (const c of await rows("select * from dcall where result is null and (d < $1 or (d = $1 and $2))", [today, after]).catch(() => [])) {
+    const b = await dailyBars('SPY').catch(() => null); let close = null, prev = null;
+    if (b) { const i = b.d.indexOf(c.d); if (i > 0) { close = b.c[i]; prev = b.c[i - 1]; } }
+    if (close == null && c.d === today) { const q = prices.get('SPY'); if (q?.p && q.prev) { close = q.p; prev = q.prev; } }
+    if (close == null) { if (c.d < addIso(today, -5)) await Q("update dcall set result='void' where d=$1", [c.d]); continue; }
+    const move = close / prev - 1, res = Math.abs(move) < 0.00005 ? 'push' : (move > 0) === (c.pick === 'up') ? 'win' : 'loss', house = await houseCalls(c.d);
+    await Q('update dcall set close=$1, prev=$2, result=$3, house=$4 where d=$5', [close, prev, res, JSON.stringify(house), c.d]);
+    await notify('game', res === 'win' ? '🎯 You called today right' : res === 'loss' ? 'Today went the other way' : 'Flat day', `The S&P 500 (SPY) closed ${move >= 0 ? 'up' : 'down'} ${(Math.abs(move) * 100).toFixed(2)}%. You said ${c.pick}.`, { url: '/#/games' });
+    checkAchievementsSoon();
+  }
+}
+async function dcallBest() { const l = await rows("select result from dcall where result in ('win','loss') order by d").catch(() => []); let best = 0, cur = 0; for (const r of l) { cur = r.result === 'win' ? cur + 1 : 0; best = Math.max(best, cur); } return best; }
+async function dcallJson() {
+  const list = await rows('select * from dcall order by d desc limit 120').catch(() => []), done = list.filter(c => c.result === 'win' || c.result === 'loss');
+  let streak = 0; for (const c of done) { if (c.result === 'win') streak++; else break; }
+  const tally = { you: [0, 0], trend: [0, 0], contra: [0, 0], bull: [0, 0] };
+  for (const c of done) { const up = +c.close > +c.prev; tally.you[0] += c.result === 'win'; tally.you[1]++; const hs = jsonOr(c.house, {}); for (const k of ['trend', 'contra', 'bull']) if (hs[k]) { tally[k][0] += (hs[k] === 'up') === up; tally[k][1]++; } }
+  const next = callDay(), pend = list.find(c => c.d === next && !c.result);
+  return { next, pick: pend?.pick || null, open: market().state === 'open', streak, best: await dcallBest(), tally,
+    history: list.slice(0, 20).map(c => ({ d: c.d, pick: c.pick, result: c.result, move: c.close ? +c.close / +c.prev - 1 : null, house: jsonOr(c.house, {}) })) };
+}
+GET('/api/dcall', auth, async () => dcallJson());
+
+// ---------- new achievements ----------
+ACHIEVEMENTS.push(
+  ['opt_first', '🎟️', 'Options trader', 'Make your first options trade', c => c.optTrades >= 1],
+  ['opt_income', '🧾', 'Rent collector', 'Sell a covered call or cash-secured put', c => c.optSold],
+  ['academy_1', '🎓', 'Student', 'Finish an Academy chapter', c => c.chapters >= 1],
+  ['academy_all', '🏛️', 'Graduate', 'Finish every Academy chapter', c => c.chapters >= ACADEMY.length],
+  ['replay_1', '⏳', 'Time traveler', 'Finish a Time machine replay', c => c.replays >= 1],
+  ['replay_beat', '🦸', 'Crash survivor', 'Beat buy-and-hold in a replay', c => c.replayBeat],
+  ['replay_all', '🗺️', 'Historian', 'Finish all four replays', c => c.replayKinds >= Object.keys(REPLAYS).length],
+  ['call_5', '📞', 'Caller', 'Make 5 daily calls', c => c.calls >= 5],
+  ['call_streak', '🎯', 'Hot hand', 'Call 5 days in a row right', c => c.callBest >= 5],
+  ['risk_done', '🧭', 'Know thyself', 'Take the risk profile quiz', c => c.riskDone],
+  ['bots_3', '🤖', 'Robot army', 'Run 3 bots', c => c.bots >= 3],
+  ['researcher', '🔬', 'Did the homework', 'Read a stock\'s research', c => c.seen?.research],
+);
+achievementContext = async function () { // the extra facts for the new achievements
+  const lc = await learnCtx(await ACH_BASE()), rp = await replayStats();
+  return { ...lc, replayKinds: rp.kinds, chapters: ACADEMY.filter(x => x.steps.every(st => st.test(lc))).length };
+};
+
+// ---------- days HQ celebrates ----------
+function dayEvents(iso = etDate()) {
+  const [y, m, d] = iso.split('-').map(Number), out = [], hol = holidayName(y, m, d), wd = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  if (hol) out.push({ k: 'holiday', text: `🏖 ${hol}: the stock market is closed` });
+  for (const e of ECON.filter(e => e.date === iso)) out.push({ k: e.k === 'fomc' ? 'fed' : 'data', text: e.k === 'fomc' ? `🏛 Fed day: the rate decision is at ${e.time}` : `📊 ${e.name} out at ${e.time}` });
+  if ([3, 6, 9, 12].includes(m) && wd === 5 && d === nthWeekday(y, m, 5, 3)) out.push({ k: 'witch', text: '🧙 Quadruple witching: stock and index options and futures all expire today' });
+  else if (wd === 5 && d === nthWeekday(y, m, 5, 3)) out.push({ k: 'opex', text: '🎟 Monthly options expiration day' });
+  if (m === 10 && d === 31) out.push({ k: 'halloween', text: '🎃 Happy Halloween' });
+  if (m === 12 && (d === 24 || d === 25)) out.push({ k: 'xmas', text: '🎄 Merry Christmas' });
+  if ((m === 12 && d === 31) || (m === 1 && d === 1)) out.push({ k: 'newyear', text: '🎆 Happy New Year' });
+  if (m === 7 && d === 4) out.push({ k: 'july4', text: '🎇 Happy Fourth of July' });
+  if (m === 11 && wd === 4 && d === nthWeekday(y, 11, 4, 4)) out.push({ k: 'thanks', text: '🦃 Happy Thanksgiving' });
+  if (m === 2 && d === 14) out.push({ k: 'valentine', text: '💘 Happy Valentine\'s Day' });
+  if (m === 3 && d === 14) out.push({ k: 'pi', text: '🥧 Happy Pi Day' });
+  if (m === 4 && d === 15 && !hol) out.push({ k: 'tax', text: '🧾 Tax day: returns are due' });
+  const lastTrading = (() => { let dd = new Date(Date.UTC(y, m, 0)).getUTCDate(); while (dd > 0 && !isTradingDay(y, m, dd)) dd--; return dd; })();
+  if (d === lastTrading && !out.some(x => x.k === 'witch')) out.push({ k: 'monthend', text: '📅 Last trading day of the month' });
+  return out;
+}
 
 // =====================================================================
 // Login
@@ -6182,7 +6488,7 @@ GET('/api/state', auth, async req => {
   for (const s of new Set(mine)) ensureMeta(s).catch(() => {});
   const eq = await equitySeries(wid, '1D').catch(() => null);
   const out = {
-    v: BUILD, appVersion: APP_VERSION, now: Date.now(), market: market(), mstate: mstateJson(), calNote: calendarNote(), profile: profileJson(), user: APP_USER,
+    v: BUILD, appVersion: APP_VERSION, now: Date.now(), market: market(), mstate: mstateJson(), calNote: calendarNote(), days: dayEvents(), profile: profileJson(), user: APP_USER,
     wallet: w, wallets, pos, ord, lims, account, xfers, options: optSummary(wid), rules: rulesJson(wr), broker: brokerJson(), trd: trd.map(tradeJson), watch: watch.map(x => x.sym), alerts: alerts.map(alertJson),
     preds: preds.map(p => ({ id: p.id, sym: p.sym, dir: p.dir, start: +p.start_px, startTs: tsMs(p.start_ts), end: tsMs(p.end_ts) })),
     assets: assetsJson(syms), prices: pricesJson(), spark: sp, eq1d: eq,
@@ -6660,7 +6966,7 @@ POST('/api/backtest', auth, async req => {
   botsOn();
   const b = req.body || {}, key = JSON.stringify([b.strategy, b.params, b.syms, b.years, b.capital, b.profile, b.maxPosPct, b.robust, b.addWeekly || 0]);
   const hit = btCache.get(key); if (hit && Date.now() - hit.t < 30 * 60e3) return hit.v;
-  const v = await backtest(b);
+  const v = await backtest(b); learnSeen('backtest');
   btCache.set(key, { t: Date.now(), v }); if (btCache.size > 40) btCache.delete(btCache.keys().next().value);
   return v;
 });
@@ -8115,7 +8421,7 @@ GET('/api/bots/board', auth, () => boardData());
 // Free public sources first: SEC EDGAR (filings), FINRA (daily short volume), Finnhub's free plan.
 // Finnhub's paid data (Congress, ETF holdings, short interest) is used when the key has it.
 const SEC_UA = () => ENV.SEC_CONTACT ? `MangoPaperTrading/1.0 ${String(ENV.SEC_CONTACT).slice(0, 120)}` : 'MangoPaperTrading/1.0 (self-hosted research)';
-async function getText(url, { timeout = 15000, headers = {} } = {}) {
+async function fetchText(url, { timeout = 15000, headers = {} } = {}) {
   const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Mango Paper Trading)', ...headers }, signal: AbortSignal.timeout(timeout) });
   if (r.status === 403 || r.status === 401) throw new HttpError(403, 'refused');
   if (r.status === 404) throw new HttpError(404, 'not found');
@@ -8123,7 +8429,7 @@ async function getText(url, { timeout = 15000, headers = {} } = {}) {
   return r.text();
 }
 // SEC asks every app to say who it is (name and email); without it, it may refuse
-const secGet = url => getText(url, { headers: { 'User-Agent': SEC_UA(), Accept: '*/*' } }).catch(e => { if (e.status === 403) throw new HttpError(503, ENV.SEC_CONTACT ? 'The SEC refused the request. Try again later.' : 'The SEC asks apps to identify themselves. Add a SEC_CONTACT variable in Railway with your name and email (for example "Alex Smith alex@example.com").'); throw e; });
+const secGet = url => fetchText(url, { headers: { 'User-Agent': SEC_UA(), Accept: '*/*' } }).catch(e => { if (e.status === 403) throw new HttpError(503, ENV.SEC_CONTACT ? 'The SEC refused the request. Try again later.' : 'The SEC asks apps to identify themselves. Add a SEC_CONTACT variable in Railway with your name and email (for example "Alex Smith alex@example.com").'); throw e; });
 const secJson = async url => JSON.parse(await secGet(url));
 const fhPaid = e => /free plan|access|premium/i.test(e?.message || '');
 async function fhMaybe(pathq) { // a Finnhub call that may be paid-only: null when the plan doesn't include it
@@ -8261,7 +8567,7 @@ function overlapOf(a, b) {
 }
 GET('/api/research/etf/:sym', auth, async req => { const d = await etfHoldings(cleanSym(req.params.sym)); return { ...d, count: d.holdings.length, holdings: d.holdings.slice(0, 50), top10: d.holdings.slice(0, 10).reduce((t, x) => t + x.pct, 0) }; });
 GET('/api/research/overlap', auth, async req => {
-  const a = cleanSym(req.query.a), b = cleanSym(req.query.b); if (!a || !b || a === b) fail('Pick two different funds');
+  const a = cleanSym(req.query.a), b = cleanSym(req.query.b); if (!a || !b || a === b) fail('Pick two different funds'); learnSeen('overlap');
   const [A, B] = await Promise.all([etfHoldings(a), etfHoldings(b)]);
   return { a, b, asOfA: A.asOf, asOfB: B.asOf, viaA: A.via || null, viaB: B.via || null, ...overlapOf(A, B) };
 });
@@ -8293,7 +8599,7 @@ async function earningsHistory(sym) {
 // ---------- short selling: FINRA's daily short volume (free), and short interest when Finnhub has it ----------
 async function finraDay(day) {
   return cached('finra:' + day, 24 * 3600e3, async () => {
-    const t = await getText(`https://cdn.finra.org/equity/regsho/daily/CNMSshvol${day.replace(/-/g, '')}.txt`, { timeout: 20000 });
+    const t = await fetchText(`https://cdn.finra.org/equity/regsho/daily/CNMSshvol${day.replace(/-/g, '')}.txt`, { timeout: 20000 });
     const m = new Map();
     for (const line of t.split('\n')) { const p = line.split('|'); if (p.length < 5 || p[0] === 'Date') continue; m.set(p[1], { short: +p[2] || 0, exempt: +p[3] || 0, total: +p[4] || 0 }); }
     if (!m.size) throw new HttpError(404, 'empty');
@@ -8362,7 +8668,7 @@ GET('/api/research/calendar', auth, async () => {
 const R_PARTS = { insiders, congress, earnings: earningsHistory, short: shortData, dividend: dividendSafety, funds: async s => fundsHolding(s), etf: s => etfHoldings(s).then(d => ({ ...d, count: d.holdings.length, holdings: d.holdings.slice(0, 15), top10: d.holdings.slice(0, 10).reduce((t, x) => t + x.pct, 0) })) };
 GET('/api/research/s/:sym/:part', auth, async req => {
   const sym = cleanSym(req.params.sym), fn = R_PARTS[req.params.part]; if (!sym || !fn) fail('Unknown research', 404);
-  if (isCrypto(sym)) fail('Research is for stocks and funds');
+  if (isCrypto(sym)) fail('Research is for stocks and funds'); learnSeen('research');
   try { return { ok: true, ...(await fn(sym)) }; }
   catch (e) { return { ok: false, error: e.status === 503 && /FINNHUB/.test(e.message) ? 'Add FINNHUB_KEY in Railway to turn this on.' : e.message }; }
 });
@@ -8480,7 +8786,8 @@ function startJobs() {
   every(fast ? 5e3 : 5 * 60e3, () => indAlertJob(), 'chart alerts');
   every(fast ? 10e3 : 60e3, () => optJob(), 'options');
   every(6 * 3600e3, () => { if (!standbyPaused()) return warmFunds(); }, 'research');
-  every(fast ? 60e3 : 6 * 3600e3, () => { if (!standbyPaused()) return decayJob(); }, 'decay'); // each bot checked about weekly setTimeout(() => { if (!standbyPaused()) warmFunds(); }, fast ? 15e3 : 5 * 60e3); // famous investors' 13F filings
+  every(fast ? 60e3 : 6 * 3600e3, () => { if (!standbyPaused()) return decayJob(); }, 'decay');
+  every(fast ? 10e3 : 60e3, () => dcallJob(), 'daily call'); // each bot checked about weekly setTimeout(() => { if (!standbyPaused()) warmFunds(); }, fast ? 15e3 : 5 * 60e3); // famous investors' 13F filings
   every(fast ? 10e3 : 30 * 60e3, () => reviewJob(), 'monthly review');
   // safety: offsite backup (nightly), uptime watch between main and standby
   every(fast ? 10e3 : 10 * 60e3, () => offsiteJob(), 'offsite backup');
@@ -8575,7 +8882,7 @@ const ICONS = {};
 const icon = (name, fn) => ICONS[name] || (ICONS[name] = fn());
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD646"/><stop offset=".5" stop-color="#FFA028"/><stop offset="1" stop-color="#FA5256"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="#1E1430"/><ellipse cx="31" cy="36" rx="18" ry="22" transform="rotate(30 31 36)" fill="url(#g)"/><path d="M20 41l6.5-6 5 3.5 9.5-10" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37 28.5h4.5V33" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="45" cy="11.5" rx="9" ry="4.6" transform="rotate(-24 45 11.5)" fill="#3BD68A"/></svg>`;
 let BUILD = 'dev', INDEX = null, INDEX_GZ = null;
-const APP_VERSION = '4.2.0'; // stamped by build.sh from package.json
+const APP_VERSION = '4.3.0'; // stamped by build.sh from package.json
 function loadIndex() {
   const file = path.join(__dirname, 'index.html');
   let html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<!doctype html><title>Mango</title><p>index.html is missing next to server.js.</p>';

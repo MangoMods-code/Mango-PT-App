@@ -1194,6 +1194,32 @@ html[data-standby] #halt-bar { bottom: calc(var(--nav-h, 64px) + env(safe-area-i
 .vs-verdict { margin-top: 12px; font-weight: 700; }
 .lab2-cards .cmp-cta { margin: 0; }
 
+/* learning and fun */
+.lrn-next { display: flex; flex-direction: column; gap: 6px; text-align: left; width: 100%; } .lrn-next b { font-size: 19px; }
+.lrn-bar { height: 5px; border-radius: 3px; background: color-mix(in srgb, var(--tx) 9%, transparent); margin-top: 8px; overflow: hidden; } .lrn-bar i { display: block; height: 100%; background: var(--ac); border-radius: 3px; }
+.lrn-step { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; } .lrn-step p { margin: 0; } .lrn-step-h { display: flex; gap: 10px; align-items: center; }
+.lrn-num { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--tx) 9%, transparent); font-weight: 800; font-size: 14px; flex: none; }
+.lrn-step.done .lrn-num { background: var(--up); color: #fff; } .lrn-num svg { width: 16px; height: 16px; }
+.rp-head { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 8px; } .rp-date { font-size: 26px; font-weight: 800; letter-spacing: -.02em; }
+.rp-prog { height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--tx) 9%, transparent); margin-top: 10px; overflow: hidden; } .rp-prog i { display: block; height: 100%; background: var(--ac); }
+.rp-fresh { background: color-mix(in srgb, var(--ac) 10%, transparent); } .rp-a { gap: 10px; }
+.rp-ctl { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 16px; position: sticky; bottom: 8px; }
+.rp-result { display: flex; gap: 16px; align-items: center; } .rp-big { font-size: 32px; font-weight: 800; letter-spacing: -.02em; }
+.rp-grade { width: 64px; height: 64px; border-radius: 18px; display: grid; place-items: center; font-size: 34px; font-weight: 900; flex: none; background: color-mix(in srgb, var(--tx) 10%, transparent); }
+.rp-grade.gA, .rp-grade.gB { background: color-mix(in srgb, var(--up) 22%, transparent); color: var(--up); } .rp-grade.gD { background: color-mix(in srgb, var(--dn) 22%, transparent); color: var(--dn); }
+.cp-bars { display: flex; align-items: flex-end; gap: 6px; height: 160px; } .cp-col { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 4px; }
+.cp-col span { font-size: 11px; color: var(--mu); } .cp-stack { width: 100%; display: flex; flex-direction: column; border-radius: 6px 6px 2px 2px; overflow: hidden; min-height: 2px; }
+.cp-stack i.g { background: var(--up); } .cp-stack i.p { background: var(--mu2); }
+.rk-meter { position: relative; height: 56px; margin: 18px 6px 0; } .rk-scale { position: absolute; left: 0; right: 0; top: 34px; height: 10px; border-radius: 5px; background: linear-gradient(90deg, #4EA8FF, #3DDC97, #FFD646, #FF9F1C, #FF5C77); }
+.rk-pin { position: absolute; top: 0; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; font-size: 12px; font-weight: 800; }
+.rk-pin::after { content: ''; width: 3px; height: 26px; border-radius: 2px; background: var(--tx); margin-top: 2px; } .rk-pin.pf { top: 30px; flex-direction: column-reverse; } .rk-pin.pf::after { margin: 0 0 2px; background: var(--ac); } .rk-pin.pf span { color: var(--ac); }
+.rk-ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--mu); margin-top: 34px; }
+.bvb button.on { box-shadow: inset 0 0 0 2px currentColor; }
+.dc-tally { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; } .dc-tally > div { display: flex; flex-direction: column; gap: 2px; padding: 8px; border-radius: 12px; background: color-mix(in srgb, var(--tx) 5%, transparent); }
+.dc-tally span { font-size: 11px; color: var(--mu); } .dc-tally b { font-size: 18px; } .dc-tally em { font-style: normal; font-size: 10px; color: var(--mu2); }
+.dc-hist { display: flex; gap: 4px; justify-content: center; } .dc-hist i { width: 14px; height: 14px; border-radius: 4px; background: color-mix(in srgb, var(--tx) 10%, transparent); } .dc-hist i.win { background: var(--up); } .dc-hist i.loss { background: var(--dn); }
+.share-img { width: 100%; border-radius: 16px; display: block; margin-top: 8px; }
+
 /* ---------- Paper / Alpaca sides ---------- */
 .space-sw { display: inline-flex; gap: 4px; padding: 4px; border-radius: 14px; background: var(--card); box-shadow: var(--hi); margin: 2px 0 10px; }
 .space-sw button { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: 10px; font-size: 14px; font-weight: 650; color: var(--mu); transition: background .2s, color .2s; }
@@ -1532,7 +1558,7 @@ html[data-standby] #halt-bar { bottom: calc(var(--nav-h, 64px) + env(safe-area-i
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '4.2.0';
+const BUILD = '__BUILD__', APP_VERSION = '4.3.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -2492,7 +2518,9 @@ VIEWS.portfolio = {
       ${menuCell('dollar', 'Account and transfers', accountSub(S), 'account')}
       ${menuCell('chart', 'Performance', 'Returns, win rate, best and worst trades', 'performance')}
       ${menuCell('note', 'Monthly review', 'Your trades and journal, with coach\'s notes', 'review')}
+      ${menuCell('sparkle', 'Learn', 'Academy chapters, the Time machine, calculators', 'learn')}
       ${menuCell('radar', 'Research', 'Economic calendar, famous investors, fund overlap', 'research')}
+      <button class="cell" data-act="shareWallet"><div class="lead">${icon('send')}</div><div class="main"><div class="title">Share your wallet</div><div class="sub ellip">A card with your return, with or without dollar amounts</div></div>${icon('right', 'chev')}</button>
       ${menuCell('clock', 'What if?', 'What a past buy would be worth today', 'whatif')}
       ${menuCell('target', 'Options', S.options ? `${S.options.n} open · ${money(S.options.value)}` : 'Calls, puts and spreads in this wallet', 'options')}
       ${feature('taxes') ? menuCell('note', 'Taxes', 'Gains, losses, wash sales and a 1099-style summary', 'taxes') : ''}
@@ -3460,6 +3488,7 @@ async function tradeDetail(id) {
   let lots = null;
   const kv = (k, v) => v == null || v === '' ? '' : `<div class="kv"><span class="k">${k}</span><span class="v">${v}</span></div>`;
   const draw = () => {
+    tradeDetail.cur = t;
     const trade = t.side === 'buy' || t.side === 'sell', gross = t.qty * t.price;
     s.html(`${t.sym ? `<button class="cell arow" style="padding:0 0 12px" data-act="asset" data-sym="${h(t.sym)}">${logo(t.sym)}<div class="main"><div class="sym">${h(t.sym)}</div><div class="name">${h(nameOf(t.sym))}</div></div>${icon('right', 'chev')}</button>` : ''}
       <div class="card" style="background:var(--card2)">
@@ -3477,6 +3506,7 @@ async function tradeDetail(id) {
         ${trade && t.why ? kv('Placed by', h(t.why === 'manual' ? 'You' : t.why === 'broker' ? 'Your broker account' : t.why[0].toUpperCase() + t.why.slice(1))) : ''}
         ${trade && live(t.sym) ? kv('Price now', `<span data-px="${h(t.sym)}">${price(live(t.sym))}</span> <span class="${cls(live(t.sym) - t.price)}">${pct((live(t.sym) / t.price - 1) * 100)}</span>`) : ''}
       </div>
+      ${trade ? `<button class="btn btn-quiet btn-block mt12" data-act="shareTrade">${icon('send')}Share this trade</button>` : ''}
       <div id="td-lots">${lots && lots.length ? `<div class="section-h"><h2>Tax lots sold</h2></div><div class="card">${lots.map(l => `<div class="lot-row"><span>${qtyStr(t.sym, l.qty)} bought ${fmtDate(l.acquired)}</span><b class="n ${cls(l.gain)}">${money(l.gain, { sign: true })}</b><span class="t-cap">${l.term === 'long' ? 'Long term' : 'Short term'} · cost ${money(l.basis)}</span><span class="t-cap" style="text-align:right">${l.wash ? money(l.wash) + ' wash sale' : ''}</span></div>`).join('')}</div>` : ''}</div>
       ${feature('journal') ? `<label class="field"><span>Journal note</span><textarea id="td-n" placeholder="What were you thinking? What did you learn?" maxlength="1000">${h(t.note || '')}</textarea></label><label class="field"><span>Tags, separated by commas</span><input id="td-t" placeholder="earnings, dip buy" value="${h(t.tags || '')}"></label>` : ''}`);
     if (feature('journal')) s.foot(`<button class="btn btn-primary btn-lg btn-block" id="td-s">Save note</button>`);
@@ -7717,15 +7747,15 @@ function runEvents(p, dt) {
   if (bar) { bar.classList.toggle('hidden', !ev); if (ev && bar._t !== ev.text) { bar.textContent = ev.text; bar._t = ev.text; bar.dataset.k = ev.k; } }
   const prev = st.evK; st.evK = ev?.k || null;
   if (ev && ev.k !== prev) { // the event starts: everyone reacts
-    for (const a of st.agents.values()) { if (a.busy || a.mood === 'sleep') continue; if (ev.k === 'crash') a.goRoom('control'); else if (ev.k === 'party') a.goRoom('lounge'); else if (ev.k === 'earn' && ev.syms.some(s => (a.bot?.holding || []).includes(s))) a.goRoom('news'); }
-    if (st.chair) PAGES.hq.say(p, st.chair, ev.k === 'crash' ? 'Battle stations! Everyone to Control.' : ev.k === 'party' ? 'Party in the lounge! You\'ve earned it.' : 'Earnings day. Eyes on the news room.', ev.k === 'crash' ? 'bad' : 'good');
+    for (const a of st.agents.values()) { if (a.busy || a.mood === 'sleep') continue; if (ev.k === 'crash') a.goRoom('control'); else if (ev.k === 'party') a.goRoom('lounge'); else if (ev.k === 'earn' && ev.syms.some(s => (a.bot?.holding || []).includes(s))) a.goRoom('news'); else if (ev.k === 'day' && Math.random() < 0.6) a.goRoom(DAY_FUN.has(ev.sub) ? 'lounge' : 'news'); }
+    if (st.chair) PAGES.hq.say(p, st.chair, ev.k === 'crash' ? 'Battle stations! Everyone to Control.' : ev.k === 'party' ? 'Party in the lounge! You\'ve earned it.' : ev.k === 'day' ? (DAY_CHAIR[ev.sub] || 'Big day today, team.') : 'Earnings day. Eyes on the news room.', ev.k === 'crash' ? 'bad' : 'good');
   }
   if (!ev || st.calm) return;
   st.evT = (st.evT ?? 3) - dt;
   if (st.evT <= 0) {
     st.evT = ev.k === 'party' ? 2.5 : 6 + Math.random() * 5;
     const list = [...st.agents.values()].filter(a => a.mood !== 'sleep'), a = list[Math.floor(Math.random() * list.length)];
-    if (a && Math.random() < 0.6) PAGES.hq.say(p, a, pickLine(EV_LINES[ev.k]), 'chat');
+    if (a && Math.random() < 0.6) PAGES.hq.say(p, a, pickLine(ev.k === 'day' ? (DAY_LINES[ev.sub] || DAY_LINES.data) : EV_LINES[ev.k]), 'chat');
     if (ev.k === 'party') { const r = HQ_ROOMS.lounge; for (let i = 0; i < 24; i++) st.parts.push({ x: r.x + r.w / 2 + (Math.random() - 0.5) * 3, y: r.y + r.d / 2 + (Math.random() - 0.5) * 3, z: 2.4, vx: (Math.random() - 0.5) * 3, vy: (Math.random() - 0.5) * 3, vz: 2 + Math.random() * 3, life: 2, c: CONFETTI[i % CONFETTI.length] }); }
     if (ev.k === 'party') for (const b of list.slice(0, 6)) for (let i = 0; i < 10; i++) st.parts.push({ x: b.x, y: b.y, z: 1.6, vx: (Math.random() - 0.5) * 2.4, vy: (Math.random() - 0.5) * 2.4, vz: 2.5 + Math.random() * 2.5, life: 1.8, c: CONFETTI[i % CONFETTI.length] });
     if (ev.k === 'earn') { const r = HQ_ROOMS.news; for (let i = 0; i < 8; i++) st.parts.push({ x: r.x + 2 + Math.random() * (r.w - 4), y: r.y + 2 + Math.random() * (r.d - 4), z: 2.2, vx: (Math.random() - 0.5), vy: (Math.random() - 0.5), vz: 1 + Math.random(), life: 2.2, c: '#F5F5F0' }); }
@@ -8416,6 +8446,30 @@ PAGES.costs = {
 // Newest first. Each release: version, date, a one-line headline and grouped notes.
 // ===================================================================
 const CHANGELOG = [
+  { v: '4.3.0', d: '2026-10-27', title: 'Learning and fun', short: [
+    'Story mode: 9 Academy chapters you finish by doing it, and a Time machine through real crashes',
+    'Compound interest and DCA calculators, and a risk profile meter',
+    'Daily call: will the S&P 500 close up or down? Play against three bots',
+    'Shareable trade and wallet cards, with or without dollar amounts',
+    '12 new achievements, and Mango HQ celebrates real days',
+  ], groups: [
+    ['Story mode: the Academy', [
+      '9 chapters of 3 steps: your first trades, diversifying, protecting your downside, order types, time in the market, knowing your risk, bots, options and learning from history.',
+      'Each step is a short lesson and a real thing to do in the app (buy an index fund, set a stop loss, run a walk-forward test…). Steps tick off by themselves when you\'ve done them, in any wallet. Portfolio → More → Learn.',
+    ]],
+    ['Story mode: the Time machine', [
+      'Go back to a real market with $10,000 of pretend money: the 2020 crash, the 2008 financial crisis, the dot-com bust or the 2022 bear market.',
+      'You only see each day as it happens, with the real headlines of the time. Buy and sell at the close, then skip a day, a week or a month. At the end you get a grade against just holding the S&P 500. Your best result for each one is saved.',
+    ]],
+    ['Compound interest and DCA', ['See how a starting amount plus monthly deposits grows over 5 to 40 years at savings, mixed or stock-market returns, how much is growth, and what a 1% fee would cost. Then the real thing: a monthly amount into the S&P 500 over the last 10 years against putting it all in on day one.']],
+    ['Risk profile meter', ['Five questions about how much risk you can handle, then a meter showing you against what your wallet actually holds (from how much each holding swings, the biggest position, crypto, cash, margin and naked options), and what to change if they don\'t match.']],
+    ['Daily call', ['On the Games tab: will the S&P 500 close up or down? Calls lock at the open, so a call during the day is for the next one. Three bots call too (one follows the trend, one bets on a reversal, one always says up), and the scoreboard shows who\'s right most often. Streaks count.']],
+    ['Shareable cards', ['Share any trade from its confirmation, or your wallet from Portfolio → More. Pick "Percentages only" to share without showing how much money is in the wallet, or include dollar amounts. Share straight from the phone or save the image.']],
+    ['Achievements and HQ', [
+      '12 new achievements: options trades, selling an option for income, Academy chapters, Time machine replays, beating buy-and-hold, daily-call streaks, the risk profile, running 3 bots and more.',
+      'Mango HQ marks real days: Fed decision days, jobs and inflation reports, options expiration and quadruple witching, market holidays, month end, Halloween, Thanksgiving, the holidays and more. The staff react and gather.',
+    ]],
+  ] },
   { v: '4.2.0', d: '2026-10-27', title: 'Bot lab 2', short: [
     'Walk-forward tests and Monte Carlo for any strategy or bot',
     'Crossbreed two bots and adopt the best child',
@@ -9468,6 +9522,226 @@ PAGES.vs = {
     busy(btn, false);
   },
 };
+
+// ===================================================================
+// Learning and fun: the Academy, the Time machine, compound interest and DCA, the risk meter,
+// the daily call, shareable cards, and the days Mango HQ celebrates
+// ===================================================================
+const learnPing = k => post('learn/seen', { k }).catch(() => {});
+// ---------- the Learn hub ----------
+PAGES.learn = {
+  mount(p) {
+    p.title('Learn', true); p.body.innerHTML = '<div class="sk sk-block mt16" style="height:420px"></div>';
+    p.load = () => api('learn').then(d => { p.d = d; this.draw(p); }).catch(e => { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; });
+    p.load(); p.on('state', debounce(() => p.load(), 5000));
+  },
+  refresh(p) { p.load && p.load(); },
+  draw(p) {
+    const d = p.d, n = d.chapters.length;
+    p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Learn</h1><p class="t-sub" style="margin:0 2px">Learn by doing it for real, with paper money: ${n} chapters, a time machine through real crashes, and tools that show how money grows.</p>
+      ${d.next ? `<button class="card lrn-next mt16" data-act="lrnChapter" data-k="${d.next.k}"><span class="t-foot">Up next · ${h(d.next.title)}</span><b>${h(d.next.step.t)}</b><span class="t-sub">${h(d.next.step.lesson)}</span></button>` : `<div class="card lrn-next mt16"><b>🎓 You've finished every chapter</b><span class="t-sub">Nice work. Try the Time machine next.</span></div>`}
+      <div class="section-h"><h2>Academy</h2><span class="t-foot">${d.done}/${n} chapters</span></div>
+      <div class="group">${d.chapters.map((c, i) => `<button class="cell" data-act="lrnChapter" data-k="${c.k}"><div class="lead ${c.done ? 'up' : ''}">${icon(c.done ? 'check' : c.icon)}</div><div class="main"><div class="title">${i + 1}. ${h(c.title)}</div><div class="lrn-bar"><i style="width:${c.n / c.steps.length * 100}%"></i></div></div><span class="t-cap">${c.n}/${c.steps.length}</span>${icon('right', 'chev')}</button>`).join('')}</div>
+      <div class="section-h"><h2>Play and practice</h2></div>
+      <div class="group">
+        <button class="cell" data-act="go" data-to="replay"><div class="lead">${icon('clock')}</div><div class="main"><div class="title">Time machine</div><div class="sub">Trade through 2008, 2020 and more, one day at a time, without knowing what comes next</div></div>${icon('right', 'chev')}</button>
+        <button class="cell" data-act="go" data-to="compound"><div class="lead">${icon('chart')}</div><div class="main"><div class="title">Compound interest and DCA</div><div class="sub">How money grows, and investing a little every month on real prices</div></div>${icon('right', 'chev')}</button>
+        <button class="cell" data-act="go" data-to="risk"><div class="lead">${icon('radar')}</div><div class="main"><div class="title">Risk profile</div><div class="sub">What you can stomach, and whether your wallet matches it</div></div>${icon('right', 'chev')}</button>
+        <button class="cell" data-act="tab" data-tab="games"><div class="lead">${icon('target')}</div><div class="main"><div class="title">Daily call</div><div class="sub">Will the S&P 500 close up or down? Play against three bots</div></div>${icon('right', 'chev')}</button>
+      </div>`;
+  },
+};
+ACT.lrnChapter = el => {
+  const p = Router.pages().reverse().find(x => x.name === 'learn'), c = p?.d.chapters.find(x => x.k === el.dataset.k); if (!c) return;
+  const s = sheet({ title: c.title, tall: true });
+  s.html(`${c.steps.map((st, i) => `<div class="card lrn-step ${st.done ? 'done' : ''} mt12"><div class="lrn-step-h"><span class="lrn-num">${st.done ? icon('check') : i + 1}</span><b>${h(st.t)}</b></div><p class="t-sub">${h(st.lesson)}</p>${st.done ? '<span class="t-foot up">Done</span>' : `<button class="btn btn-quiet btn-sm" data-go="${h(st.go)}">Do it</button>`}</div>`).join('')}
+    <p class="note">Steps check what you've actually done in the app, in any wallet. They tick off by themselves.</p>`);
+  s.body.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', async () => { const to = b.dataset.go; s.close(); await sleep(260); if (['portfolio', 'market', 'activity', 'games'].includes(to)) ACT.tab({ dataset: { tab: to } }); else if (to === 'search') Router.go('search'); else Router.go(to); }));
+};
+// ---------- the Time machine ----------
+PAGES.replay = {
+  mount(p) { p.title('Time machine', true); p.body.innerHTML = '<div class="sk sk-block mt16" style="height:400px"></div>'; api('replay').then(d => { p.d = d; this.draw(p); }).catch(e => { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; }); },
+  async act(p, path, body, btn) { if (btn) busy(btn, true); try { const g = await post('replay/' + path, body); p.d = { ...p.d, ...g }; if (path === 'quit') p.d = await api('replay'); this.draw(p); } catch (e) { toastErr(e); } if (btn && document.body.contains(btn)) busy(btn, false); },
+  draw(p) {
+    const d = p.d, g = d.game, keep = p.scroller.scrollTop;
+    if (!g) {
+      p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Time machine</h1><p class="t-sub" style="margin:0 2px">Go back to a real market with $10,000 of pretend money. You only see each day as it happens, with the real news of the time. At the end, see how you did against just holding the S&P 500.</p>
+        <div class="group mt16">${d.scenarios.map(s => `<button class="cell rp-sc" data-k="${s.k}"><div class="main"><div class="title">${h(s.name)}</div><div class="sub">${h(s.blurb)}</div>${s.best ? `<div class="t-foot mt8">Your best: <b class="${cls(s.best.ret)}">${pct(s.best.ret * 100, 1)}</b> vs S&P ${pct(s.best.spy * 100, 1)} · grade ${h(s.best.grade)}</div>` : ''}</div>${icon('play', 'chev')}</button>`).join('')}</div>
+        <p class="note">Real daily prices, adjusted for dividends and splits. Trades fill at the day's close with a tiny spread and no commissions. It doesn't touch your wallets.</p>`;
+      p.body.querySelectorAll('.rp-sc').forEach(b => b.addEventListener('click', () => this.act(p, 'start', { k: b.dataset.k }, b)));
+      return;
+    }
+    const day = new Date(g.day + 'T12:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }), R = g.result;
+    p.body.innerHTML = `<div class="rp-head"><div><div class="t-foot">${h(g.name)} · day ${g.i + 1} of ${g.of}</div><div class="rp-date">${day}</div></div><button class="btn btn-quiet btn-sm" id="rp-quit">${R ? 'New game' : 'Quit'}</button></div>
+      <div class="rp-prog"><i style="width:${(g.i + 1) / g.of * 100}%"></i></div>
+      ${R ? `<div class="card rp-result mt16"><div class="rp-grade g${R.grade}">${R.grade}</div><div><div class="t-foot">You finished with</div><div class="rp-big">${money(R.value)}</div><div class="t-sub">You ${pct(R.ret * 100, 1)}, holding the S&P 500 ${pct(R.spy * 100, 1)}. ${R.beat ? 'You beat buy-and-hold!' : 'Buy-and-hold won this time.'} ${R.trades} trade${R.trades === 1 ? '' : 's'}.${R.worst ? ` Your worst sale: ${h(R.worst.sym)} on ${fmtDate(R.worst.d + 'T12:00')} (${money(R.worst.pnl, { sign: true })}).` : ''}</div></div></div>` : ''}
+      <div class="tiles mt12"><div class="tile"><div class="k">Your $10,000</div><div class="v">${money(g.value)}</div><div class="s ${cls(g.ret)}">${pct(g.ret * 100, 1)}</div></div><div class="tile"><div class="k">S&P 500 since the start</div><div class="v ${cls(g.spy)}">${pct(g.spy * 100, 1)}</div><div class="s">${money(g.cash)} in cash</div></div></div>
+      ${g.news.length ? `<div class="section-h"><h2>In the news</h2></div><div class="group">${g.news.map(n => `<div class="cell ${n.fresh ? 'rp-fresh' : ''}"><div class="main"><div class="title">${h(n.t)}</div><div class="sub">${fmtDate(n.d + 'T12:00')}</div></div></div>`).join('')}</div>` : ''}
+      <div class="section-h"><h2>Market</h2><span class="t-foot">tap to trade</span></div>
+      <div class="group">${g.assets.map(a => `<button class="cell rp-a" data-sym="${a.sym}" ${R ? 'disabled' : ''}><div class="main"><div class="title">${h(a.sym)} ${a.held ? `<span class="tag ac">own ${money(a.held * a.px)}</span>` : ''}</div><div class="sub">${price(a.px)} · <span class="${cls(a.day)}">${pct(a.day * 100, 1)} today</span></div></div>${miniSpark(a.spark)}<b class="n ${cls(a.since)}">${pct(a.since * 100, 1)}</b></button>`).join('')}</div>
+      ${R ? '' : `<div class="rp-ctl"><button class="btn btn-quiet" data-n="1">Next day</button><button class="btn btn-quiet" data-n="5">Next week</button><button class="btn btn-primary" data-n="21">Next month</button></div><button class="btn btn-quiet btn-block mt8" id="rp-fin">Skip to the end</button>`}
+      ${g.trades.length ? `<div class="section-h"><h2>Your trades</h2></div><div class="group">${g.trades.map(t => `<div class="cell"><div class="main"><div class="title">${t.side === 'buy' ? 'Bought' : 'Sold'} ${h(t.sym)}</div><div class="sub">${fmtDate(t.d + 'T12:00')} at ${price(t.px)}</div></div><b class="n ${t.pnl != null ? cls(t.pnl) : ''}">${t.pnl != null ? money(t.pnl, { sign: true }) : money(t.usd)}</b></div>`).join('')}</div>` : ''}`;
+    p.scroller.scrollTop = R ? 0 : keep;
+    $('#rp-quit', p.body).addEventListener('click', async e => { if (!R && !(await confirmBox({ title: 'Quit this replay?', msg: 'Your progress in it is lost.', ok: 'Quit', danger: true }))) return; this.act(p, 'quit', {}, e.currentTarget); });
+    p.body.querySelectorAll('[data-n]').forEach(b => b.addEventListener('click', () => this.act(p, 'next', { days: +b.dataset.n }, b)));
+    $('#rp-fin', p.body)?.addEventListener('click', e => this.act(p, 'next', { finish: true }, e.currentTarget));
+    p.body.querySelectorAll('.rp-a').forEach(b => b.addEventListener('click', () => this.trade(p, b.dataset.sym)));
+  },
+  trade(p, sym) {
+    const g = p.d.game, a = g.assets.find(x => x.sym === sym), s = sheet({ title: `${sym} on ${fmtDate(g.day + 'T12:00')}` });
+    s.html(`<div class="t-foot">${price(a.px)} · ${pct(a.since * 100, 1)} since the start · you have ${money(g.cash)} in cash${a.held ? ` and ${money(a.held * a.px)} of ${h(sym)}` : ''}</div>
+      <div class="section-h"><h2>Buy</h2></div><div class="btns">${[0.25, 0.5, 1].map(f => `<button class="btn btn-quiet" data-buy="${f}" ${g.cash < 1 ? 'disabled' : ''}>${f === 1 ? 'All cash' : Math.round(f * 100) + '%'}<small class="t-cap"> ${money(g.cash * f)}</small></button>`).join('')}</div>
+      ${a.held ? `<div class="section-h"><h2>Sell</h2></div><div class="btns"><button class="btn btn-quiet" data-sell="0.5">Half</button><button class="btn btn-danger" data-sell="1">All of it</button></div>` : ''}
+      <p class="note">Fills at today's close. Nothing to know about tomorrow yet.</p>`);
+    s.body.querySelectorAll('[data-buy]').forEach(b => b.addEventListener('click', async () => { const f = +b.dataset.buy; s.close(); await this.act(p, 'trade', { sym, side: 'buy', usd: g.cash * f, all: f === 1 }); }));
+    s.body.querySelectorAll('[data-sell]').forEach(b => b.addEventListener('click', async () => { const f = +b.dataset.sell; s.close(); await this.act(p, 'trade', { sym, side: 'sell', usd: f === 1 ? 0 : a.held * a.px * f, all: f === 1 }); }));
+  },
+};
+function miniSpark(v) { if (!v?.length) return ''; const W = 60, H = 24, lo = Math.min(...v), hi = Math.max(...v); return `<svg viewBox="0 0 ${W} ${H}" class="spark ${v[v.length - 1] >= v[0] ? 'up' : 'dn'}" preserveAspectRatio="none"><path d="M${v.map((a, i) => `${(i / (v.length - 1) * W).toFixed(1)},${(H - 2 - (a - lo) / (hi - lo || 1) * (H - 4)).toFixed(1)}`).join('L')}"/></svg>`; }
+// ---------- compound interest and dollar-cost averaging ----------
+PAGES.compound = {
+  mount(p) {
+    p.title('Compound interest', true); learnPing('compound');
+    p.v = { start: 1000, monthly: 200, years: 30, rate: 10, ...(store.get('compound') || {}) };
+    p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">How money grows</h1><p class="t-sub" style="margin:0 2px">Money earns returns, and then the returns earn returns. Time does most of the work.</p>
+      <div class="pf-grid mt16"><label class="field"><span>Start with ($)</span><input type="number" inputmode="decimal" id="cp-s" value="${p.v.start}"></label><label class="field"><span>Add each month ($)</span><input type="number" inputmode="decimal" id="cp-m" value="${p.v.monthly}"></label></div>
+      <div class="field"><span>Years</span>${seg('cp-y', [[5, '5'], [10, '10'], [20, '20'], [30, '30'], [40, '40']], p.v.years)}</div>
+      <div class="field"><span>Yearly return</span>${seg('cp-r', [[4, '4% savings'], [6, '6% mix'], [10, '10% stocks']], p.v.rate)}</div>
+      <div id="cp-out"></div>
+      <div class="section-h"><h2>On real prices: a little every month</h2></div><p class="t-sub" style="margin:0 2px">Dollar-cost averaging means buying the same dollar amount on a schedule, whatever the price. Here is ${'$'}<span id="dca-m">${p.v.monthly}</span> a month into the S&P 500 (SPY) over the last 10 years, against putting the same total in on day one.</p><div id="dca-out"><div class="sk sk-block mt12" style="height:240px"></div></div>`;
+    const calc = () => { p.v.start = Math.max(0, num($('#cp-s', p.body).value, 0)); p.v.monthly = Math.max(0, num($('#cp-m', p.body).value, 0)); store.set('compound', p.v); this.draw(p); };
+    $('#cp-s', p.body).addEventListener('input', calc); $('#cp-m', p.body).addEventListener('input', calc); $('#cp-m', p.body).addEventListener('change', () => this.dca(p));
+    onSeg(p.body, 'cp-y', v => { p.v.years = +v; calc(); }); onSeg(p.body, 'cp-r', v => { p.v.rate = +v; calc(); });
+    this.draw(p); this.dca(p);
+  },
+  unmount(p) { p.chart && p.chart.destroy(); },
+  draw(p) {
+    const { start, monthly, years, rate } = p.v, r = rate / 100 / 12, bars = [];
+    let bal = start, put = start;
+    for (let m = 1; m <= years * 12; m++) { bal = bal * (1 + r) + monthly; put += monthly; if (m % 12 === 0 && (m / 12) % Math.max(1, Math.round(years / 10)) === 0) bars.push({ y: m / 12, bal, put }); }
+    const max = Math.max(...bars.map(b => b.bal), 1), growth = bal - put;
+    $('#cp-out', p.body).innerHTML = `<div class="card mt12"><div class="t-foot">After ${years} years</div><div class="rp-big">${money(bal)}</div><div class="t-sub">You put in ${money(put)}. Growth added <b class="up">${money(growth)}</b>${bal > 0 ? `, ${Math.round(growth / bal * 100)}% of the total` : ''}.</div>
+      <div class="cp-bars mt12">${bars.map(b => `<div class="cp-col"><div class="cp-stack" style="height:${b.bal / max * 100}%"><i class="g" style="height:${(b.bal - b.put) / b.bal * 100}%"></i><i class="p" style="height:${b.put / b.bal * 100}%"></i></div><span>${b.y}</span></div>`).join('')}</div>
+      <div class="fan-key"><span><i class="b2" style="background:var(--mu2)"></i>What you put in</span><span><i class="b2" style="background:var(--up)"></i>Growth</span></div></div>
+      <p class="note">Assumes the same return every year, monthly, before taxes and fees. Real markets go up and down: the S&P 500 has averaged about 10% a year over the long run, with some years far worse. A 1% yearly fee on ${money(bal)} over ${years} years would cost about ${money(bal - (() => { let b = start, rr = (rate - 1) / 100 / 12; for (let m = 1; m <= years * 12; m++) b = b * (1 + rr) + monthly; return b; })())}.</p>`;
+  },
+  async dca(p) {
+    const el = $('#dca-out', p.body), m = Math.max(1, p.v.monthly || 100); $('#dca-m', p.body).textContent = m;
+    try {
+      const r = await api(`learn/dca?sym=SPY&years=10&monthly=${m}`);
+      el.innerHTML = `<div class="tiles mt12"><div class="tile"><div class="k">Monthly, ${r.months} buys</div><div class="v">${money(r.dca)}</div><div class="s">${pct((r.dca / r.invested - 1) * 100, 0)} on ${money(r.invested)}</div></div><div class="tile"><div class="k">All on day one</div><div class="v">${money(r.lump)}</div><div class="s">${pct((r.lump / r.invested - 1) * 100, 0)}</div></div></div>
+        <div class="chart-wrap" id="dca-chart"></div><div class="bt-legend"><span><i class="ln"></i>Monthly</span><span><i class="ln dash"></i>All at once</span></div>
+        <p class="note">${r.lumpWins ? 'Putting it all in at once usually wins when markets mostly rise, because the money is invested longer.' : 'Buying monthly won here: it bought more shares when prices were low.'} Monthly investing mostly helps by making it a habit and taking the guesswork out of timing. ${fmtDate(r.start + 'T12:00')} to ${fmtDate(r.end + 'T12:00')}, with dividends reinvested.</p>`;
+      if (p.chart) p.chart.destroy();
+      p.chart = new Chart($('#dca-chart', el), { fmtTime: t => fmtDate(t) });
+      p.chart.set({ type: 'line', points: r.curve.map(x => [dayTs(x[0]), x[1]]), bench: r.lumpCurve.map(x => [dayTs(x[0]), x[1]]), padTop: 18, padX: 10, color: 'up' });
+    } catch (e) { el.innerHTML = `<div class="callout mt12">${icon('info')}<div>${h(e.message)}</div></div>`; }
+  },
+};
+// ---------- the risk profile meter ----------
+PAGES.risk = {
+  mount(p) { p.title('Risk profile', true); p.load = () => api('learn/risk').then(d => { p.d = d; p.answers = d.answers ? d.answers.slice() : []; p.edit = !d.you; this.draw(p); }).catch(e => { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; }); p.load(); },
+  draw(p) {
+    const d = p.d;
+    if (p.edit) {
+      p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Risk profile</h1><p class="t-sub" style="margin:0 2px">Five questions. There are no wrong answers: the point is to own things you won't panic-sell.</p>
+        ${d.questions.map((q, i) => `<div class="quiz-q mt16"><b>${i + 1}. ${h(q.q)}</b>${q.a.map(a => `<button class="quiz-a ${p.answers[i] === a ? 'on' : ''}" data-i="${i}" data-a="${h(a)}">${h(a)}</button>`).join('')}</div>`).join('')}
+        <button class="btn btn-primary btn-block btn-lg mt16" id="rk-go" ${p.answers.filter(Boolean).length === d.questions.length ? '' : 'disabled'}>See my profile</button>`;
+      p.body.querySelectorAll('.quiz-a').forEach(b => b.addEventListener('click', () => { p.answers[+b.dataset.i] = b.dataset.a; const k = p.scroller.scrollTop; this.draw(p); p.scroller.scrollTop = k; }));
+      $('#rk-go', p.body).addEventListener('click', async e => { busy(e.currentTarget, true); try { await post('learn/risk', { answers: p.answers }); p.load(); } catch (err) { toastErr(err); busy(e.currentTarget, false); } });
+      return;
+    }
+    const you = d.you, pf = d.portfolio, at = v => `${(v - 1) / 9 * 100}%`;
+    p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Risk profile</h1><p class="t-sub" style="margin:0 2px">What you said you can handle, against what ${h(W().emoji)} ${h(W().name)} actually holds.</p>
+      <div class="card mt16"><div class="rk-meter"><div class="rk-scale"></div>${you ? `<div class="rk-pin you" style="left:${at(you.score)}"><span>You</span></div>` : ''}${pf ? `<div class="rk-pin pf" style="left:${at(pf.score)}"><span>Wallet</span></div>` : ''}</div>
+        <div class="rk-ends"><span>Very careful</span><span>Balanced</span><span>Aggressive</span></div>
+        <div class="tiles mt12"><div class="tile"><div class="k">You</div><div class="v">${h(you.label)}</div><div class="s">${you.score.toFixed(1)} out of 10</div></div><div class="tile"><div class="k">This wallet</div><div class="v">${pf ? h(pf.label) : '–'}</div><div class="s">${pf ? pf.score.toFixed(1) + ' out of 10' : 'nothing held'}</div></div></div>
+        ${d.verdict ? `<p class="t-sub mt12" style="margin-bottom:0">${h(d.verdict)}</p>` : ''}</div>
+      ${pf ? `<div class="section-h"><h2>Why the wallet scores ${pf.score.toFixed(1)}</h2></div><div class="card">${[['Expected yearly swing', pct0(pf.vol * 100, 0)], ['Biggest position', pf.topSym ? `${h(pf.topSym)}, ${pct0(pf.top * 100, 0)}` : '–'], ['Crypto', pct0(pf.crypto * 100, 0)], ['Cash', pct0(pf.cash * 100, 0)], ['Borrowed (margin)', pf.lev ? pct0(pf.lev * 100, 0) : 'None'], ['Naked options', pf.naked || 'None'], ['Holdings', pf.n]].map(([k, v]) => `<div class="kv"><span class="k">${k}</span><span class="v">${v}</span></div>`).join('')}</div>` : ''}
+      <button class="btn btn-quiet btn-block mt16" id="rk-redo">Answer again</button>
+      <p class="note">The wallet's score comes from how much each holding has swung over the last 3 months, weighted by size, with a little credit for diversification and more risk for margin and naked options. A rough guide, not advice.</p>`;
+    $('#rk-redo', p.body).addEventListener('click', () => { p.edit = true; this.draw(p); });
+  },
+};
+// ---------- the daily call, on the Games tab ----------
+{ const r0 = VIEWS.games.render; VIEWS.games.render = function () {
+  r0.call(this); const lv = $('.lvl', this.el); if (!lv || !feature('games')) return;
+  if (!$('#dc-card', this.el)) lv.insertAdjacentHTML('afterend', '<div id="dc-card"></div><div id="lrn-card"></div>');
+  api('dcall').then(d => { this.dc = d; drawCall(this); }).catch(() => {});
+  api('learn').then(l => { const el = $('#lrn-card', this.el); if (el) el.innerHTML = `<button class="card cmp-cta mt12" data-act="go" data-to="learn"><span class="cmp-cta-ic">${icon('sparkle')}</span><span><b>Story mode</b><span class="t-foot">${l.next ? `Academy ${l.done}/${l.chapters.length} · next: ${h(l.next.step.t)}` : 'Every chapter done · try the Time machine'}</span></span>${icon('right')}</button>`; }).catch(() => {});
+}; }
+function drawCall(v) {
+  const d = v.dc, el = $('#dc-card', v.el); if (!el || !d) return;
+  const day = new Date(d.next + 'T12:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }), T = d.tally, rate = x => x[1] ? `${Math.round(x[0] / x[1] * 100)}%` : '–';
+  el.innerHTML = `<div class="section-h"><h2>Daily call</h2><span class="t-foot">${d.streak ? `🔥 ${d.streak} in a row` : `best streak ${d.best}`}</span></div>
+    <div class="card"><p class="t-sub" style="margin:0 0 12px">Will the S&P 500 close up or down on <b>${day}</b>? ${d.open ? 'Today is already trading, so this call is for the next day.' : 'Calls lock when the market opens.'}</p>
+      <div class="bvb"><button class="bull ${d.pick === 'up' ? 'on' : ''}" data-dc="up"><span class="em">📈</span>Up</button><button class="bear ${d.pick === 'down' ? 'on' : ''}" data-dc="down"><span class="em">📉</span>Down</button></div>
+      ${d.pick ? `<div class="t-foot mt8" style="text-align:center">You said ${d.pick}. You can change it until the open.</div>` : ''}
+      <div class="dc-tally mt12"><div><span>You</span><b>${rate(T.you)}</b><em>${T.you[1]} calls</em></div><div><span>Trend bot</span><b>${rate(T.trend)}</b><em>follows the trend</em></div><div><span>Contrarian</span><b>${rate(T.contra)}</b><em>bets on a reversal</em></div><div><span>Always up</span><b>${rate(T.bull)}</b><em>never bearish</em></div></div>
+      ${d.history.length ? `<div class="dc-hist mt12">${d.history.slice(0, 14).reverse().map(c => `<i class="${c.result || 'wait'}" title="${c.d}"></i>`).join('')}</div>` : ''}</div>`;
+  el.querySelectorAll('[data-dc]').forEach(b => b.addEventListener('click', async () => { try { v.dc = await post('dcall', { pick: b.dataset.dc }); drawCall(v); toast(`Called ${b.dataset.dc} for ${day}`); } catch (e) { toastErr(e); } }));
+}
+// ---------- shareable cards ----------
+function cardCanvas({ kicker, title, big, bigUp, sub, rows, foot }) {
+  const W = 1080, H = 1350, c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d');
+  const gr = g.createLinearGradient(0, 0, W, H); gr.addColorStop(0, '#2C1A3E'); gr.addColorStop(1, '#120B1C'); g.fillStyle = gr; g.fillRect(0, 0, W, H);
+  const glow = g.createRadialGradient(W * 0.82, H * 0.1, 20, W * 0.82, H * 0.1, 700); glow.addColorStop(0, bigUp ? 'rgba(61,220,151,.22)' : 'rgba(255,92,119,.22)'); glow.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = glow; g.fillRect(0, 0, W, H);
+  const F = (w, s) => `${w} ${s}px -apple-system, "SF Pro Display", "Inter", "Segoe UI", sans-serif`;
+  g.fillStyle = '#FFB547'; g.font = F(800, 44); g.fillText('🥭 Mango', 90, 140);
+  g.fillStyle = '#CABFE0'; g.font = F(600, 40); g.fillText(kicker, 90, 300);
+  g.fillStyle = '#F7F2FF'; g.font = F(800, 120); g.fillText(title, 90, 430);
+  g.fillStyle = bigUp ? '#3DDC97' : '#FF5C77'; g.font = F(800, 210); g.fillText(big, 80, 680);
+  if (sub) { g.fillStyle = '#CABFE0'; g.font = F(600, 48); g.fillText(sub, 90, 770); }
+  let y = 900; g.font = F(600, 42);
+  for (const [k, v] of rows) { g.fillStyle = '#8E81A8'; g.fillText(k, 90, y); g.fillStyle = '#F7F2FF'; g.textAlign = 'right'; g.fillText(v, W - 90, y); g.textAlign = 'left'; y += 78; }
+  g.fillStyle = '#6D6187'; g.font = F(500, 32); g.fillText(foot, 90, H - 90);
+  return c;
+}
+function shareSheet(build, name) {
+  let dollars = !!store.get('shareDollars');
+  const s = sheet({ title: 'Share', html: '' });
+  const draw = () => {
+    const c = build(dollars), url = c.toDataURL('image/png');
+    s.html(`<div class="field"><span>Show</span>${seg('sh-m', [['pct', 'Percentages only'], ['usd', 'Dollar amounts too']], dollars ? 'usd' : 'pct')}</div><img class="share-img" src="${url}" alt="Share card">
+      <p class="note">${dollars ? 'Dollar amounts show how much money is in this paper wallet.' : 'Percentages only: nobody sees how much money is in the wallet.'}</p>`);
+    s.foot(`<div class="btns"><button class="btn btn-quiet" id="sh-save">${icon('download')}Save</button><button class="btn btn-primary" id="sh-go">${icon('send')}Share</button></div>`);
+    onSeg(s.body, 'sh-m', v => { dollars = v === 'usd'; store.set('shareDollars', dollars); draw(); });
+    const blob = () => new Promise(r => c.toBlob(r, 'image/png'));
+    $('#sh-save', s.footEl).addEventListener('click', async () => { const a = document.createElement('a'); a.href = url; a.download = name + '.png'; a.click(); });
+    $('#sh-go', s.footEl).addEventListener('click', async () => {
+      try { const f = new File([await blob()], name + '.png', { type: 'image/png' }); if (navigator.canShare?.({ files: [f] })) await navigator.share({ files: [f], title: 'Mango Paper Trading' }); else { const a = document.createElement('a'); a.href = url; a.download = name + '.png'; a.click(); toast('Saved the image'); } }
+      catch (e) { if (e.name !== 'AbortError') toastErr(e); }
+    });
+  };
+  draw();
+}
+ACT.shareTrade = () => {
+  const t = tradeDetail.cur; if (!t) return;
+  const sell = t.side === 'sell', gain = sell && t.pnl != null ? t.pnl / (t.qty * t.price - t.pnl) : null, now = live(t.sym), since = now ? now / t.price - 1 : null;
+  shareSheet(usd => {
+    const big = sell ? (gain != null ? pct(gain * 100, 1) : 'Sold') : since != null ? pct(since * 100, 1) : 'Bought';
+    const rows = [[sell ? 'Sold at' : 'Bought at', price(t.price)], ['Date', fmtDate(t.ts)]];
+    if (!sell && now) rows.push(['Price now', price(now)]);
+    if (usd) { rows.push([sell ? 'Proceeds' : 'Amount', money(t.qty * t.price)]); if (sell && t.pnl != null) rows.push(['Profit', money(t.pnl, { sign: true })]); }
+    return cardCanvas({ kicker: sell ? 'Closed a trade' : 'Opened a position', title: t.sym, big, bigUp: (sell ? gain ?? 0 : since ?? 0) >= 0, sub: sell ? (gain != null ? 'on the trade' : '') : since != null ? 'since buying' : '', rows, foot: 'Paper trading with pretend money · not financial advice' });
+  }, `mango-${t.sym}-${t.id}`);
+};
+ACT.shareWallet = () => {
+  const S = App.S, w = S.wallet, eq = equityNow(), ret = eq / w.start - 1, pos = (S.pos || []).slice().sort((a, b) => b.qty * (live(b.sym) || b.avg) - a.qty * (live(a.sym) || a.avg));
+  shareSheet(usd => cardCanvas({ kicker: `${w.emoji} ${w.name}`, title: 'My wallet', big: pct(ret * 100, 1), bigUp: ret >= 0, sub: `since ${fmtDate(w.seasonStart || w.created)}`,
+    rows: [['Top holdings', pos.slice(0, 3).map(p => p.sym).join(', ') || '–'], ['Positions', String(pos.length)], ...(usd ? [['Value', money(eq)]] : [])], foot: 'Paper trading with pretend money · not financial advice' }), `mango-wallet-${w.id}`);
+};
+// ---------- the days Mango HQ celebrates ----------
+const DAY_FUN = new Set(['holiday', 'halloween', 'xmas', 'newyear', 'july4', 'thanks', 'valentine', 'pi']);
+const DAY_CHAIR = { fed: 'Fed day. Nobody trades in a panic at 2 pm.', data: 'Big numbers out this morning. Read before you react.', witch: 'Quadruple witching: expect volume at the close.', opex: 'Options expire today. Watch the pins.', holiday: 'Market\'s closed. Enjoy the day off, team.', halloween: 'Happy Halloween! No scary trades.', xmas: 'Merry Christmas, everyone!', newyear: 'Happy New Year! Fresh start.', july4: 'Happy Fourth! Fireworks on the roof.', thanks: 'Happy Thanksgiving. Thankful for this crew.', valentine: 'Love your portfolio today.', pi: 'Pie in the lounge for Pi Day.', tax: 'Tax day. Hope those losses were harvested.', monthend: 'Month end: the rebalancers are coming.' };
+const DAY_LINES = {
+  fed: ['What did Powell say?', 'Dot plot!', 'Rates up, rates down?', 'Hold on until 2:30.'], data: ['Hotter than expected?', 'Consensus was…', 'Revisions!', 'Futures are moving.'],
+  witch: ['So much volume!', 'Here comes the close.'], opex: ['Pinned at the strike again.', 'Max pain!'], holiday: ['Day off!', 'Nothing to trade today.', 'Crypto never sleeps, though.'],
+  halloween: ['Boo! 🎃', 'Trick or treat!', 'Scariest chart I\'ve seen.'], xmas: ['Ho ho ho!', 'Santa rally?', 'Cookies in the lounge!'], newyear: ['New year, new highs?', 'Happy New Year!'],
+  july4: ['Happy Fourth!', 'Fireworks!'], thanks: ['Pass the pie.', 'Thankful for dividends.'], valentine: ['Roses are red, stocks are green.'], pi: ['3.14159…', 'Pie for everyone!'],
+  tax: ['Did you file?', 'Form 8949 time.'], monthend: ['Window dressing!', 'Rebalancing day.'],
+};
+{ const ev0 = eventOf; eventOf = st => { const e = ev0(st); if (e || !LIFE.get().events) return e; const dd = App.S?.days?.[0]; return dd ? { k: 'day', sub: dd.k, text: dd.text } : null; }; }
 
 // ===================================================================
 // Settings
