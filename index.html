@@ -1179,6 +1179,21 @@ html[data-standby] #halt-bar { bottom: calc(var(--nav-h, 64px) + env(safe-area-i
 .ov-hd, .ov-row { display: grid !important; grid-template-columns: 1.4fr 1fr 1fr; gap: 8px; } .ov-hd span:not(:first-child), .ov-row span:not(:first-child) { text-align: right; }
 .lead.up { color: var(--up); } .lead.dn { color: var(--dn); }
 
+/* bot lab 2 */
+.fan { width: 100%; height: 150px; display: block; } .fan .b1 { fill: color-mix(in srgb, var(--ac) 16%, transparent); } .fan .b2 { fill: color-mix(in srgb, var(--ac) 32%, transparent); }
+.fan .ln { fill: none; stroke: var(--ac); stroke-width: 2; vector-effect: non-scaling-stroke; } .fan .zero { stroke: var(--mu2); stroke-dasharray: 3 4; vector-effect: non-scaling-stroke; }
+.fan-key { display: flex; gap: 14px; font-size: 12px; color: var(--mu); margin-top: 8px; flex-wrap: wrap; } .fan-key i { display: inline-block; width: 12px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+.fan-key i.b1 { background: color-mix(in srgb, var(--ac) 16%, transparent); } .fan-key i.b2 { background: color-mix(in srgb, var(--ac) 32%, transparent); } .fan-key i.ln { background: var(--ac); height: 3px; }
+.wf-list .cell { gap: 10px; } .wf-bar { width: 56px; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--tx) 8%, transparent); overflow: hidden; flex: none; }
+.wf-bar i { display: block; height: 100%; border-radius: 3px; } .wf-bar i.up { background: var(--up); } .wf-bar i.dn { background: var(--dn); }
+.spark { width: 64px; height: 28px; flex: none; } .spark path { fill: none; stroke-width: 1.8; vector-effect: non-scaling-stroke; } .spark.up path { stroke: var(--up); } .spark.dn path { stroke: var(--dn); }
+.br-row { gap: 10px; } .br-row .btn-sm { flex: none; }
+.lab2-cards { display: grid; grid-template-columns: 1fr; gap: 8px; }
+.vs-who { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; } .vs-who > div:not(.vs-vs) { display: flex; flex-direction: column; gap: 2px; } .vs-who > div:last-child { text-align: right; align-items: flex-end; }
+.vs-who b { font-size: 22px; } .vs-who svg { width: 14px; height: 14px; vertical-align: -2px; } .vs-vs { color: var(--mu); font-weight: 700; }
+.vs-verdict { margin-top: 12px; font-weight: 700; }
+.lab2-cards .cmp-cta { margin: 0; }
+
 /* ---------- Paper / Alpaca sides ---------- */
 .space-sw { display: inline-flex; gap: 4px; padding: 4px; border-radius: 14px; background: var(--card); box-shadow: var(--hi); margin: 2px 0 10px; }
 .space-sw button { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: 10px; font-size: 14px; font-weight: 650; color: var(--mu); transition: background .2s, color .2s; }
@@ -1517,7 +1532,7 @@ html[data-standby] #halt-bar { bottom: calc(var(--nav-h, 64px) + env(safe-area-i
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '4.1.0';
+const BUILD = '__BUILD__', APP_VERSION = '4.2.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -4546,7 +4561,7 @@ function verCard(st, sv) {
     ${v.changes.length ? `<ul class="ver-l">${v.changes.map(c => `<li>${h(c)}</li>`).join('')}</ul>` : ''}${v.history.slice(0, -1).reverse().map(x => `<details class="ver-old"><summary>v${x.v}: ${h(x.title || '')}</summary>${x.changes?.length ? `<ul class="ver-l">${x.changes.map(c => `<li>${h(c)}</li>`).join('')}</ul>` : ''}</details>`).join('')}</div>`;
 }
 function stratPick(s, cur, pre) {
-  return `<div class="strat-pick" data-pick="${pre}-strat">${Object.entries(s.strategies).filter(([, x]) => !x.auto).map(([k, x]) => `<button type="button" class="strat ${k === cur ? 'on' : ''}" data-k="${k}" style="--hue:${hueOf(k)}"><span class="strat-ic">${icon(x.icon)}</span><span class="strat-t">${h(x.name)}${x.ver ? `<span class="strat-v">v${x.ver.v}</span>` : ''}</span><span class="strat-d">${h(x.desc)}</span><span class="strat-m">${x.rebalance === 'monthly' ? 'Trades monthly' : 'Checks daily'} · ${x.markets === 'stocks' ? 'Best on stocks and ETFs' : 'Stocks and crypto'}</span></button>`).join('')}</div>`;
+  return `<div class="strat-pick" data-pick="${pre}-strat">${Object.entries(s.strategies).filter(([, x]) => !x.auto && !x.hidden).map(([k, x]) => `<button type="button" class="strat ${k === cur ? 'on' : ''}" data-k="${k}" style="--hue:${hueOf(k)}"><span class="strat-ic">${icon(x.icon)}</span><span class="strat-t">${h(x.name)}${x.ver ? `<span class="strat-v">v${x.ver.v}</span>` : ''}</span><span class="strat-d">${h(x.desc)}</span><span class="strat-m">${x.rebalance === 'monthly' ? 'Trades monthly' : 'Checks daily'} · ${x.markets === 'stocks' ? 'Best on stocks and ETFs' : 'Stocks and crypto'}</span></button>`).join('')}</div>`;
 }
 function uniPick(s, cur, syms, pre) {
   return `<div class="chips">${Object.entries(s.universes).map(([k, u]) => `<button type="button" class="chip ${k === cur ? 'on' : ''}" data-uni="${k}">${h(u.name)}</button>`).join('')}<button type="button" class="chip ${cur === 'custom' ? 'on' : ''}" data-uni="custom">Your own</button></div>
@@ -8039,6 +8054,7 @@ function guardsCard() {
     ${rowToggle('corrGuard', 'Correlation guard', 'A bot won\'t open a position that has moved almost exactly like one it already holds over 60 days')}
     ${rowToggle('sharedRisk', 'Shared risk caps', 'Limits across all bots together, so two bots can\'t pile into the same stock or sector')}
     ${on ? `${rowNum('maxSymPct', 'Most in one symbol', 'Of all bots\' money together', '%', { w: 90 })}${rowNum('maxSectorPct', 'Most in one sector', 'Tech, health, energy…', '%', { w: 90 })}${rowNum('maxCryptoPct', 'Most in crypto', 'All coins together', '%', { w: 90 })}` : ''}
+    ${rowToggle('decayAlerts', 'Strategy decay alerts', 'Weekly: pause a bot whose strategy stopped working lately, or that falls far behind its own backtest, and say why')}
     ${rowToggle('autoBench', 'Auto-bench', 'Pause a bot that trails the S&P 500 by more than 3% over 60 days. Off: you get a notification instead')}
     ${rowToggle('autoTune', 'Monthly re-tune check', 'Re-tests each bot\'s settings once a month and suggests better ones. It never changes them without you')}</div>`;
 }
@@ -8400,6 +8416,30 @@ PAGES.costs = {
 // Newest first. Each release: version, date, a one-line headline and grouped notes.
 // ===================================================================
 const CHANGELOG = [
+  { v: '4.2.0', d: '2026-10-27', title: 'Bot lab 2', short: [
+    'Walk-forward tests and Monte Carlo for any strategy or bot',
+    'Crossbreed two bots and adopt the best child',
+    'Decay alerts: bots that stop working get flagged and paused',
+    'New bots: Economic cycle sectors, and a Filings follower that only acts on SEC filings',
+    'Bot vs you: your wallet against a strategy given the same money',
+  ], groups: [
+    ['Walk-forward test', [
+      'Tunes the strategy on 12 months, trades the next 3 months it never saw, then rolls forward and repeats across the whole history. Only the unseen months are stitched together, which is the most honest backtest there is.',
+      'Shows how many unseen stretches made money, how many beat the benchmark, and how much of its tuned return it kept (50% or more is healthy). In the Strategy lab after a test, and on every bot\'s page.',
+    ]],
+    ['Monte Carlo', ['Reshuffles the backtest\'s real days, in 10-day chunks, into 1,000 other orders and shows the spread: the bad-luck, typical and good-luck outcomes, the chance of losing money, and the typical worst drop, with a fan chart.']],
+    ['Crossbreeding', [
+      'Pick two bots. Two of the same strategy make children that mix their settings, with a small mutation. Two different strategies make a child that runs both, each on its own schedule with its own settings and symbols, and splits the money 30/70, 50/50 or 70/30.',
+      'Parents and children are tested on the same 3 years. Adopt a child and it becomes a new bot with its own $10,000 wallet, paused so you can look it over first.',
+    ]],
+    ['Strategy decay alerts (on by default)', [
+      'Once a week, every running bot that is at least 60 days old gets two checks: is its strategy still working (its last 6 months against its 3-year record and the market), and is the bot keeping up with its own backtest over the days it has been live?',
+      'If either fails, you get a notification saying why and the bot is paused. Resume it and it won\'t pause for this again for 30 days. Check any bot on demand from its page. Switch it off in Settings.',
+    ]],
+    ['New bot: Economic cycle sectors', ['Reads the business cycle from the market: the S&P 500 against its 200-day average, consumer discretionary against staples (how freely people spend), and long Treasuries (where rates are heading). It holds the strongest of the sectors that usually lead in that phase: early recovery, mid-cycle, late cycle or slowdown. Once a month, with its reasoning in the journal.']],
+    ['New bot: Filings follower', ['Buys companies where at least 2 insiders bought $100,000 or more of shares on the open market in the last 30 days (Form 4), or where a famous investor opened a new position in their latest 13F. It never acts on headlines. Holds each about 3 months with a 12% stop and waits in T-bills between signals. Every setting can be changed. It runs live only, since the backtester has no filings history.']],
+    ['Bot vs you', ['Pick one of your wallets and a strategy. The strategy gets the same starting money on the day your wallet\'s season started, plus every deposit and withdrawal on the days they happened, and trades with the same fees. See who\'s ahead, both curves, returns, worst drops and trade counts. In the Strategy lab.']],
+  ] },
   { v: '4.1.0', d: '2026-10-27', title: 'Research', short: [
     'Research on every stock page: earnings history, insider trades, famous investors, Congress, short selling, dividend safety',
     'Fund holdings and a fund overlap tool',
@@ -9284,6 +9324,148 @@ PAGES.overlap = {
       } catch (e) { $('#ov-r', p.body).innerHTML = `<div class="callout mt16">${icon('info')}<div>${h(e.message)}</div></div>`; }
     };
     draw();
+  },
+};
+
+// ===================================================================
+// Bot lab 2: walk-forward tests, Monte Carlo, crossbreeding, strategy decay, bot vs you
+// ===================================================================
+STRAT_HUE.cycle = '#3FB6A8'; STRAT_HUE.filings = '#C08A3E'; STRAT_HUE.hybrid = '#B07BE8';
+STRAT_SYMS.cycle = ['SPY', 'XLK', 'XLF', 'XLE', 'XLV', 'XLY', 'XLP', 'XLI', 'XLU', 'XLB', 'XLC', 'XLRE', 'TLT', 'SGOV'];
+STRAT_SYMS.filings = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'META', 'AVGO', 'TSLA', 'JPM', 'V', 'LLY', 'COST', 'NFLX', 'WMT', 'XOM', 'AMD', 'ORCL', 'CRM', 'ADBE', 'UNH', 'HD', 'MA', 'BAC', 'PG', 'SGOV'];
+const testable = st => st && !st.auto && !st.live && !st.hidden;
+// a small chart: a band (or two) and a line, from 0..1 series
+function fanSvg(fan, actual) {
+  const W = 320, H = 150, P = 6, ys = fan.flatMap(f => [f.p5, f.p95]), lo = Math.min(...ys, 0.6), hi = Math.max(...ys);
+  const x = i => P + i / (fan.length - 1) * (W - 2 * P), y = v => H - P - (v - lo) / (hi - lo || 1) * (H - 2 * P);
+  const band = (a, b) => `M${fan.map((f, i) => `${x(i)},${y(f[a])}`).join('L')}L${fan.map((f, i) => `${x(fan.length - 1 - i)},${y(fan[fan.length - 1 - i][b])}`).join('L')}Z`;
+  return `<svg viewBox="0 0 ${W} ${H}" class="fan" preserveAspectRatio="none"><path d="${band('p5', 'p95')}" class="b1"/><path d="${band('p25', 'p75')}" class="b2"/><path d="M${fan.map((f, i) => `${x(i)},${y(f.p50)}`).join('L')}" class="ln"/><line x1="${P}" x2="${W - P}" y1="${y(1)}" y2="${y(1)}" class="zero"/></svg>`;
+}
+function curveSpark(curve, cls0 = '') { if (!curve?.length) return ''; const W = 120, H = 34, v = curve.map(c => c[1]), lo = Math.min(...v), hi = Math.max(...v); return `<svg viewBox="0 0 ${W} ${H}" class="spark ${cls0}" preserveAspectRatio="none"><path d="M${v.map((a, i) => `${(i / (v.length - 1) * W).toFixed(1)},${(H - 2 - (a - lo) / (hi - lo || 1) * (H - 4)).toFixed(1)}`).join('L')}"/></svg>`; }
+async function wfSheet(cfg) {
+  const s = sheet({ title: 'Walk-forward test', tall: true, html: '<div class="sk sk-block" style="height:300px"></div><p class="t-foot center">Tuning on each year and trading the next 3 months, over and over. Up to a minute…</p>' });
+  try {
+    const r = await post('lab/walkforward', cfg); if (s.closed) return;
+    const maxAbs = Math.max(0.01, ...r.windows.map(w => Math.abs(w.ret)));
+    s.html(`<div class="card"><div class="opt-rb"><div><div class="t-foot">${h(r.name)} on data it never saw</div><div class="opt-lvl-n ${r.pass ? 'up' : 'dn'}">${r.pass ? 'Held up' : 'Weak'}</div></div><b class="n ${cls(r.cagr)}" style="font-size:24px;white-space:nowrap">${pctF(r.cagr)}<small class="t-cap">/yr</small></b></div><p class="t-sub" style="margin:8px 0 0">${h(r.verdict)}</p></div>
+      <div class="tiles mt12"><div class="tile"><div class="k">Unseen stretches won</div><div class="v">${r.wins}/${r.windows.length}</div><div class="s">beat ${h(r.bench)} ${r.beat} times</div></div><div class="tile"><div class="k">Kept of its tuned return</div><div class="v">${r.efficiency == null ? '–' : Math.round(r.efficiency * 100) + '%'}</div><div class="s">50%+ is healthy</div></div></div>
+      <div class="tiles mt8"><div class="tile"><div class="k">All unseen stretches</div><div class="v ${cls(r.oos)}">${pctF(r.oos)}</div><div class="s">${r.tunable ? `fixed settings: ${pctF(r.fixedRet)}` : 'no settings to tune'}</div></div><div class="tile"><div class="k">${h(r.bench)} in the same stretches</div><div class="v ${cls(r.benchRet)}">${pctF(r.benchRet)}</div><div class="s">buy and hold</div></div></div>
+      <div class="section-h"><h2>Each stretch</h2></div><div class="group wf-list">${r.windows.map(w => `<div class="cell"><div class="main"><div class="title">${fmtDate(w.from + 'T12:00')} to ${fmtDate(w.to + 'T12:00')}</div><div class="sub">${Object.keys(w.tuned).length ? 'Tuned: ' + h(Object.entries(w.tuned).map(([k, v]) => `${k} ${v}`).join(', ')) : 'Its settings'}${w.benchRet != null ? ` · ${h(r.bench)} ${pct(w.benchRet * 100, 1)}` : ''}</div></div><div class="wf-bar"><i class="${w.ret >= 0 ? 'up' : 'dn'}" style="width:${Math.round(Math.abs(w.ret) / maxAbs * 100)}%"></i></div><b class="n ${cls(w.ret)}">${pct(w.ret * 100, 1)}</b></div>`).join('')}</div>
+      <p class="note">Each time, the settings are picked on the ${r.train} months before (best Sharpe ratio), then traded for the next ${r.test} months they never saw. Stitching only those unseen months together is the most honest test there is: a strategy fitted to the past falls apart here.</p>`);
+  } catch (e) { if (!s.closed) s.html(`<div class="callout warn">${icon('info')}<div>${h(e.message)}</div></div>`); }
+}
+async function mcSheet(cfg) {
+  const s = sheet({ title: 'Monte Carlo', tall: true, html: '<div class="sk sk-block" style="height:300px"></div>' });
+  try {
+    const r = await post('lab/montecarlo', cfg); if (s.closed) return;
+    const cap = r.capital, f = r.final, end = v => money(cap * (1 + v));
+    s.html(`<p class="t-sub">The backtest is one path through history. This reshuffles its real days, in 10-day chunks, into ${r.sims.toLocaleString()} other orders that could have happened, and shows the spread of outcomes over ${r.years.toFixed(1)} years.</p>
+      <div class="card mt12">${fanSvg(r.fan)}<div class="fan-key"><span><i class="b1"></i>9 in 10 paths</span><span><i class="b2"></i>Half of paths</span><span><i class="ln"></i>Middle</span></div></div>
+      <div class="group mt12"><div class="cell"><div class="main"><div class="title">Bad luck (1 in 20)</div><div class="sub">${pctF(r.cagr.p5)} a year</div></div><b class="n ${cls(f.p5)}">${end(f.p5)}</b></div>
+        <div class="cell"><div class="main"><div class="title">Typical</div><div class="sub">${pctF(r.cagr.p50)} a year</div></div><b class="n ${cls(f.p50)}">${end(f.p50)}</b></div>
+        <div class="cell"><div class="main"><div class="title">Good luck (1 in 20)</div><div class="sub">${pctF(r.cagr.p95)} a year</div></div><b class="n ${cls(f.p95)}">${end(f.p95)}</b></div>
+        <div class="cell"><div class="main"><div class="title">What the backtest got</div><div class="sub">the one real path</div></div><b class="n ${cls(r.actual)}">${end(r.actual)}</b></div></div>
+      <div class="tiles mt12"><div class="tile"><div class="k">Chance of losing money</div><div class="v ${r.lossChance > 0.2 ? 'dn' : ''}">${Math.round(r.lossChance * 100)}%</div><div class="s">over the whole period</div></div><div class="tile"><div class="k">Typical worst drop</div><div class="v dn">${pctA(r.dd.p50)}</div><div class="s">${Math.round(r.dd30Chance * 100)}% chance of a 30% drop</div></div></div>
+      <p class="note">Starting from ${money(cap)}. Shuffling keeps each day's real size but not the order, so it shows how much of the result was the luck of timing. It can't invent crashes worse than the ones in the data.</p>`);
+  } catch (e) { if (!s.closed) s.html(`<div class="callout warn">${icon('info')}<div>${h(e.message)}</div></div>`); }
+}
+// ---------- on the bot page ----------
+function decayCard(b) {
+  const d = b.decay; if (!d) return '';
+  if (d.ok) return `<div class="t-foot mt8" style="margin-left:4px">${icon('check')} Checked ${timeAgo(d.ts)}: still doing what its backtest does.</div>`;
+  return `<div class="callout warn mt12">${icon('chart')}<div><b>${d.kind === 'edge' ? 'Strategy decay' : 'Behind its own backtest'}</b><br>${h(d.why)}${b.status === 'paused' ? ' It was paused. Resume it if you still want it running; it won\'t pause for this again for 30 days.' : d.ack ? ' You resumed it.' : ''}</div></div>`;
+}
+function labCard(b) {
+  const st = STRATS?.strategies?.[b.strategy];
+  if (b.strategy === 'hybrid') return `<div class="card mt12">${icon('flask')} <b>Crossbreed</b><div class="t-foot mt8">Child of ${h(STRATS?.strategies?.[b.params.a]?.name || b.params.a)} (${h((b.params.sa || []).join(', '))}) and ${h(STRATS?.strategies?.[b.params.b]?.name || b.params.b)} (${h((b.params.sb || []).join(', '))}), ${b.params.mix}% / ${100 - b.params.mix}%.</div></div>`;
+  if (!testable(st)) return '';
+  return `<div class="section-h"><h2>Lab</h2></div><div class="group">
+    <button class="cell" data-act="botWF"><div class="lead">${icon('layers')}</div><div class="main"><div class="title">Walk-forward test</div><div class="sub">Does it hold up on stretches it was never tuned on?</div></div>${icon('right', 'chev')}</button>
+    <button class="cell" data-act="botMC"><div class="lead">${icon('radar')}</div><div class="main"><div class="title">Monte Carlo</div><div class="sub">The range of outcomes if history came in a different order</div></div>${icon('right', 'chev')}</button>
+    <button class="cell" data-act="go" data-to="breed/${b.id}"><div class="lead">${icon('flask')}</div><div class="main"><div class="title">Crossbreed</div><div class="sub">Mix it with another bot and test the children</div></div>${icon('right', 'chev')}</button>
+    <button class="cell" data-act="botDecay"><div class="lead">${icon('chart')}</div><div class="main"><div class="title">Check for decay</div><div class="sub">${b.decay ? `Last checked ${timeAgo(b.decay.ts)}` : 'Live results vs its backtest, and the strategy\'s last 6 months'}</div></div>${icon('right', 'chev')}</button></div>`;
+}
+{ const tc0 = tuneCard; tuneCard = b => tc0(b) + decayCard(b) + labCard(b); }
+const botCfg = b => ({ strategy: b.strategy, params: b.params, syms: b.syms, years: 5, capital: 10000 });
+ACT.botWF = () => { const p = curBot(); if (p?.d) wfSheet(botCfg(p.d)); };
+ACT.botMC = () => { const p = curBot(); if (p?.d) mcSheet(botCfg(p.d)); };
+ACT.botDecay = async el => { const p = curBot(); if (!p) return; busy(el, true); try { const r = await post(`bots/${p.id}/decay`, {}); toast(r.young ? 'Too new to check' : r.ok ? 'No decay found' : 'Decay found', { sub: r.young ? 'It needs 60 days of live results.' : r.ok ? 'It\'s tracking its backtest.' : r.why }); p.load(); } catch (e) { toastErr(e); } busy(el, false); };
+// ---------- in the strategy lab ----------
+{ const r0 = PAGES.lab.run; PAGES.lab.run = async function (p, btn) { await r0.call(this, p, btn); const t = $('[data-act=labToBot]', p.body); if (t && !$('#lab2-btns', p.body)) t.insertAdjacentHTML('beforebegin', `<div class="btns mt16" id="lab2-btns"><button class="btn btn-quiet" data-act="labWF">${icon('layers')}Walk-forward</button><button class="btn btn-quiet" data-act="labMC">${icon('radar')}Monte Carlo</button></div>`); }; }
+{ const d0 = PAGES.lab.draw; PAGES.lab.draw = function (p) { d0.call(this, p); const c = $('.cmp-cta', p.body); if (c) { c.querySelector('.t-foot').textContent = 'Test them all on your money and weekly deposits, ranked.'; c.insertAdjacentHTML('afterend', `<div class="lab2-cards mt8"><button class="card cmp-cta" data-act="go" data-to="vs"><span class="cmp-cta-ic">${icon('bot')}</span><span><b>Bot vs you</b><span class="t-foot">Your wallet against a strategy given the same money</span></span>${icon('right')}</button><button class="card cmp-cta" data-act="go" data-to="breed"><span class="cmp-cta-ic">${icon('flask')}</span><span><b>Crossbreed</b><span class="t-foot">Mix two bots and test the children</span></span>${icon('right')}</button></div>`); } }; }
+const labCfg = () => ({ strategy: LAB.strategy, params: LAB.params, syms: LAB.syms, years: Math.max(3, LAB.years), capital: LAB.capital });
+ACT.labWF = () => wfSheet(labCfg()); ACT.labMC = () => mcSheet(labCfg());
+// ---------- crossbreeding ----------
+PAGES.breed = {
+  async mount(p, [first]) {
+    p.title('Crossbreed', true); p.body.innerHTML = '<div class="sk sk-block mt16" style="height:300px"></div>';
+    const [bl, s] = await Promise.all([api('bots'), strats()]); p.s = s;
+    p.bots = bl.bots.filter(b => testable(s.strategies[b.strategy])); p.a = +first || p.bots[0]?.id; p.b = p.bots.find(b => b.id !== p.a)?.id;
+    this.draw(p);
+  },
+  draw(p) {
+    const opt = sel => p.bots.map(b => `<option value="${b.id}" ${b.id === sel ? 'selected' : ''}>${h(b.name)} · ${h(p.s.strategies[b.strategy]?.short || b.strategy)}</option>`).join('');
+    p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Crossbreed</h1><p class="t-sub" style="margin:0 2px">Pick two bots. Two of the same strategy make children that mix their settings. Two different strategies make a child that runs both and splits the money.</p>
+      ${p.bots.length < 2 ? `<div class="callout mt16">${icon('bot')}<div>You need two bots with backtestable strategies. Make another one first.</div></div>` : `
+      <label class="field mt16"><span>First parent</span><select id="br-a">${opt(p.a)}</select></label><label class="field"><span>Second parent</span><select id="br-b">${opt(p.b)}</select></label>
+      <button class="btn btn-primary btn-block btn-lg mt12" id="br-go">${icon('flask')}Breed and test</button><div id="br-out"></div>`}`;
+    const go = $('#br-go', p.body); if (!go) return;
+    go.addEventListener('click', async () => {
+      p.a = +$('#br-a', p.body).value; p.b = +$('#br-b', p.body).value; if (p.a === p.b) return toast('Pick two different bots', { kind: 'err' });
+      const out = $('#br-out', p.body); busy(go, true); out.innerHTML = '<div class="sk sk-block mt16" style="height:260px"></div><p class="t-foot center">Testing both parents and their children on 3 years…</p>';
+      try { const r = await post('lab/breed', { a: { bot: p.a }, b: { bot: p.b } }); p.r = r; this.result(p, out); } catch (e) { out.innerHTML = `<div class="callout warn mt16">${icon('info')}<div>${h(e.message)}</div></div>`; }
+      busy(go, false);
+    });
+  },
+  result(p, out) {
+    const r = p.r, row = (x, title, sub, act = '') => `<div class="cell br-row"><div class="main"><div class="title">${title}</div><div class="sub">${sub}</div></div>${curveSpark(x.curve, (x.ret ?? 0) >= 0 ? 'up' : 'dn')}<div class="trail col" style="align-items:flex-end"><b class="n ${cls(x.ret)}">${pctF(x.ret)}</b><span class="t-cap">drop ${pctA(x.maxDD)}</span></div>${act}</div>`;
+    const stat = x => `Sharpe ${x.sharpe?.toFixed(2) ?? '–'} · ${x.trades} trades`;
+    const kidSub = k => r.same ? Object.entries(k.params).filter(([kk, v]) => r.a.params[kk] !== v || r.b.params[kk] !== v).map(([kk, v]) => `${p.s.strategies[k.strategy].params.find(d => d.k === kk)?.label || kk}: ${v}`).slice(0, 3).join(' · ') + ' · ' + stat(k) : `${k.params.mix}% ${h(p.s.strategies[k.params.a].short)}, ${100 - k.params.mix}% ${h(p.s.strategies[k.params.b].short)} · ${stat(k)}`;
+    out.innerHTML = `<div class="callout mt16 ${r.beats ? '' : 'warn'}">${icon('flask')}<div>${h(r.verdict)}</div></div>
+      <div class="section-h"><h2>Parents</h2></div><div class="group">${row(r.a, h(r.a.name), stat(r.a))}${row(r.b, h(r.b.name), stat(r.b))}</div>
+      <div class="section-h"><h2>Children</h2></div><div class="group">${r.kids.map((k, i) => row(k, `Child ${i + 1}`, kidSub(k), `<button class="btn btn-quiet btn-sm" data-kid="${i}">Adopt</button>`)).join('')}</div>
+      <p class="note">Each one tested on the same 3 years with $10,000, the same fees and spreads. Adopting a child makes it a new bot with its own $10,000 wallet, paused so you can look it over first.</p>`;
+    out.querySelectorAll('[data-kid]').forEach(bt => bt.addEventListener('click', async () => {
+      const k = r.kids[+bt.dataset.kid], name = `${r.a.name.split(' ')[0]} × ${r.b.name.split(' ')[0]}`.slice(0, 30);
+      if (!(await confirmBox({ title: 'Adopt this child?', msg: `It becomes a new bot called "${name}" with its own $10,000 wallet. It starts paused.`, ok: 'Adopt' }))) return;
+      try { const nb = await post('bots', { strategy: k.strategy, params: k.params, syms: k.syms, name, start: 10000, paused: true }); toast('Adopted', { sub: name }); Router.go('bot/' + (nb.bot?.id || nb.id)); } catch (e) { toastErr(e); }
+    }));
+  },
+};
+// ---------- bot vs you ----------
+PAGES.vs = {
+  async mount(p) {
+    p.title('Bot vs you', true); p.s = await strats();
+    p.w = store.get('vsW') || App.W; p.k = store.get('vsK') || 'hold';
+    this.draw(p);
+  },
+  unmount(p) { p.chart && p.chart.destroy(); },
+  draw(p) {
+    const ws = (App.S?.wallets || []).filter(w => !w.archived && !w.broker), list = Object.entries(p.s.strategies).filter(([, x]) => testable(x));
+    p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Bot vs you</h1><p class="t-sub" style="margin:0 2px">A strategy gets the same starting money as your wallet, on the same day, plus every deposit and withdrawal you made. Who's ahead?</p>
+      <label class="field mt16"><span>Your wallet</span><select id="vs-w">${ws.map(w => `<option value="${w.id}" ${w.id === p.w ? 'selected' : ''}>${h(w.emoji)} ${h(w.name)}</option>`).join('')}</select></label>
+      <label class="field"><span>Against</span><select id="vs-k">${list.map(([k, x]) => `<option value="${k}" ${k === p.k ? 'selected' : ''}>${h(x.name)}</option>`).join('')}</select></label>
+      <label class="field"><span>It trades</span><input id="vs-syms" value="${h((STRAT_SYMS[p.k] || p.s.universes.megacap.syms).join(', '))}"></label>
+      <button class="btn btn-primary btn-block btn-lg mt12" id="vs-go">${icon('play')}Compare</button><div id="vs-out"></div>`;
+    $('#vs-k', p.body).addEventListener('change', e => { p.k = e.target.value; $('#vs-syms', p.body).value = (STRAT_SYMS[p.k] || p.s.universes.megacap.syms).join(', '); });
+    $('#vs-go', p.body).addEventListener('click', e => this.run(p, e.currentTarget));
+  },
+  async run(p, btn) {
+    p.w = +$('#vs-w', p.body).value; p.k = $('#vs-k', p.body).value; store.set('vsW', p.w); store.set('vsK', p.k);
+    const out = $('#vs-out', p.body); busy(btn, true); out.innerHTML = '<div class="sk sk-block mt16" style="height:260px"></div>';
+    try {
+      const r = await post('lab/vs', { wallet: p.w, strategy: p.k, syms: symList($('#vs-syms', p.body).value) });
+      const t = (k, v, s, c = '') => `<div class="tile"><div class="k">${k}</div><div class="v ${c}">${v}</div><div class="s">${s}</div></div>`;
+      out.innerHTML = `<div class="card mt16 vs-card"><div class="vs-who"><div><span class="t-foot">${h(r.wallet.emoji)} You</span><b class="n">${money(r.you.money)}</b></div><div class="vs-vs">vs</div><div><span class="t-foot">${icon('bot')} ${h(r.name)}</span><b class="n">${money(r.bot.money)}</b></div></div><div class="vs-verdict ${r.lead >= 0 ? 'up' : 'dn'}">${h(r.verdict)}</div></div>
+        <div class="chart-wrap" id="vs-chart"></div><div class="bt-legend"><span><i class="ln"></i>You</span><span><i class="ln dash"></i>The bot</span></div>
+        <div class="tiles mt12">${t('Your return', pctF(r.you.ret), `${r.you.trades} trades`, cls(r.you.ret))}${t('Bot\'s return', pctF(r.bot.ret), `${r.bot.trades} trades`, cls(r.bot.ret))}</div>
+        <div class="tiles mt8">${t('Your worst drop', pctA(r.you.maxDD), 'from a high', 'dn')}${t('Bot\'s worst drop', pctA(r.bot.maxDD), r.bot.holds.length ? 'holds ' + r.bot.holds.slice(0, 3).join(', ') : 'in cash', 'dn')}</div>
+        <p class="note">${h(r.note)} Returns are time-weighted, so deposits don't count as gains.</p>`;
+      if (p.chart) p.chart.destroy();
+      p.chart = new Chart($('#vs-chart', out), { fmtTime: t2 => fmtDate(t2) });
+      p.chart.set({ type: 'line', points: r.you.curve.map(x => [dayTs(x[0]), x[1]]), bench: r.bot.curve.map(x => [dayTs(x[0]), x[1]]), padTop: 18, padX: 10, color: r.lead >= 0 ? 'up' : 'dn' });
+    } catch (e) { out.innerHTML = `<div class="callout warn mt16">${icon('info')}<div>${h(e.message)}</div></div>`; }
+    busy(btn, false);
   },
 };
 
