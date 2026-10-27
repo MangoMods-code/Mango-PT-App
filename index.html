@@ -429,12 +429,12 @@ button.tile:active { transform: scale(.98); }
 .splash-line2 { stroke-dasharray: 22; stroke-dashoffset: 22; animation-delay: 1s; animation-duration: .35s; }
 .splash-word { font-family: var(--font-display); font-weight: 800; font-size: 38px; letter-spacing: -.04em; font-variation-settings: "opsz" 72; background: linear-gradient(120deg, #FFD646, #FFA028 50%, #FA5256); -webkit-background-clip: text; background-clip: text; color: transparent; animation: rise .7s .2s var(--ease-out) both; }
 .splash-status { position: absolute; bottom: calc(var(--safe-b) + 48px); color: var(--mu); font-size: 14px; animation: fade .4s .9s both; }
-#login { position: fixed; inset: 0; z-index: 150; display: grid; place-items: center; padding: calc(var(--safe-t) + 20px) 20px calc(var(--safe-b) + 20px); background: radial-gradient(120% 70% at 50% -10%, color-mix(in srgb, var(--ac) 22%, transparent), transparent 60%), var(--bg); overflow-y: auto; }
+#login, #signup { position: fixed; inset: 0; z-index: 150; display: grid; place-items: center; padding: calc(var(--safe-t) + 20px) 20px calc(var(--safe-b) + 20px); background: radial-gradient(120% 70% at 50% -10%, color-mix(in srgb, var(--ac) 22%, transparent), transparent 60%), var(--bg); overflow-y: auto; }
 .login-card { width: 100%; max-width: 380px; animation: rise .6s var(--ease-out) both; }
 .login-logo { width: 76px; height: 76px; margin: 0 auto 16px; }
 .login-title { text-align: center; font-family: var(--font-display); font-weight: 750; font-size: 32px; letter-spacing: -.03em; margin: 0; font-variation-settings: "opsz" 60; }
 .login-sub { text-align: center; color: var(--mu); margin: 8px auto 12px; max-width: 290px; font-size: 15px; }
-#login .btn { width: 100%; margin-top: 22px; }
+#login .btn, #signup .btn { width: 100%; margin-top: 22px; }
 .login-err { min-height: 22px; text-align: center; color: var(--dn); font-weight: 600; font-size: 14.5px; margin: 12px 0 0; }
 
 #netbar { position: fixed; left: 50%; top: calc(var(--safe-t) + 8px); transform: translateX(-50%); z-index: 90; height: 32px; padding: 0 14px; border-radius: 16px; background: var(--card3); color: var(--tx); font-size: 13.5px; font-weight: 650; display: flex; align-items: center; gap: 8px; box-shadow: var(--shadow-sm); }
@@ -1444,6 +1444,35 @@ html[data-standby] #halt-bar { bottom: calc(var(--nav-h, 64px) + env(safe-area-i
 [data-hqt=underwater] .hq-bub { background: #E6FBFF; box-shadow: 0 0 0 1.5px rgba(63,224,208,.7), 0 6px 18px rgba(0,30,60,.4); }
 [data-hqt=mars] .hq-bub { background: #FFF1E6; box-shadow: 0 0 0 1.5px rgba(255,122,61,.6), 0 6px 18px rgba(60,20,10,.35); }
 
+/* ---------- accounts and the friends league ---------- */
+#signup { overflow-y: auto; align-items: start; }
+#signup .login-card { margin: auto 0; padding: 12px 0 24px; }
+#signup .login-logo { width: 60px; height: 60px; margin-bottom: 12px; }
+#signup .field { margin-top: 12px; }
+.login-alt { text-align: center; font-size: 14.5px; color: var(--mu); margin: 14px 0 0; }
+.login-alt .link { font-weight: 650; }
+.login-fine { font-size: 13px; color: var(--mu); margin: 10px 2px 0; }
+.login-inv { text-align: center; font-size: 14px; font-weight: 600; color: var(--ac); background: color-mix(in srgb, var(--ac) 12%, transparent); border-radius: var(--r-md, 12px); padding: 10px 12px; margin: 4px 0 6px; }
+.acct-hero { display: flex; align-items: center; gap: 14px; margin: 8px 2px 4px; }
+.acct-em { width: 60px; height: 60px; border-radius: 50%; display: grid; place-items: center; font-size: 32px; background: var(--card2); flex: none; }
+.lg-row { gap: 10px; }
+.lg-row.me { background: color-mix(in srgb, var(--ac) 9%, transparent); }
+.lg-row[disabled] { opacity: 1; cursor: default; }
+.lg-rank { width: 28px; text-align: center; font-family: var(--font-num); font-weight: 750; font-size: 17px; color: var(--mu); flex: none; }
+.lg-em { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; font-size: 20px; background: var(--card2); flex: none; }
+.lg-ret { font-family: var(--font-num); font-weight: 750; font-size: 17px; letter-spacing: -.01em; }
+.lg-me { text-align: center; padding-top: 20px; }
+.lg-me-k { font-weight: 650; color: var(--mu); }
+.lg-me-v { font-family: var(--font-num); font-weight: 800; font-size: 44px; letter-spacing: -.03em; margin-top: 2px; }
+.lg-rules { margin: 0; padding-left: 18px; color: var(--tx2, var(--mu)); font-size: 14.5px; line-height: 1.5; }
+.lg-rules li + li { margin-top: 6px; }
+.lg-card { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; margin-bottom: 14px; }
+.lg-card .grow { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.lg-card-ic { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: color-mix(in srgb, var(--ac) 16%, transparent); color: var(--ac); flex: none; }
+.lg-card-ic svg { width: 22px; height: 22px; }
+.lg-card .grow { flex: 1; }
+.lg-card .chev { width: 18px; height: 18px; flex: none; color: var(--mu); }
+
 /* ---------- motion ---------- */
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--up) 55%, transparent); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
@@ -1526,6 +1555,24 @@ html[data-standby] #halt-bar { bottom: calc(var(--nav-h, 64px) + env(safe-area-i
     <label class="field"><span>Password</span><div class="field-row"><input id="login-p" name="password" type="password" autocomplete="current-password" required><button type="button" class="field-eye" id="login-eye" aria-label="Show password"></button></div></label>
     <button class="btn btn-primary btn-lg" id="login-go" type="submit">Log in</button>
     <p class="login-err" id="login-err" role="alert"></p>
+    <p class="login-alt hidden" id="login-alt">New here? <button type="button" class="link" id="go-signup">Make an account</button></p>
+  </div>
+</form>
+
+<form id="signup" class="hidden" autocomplete="on" novalidate>
+  <div class="login-card">
+    <svg viewBox="0 0 120 120" class="login-logo" aria-hidden="true"><use href="#mango-mark"/></svg>
+    <h1 class="login-title">Make an account</h1>
+    <p class="login-sub">You start with $10,000 of practice money. Trade on your own, or join the monthly league with friends.</p>
+    <p class="login-inv hidden" id="su-inv">You have an invite. It's used as soon as your account is made.</p>
+    <label class="field"><span>Your name</span><input id="su-n" name="name" autocomplete="given-name" maxlength="24" placeholder="What friends see in the league"></label>
+    <label class="field"><span>Username</span><input id="su-u" name="username" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="20" placeholder="3 to 20 letters, numbers or _"></label>
+    <label class="field"><span>Password</span><div class="field-row"><input id="su-p" name="password" type="password" autocomplete="new-password" placeholder="At least 8 characters"><button type="button" class="field-eye" id="su-eye" aria-label="Show password"></button></div></label>
+    <label class="field"><span>Date of birth</span><input id="su-d" name="bday" type="date" autocomplete="bday"></label>
+    <p class="login-fine">You need to be 13 or older. Your date of birth isn't shown to other players.</p>
+    <button class="btn btn-primary btn-lg" id="su-go" type="submit">Make account</button>
+    <p class="login-err" id="su-err" role="alert"></p>
+    <p class="login-alt">Have an account? <button type="button" class="link" id="go-login">Log in</button></p>
   </div>
 </form>
 
@@ -1562,7 +1609,7 @@ html[data-standby] #halt-bar { bottom: calc(var(--nav-h, 64px) + env(safe-area-i
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '4.4.0';
+const BUILD = '__BUILD__', APP_VERSION = '5.0.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1680,6 +1727,9 @@ const ICON_PATHS = {
   swap: '<path d="M7 16V4m0 0L3 8m4-4 4 4M17 8v12m0 0 4-4m-4 4-4-4"/>',
   copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>',
   crown: '<path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5L3 8Z"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/>',
+  users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.3c2.1.7 3.5 2.7 3.5 5.7"/>',
+  trophy: '<path d="M8 4h8v5a4 4 0 0 1-8 0V4Z"/><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M8 21h8M9.5 17h5"/>',
   send: '<path d="M4 12 20 4l-6 16-3-7-7-1Z"/>',
   chat: '<path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H10l-5 4v-4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/>',
   image: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="12" cy="12" r="3.5"/><path d="M8 5l1.5-2h5L16 5"/>',
@@ -4819,12 +4869,14 @@ function hqHero(bots) {
 // Two sides of the app: Paper (the game: practice wallets, bots, games) and Alpaca (a real account,
 // no games, stricter by default). A switch at the top moves between them; each side only shows its own things.
 // ===================================================================
-const isRealSpace = () => store.get('space') === 'real';
+// A friend's account (made on the owner's server) is paper only for now: their tokens start with u<id>.
+const isFriend = () => /^u\d+\./.test(App.T || '');
+const isRealSpace = () => !isFriend() && store.get('space') === 'real';
 const brokerW = () => (App.S?.wallets || []).find(w => w.broker && !w.archived) || null;
 const inSpace = w => isRealSpace() ? !!w.broker : !w.broker;
 const spaceWallets = () => (App.S?.wallets || []).filter(w => !w.archived && inSpace(w));
 const realLive = () => isRealSpace() && brokerW()?.brokerEnv === 'live';
-const spaceSwitch = () => `<div class="space-sw" role="tablist" aria-label="Paper or Alpaca"><button class="${isRealSpace() ? '' : 'on'}" data-act="space" data-sp="paper">${icon('games')}Paper</button><button class="${isRealSpace() ? 'on' : ''}" data-act="space" data-sp="real">${icon('lock')}Alpaca${brokerW()?.brokerEnv === 'live' ? ' <span class="real-badge">LIVE</span>' : ''}</button></div>`;
+const spaceSwitch = () => isFriend() ? '' : `<div class="space-sw" role="tablist" aria-label="Paper or Alpaca"><button class="${isRealSpace() ? '' : 'on'}" data-act="space" data-sp="paper">${icon('games')}Paper</button><button class="${isRealSpace() ? 'on' : ''}" data-act="space" data-sp="real">${icon('lock')}Alpaca${brokerW()?.brokerEnv === 'live' ? ' <span class="real-badge">LIVE</span>' : ''}</button></div>`;
 ACT.space = el => setSpace(el.dataset.sp);
 async function setSpace(sp) {
   if ((sp === 'real') === isRealSpace()) return;
@@ -8452,6 +8504,40 @@ PAGES.costs = {
 // Newest first. Each release: version, date, a one-line headline and grouped notes.
 // ===================================================================
 const CHANGELOG = [
+  { v: '5.0.0', d: '2026-10-27', title: 'Friends and the monthly league', short: [
+    'Friends can make their own free account on your server: their own wallets, bots and history',
+    'Monthly league: everyone starts with $10,000 on the same day, bots allowed, final standings',
+    'Owner controls: accounts, invites, AI limits; Alpaca stays invite-only',
+  ], groups: [
+    ['Accounts for friends', [
+      'Anyone with your app\'s link can tap "Make an account" on the login screen: a name, a username, a password and a date of birth (13 or older). Paper trading, bots, games, research and the lab are all free for them.',
+      'Every account is its own world. It runs as its own process with its own database schema, so one person\'s wallets, bots, alerts and history can\'t be seen or changed by anyone else. Each account is checked on every request and on start-up.',
+      'Friends never get your keys. Alpaca keys, backup tokens and your password stay in your process. Prices and AI go through yours, so friends use your Finnhub and Anthropic keys without seeing them.',
+      'Friends can change their password, log out, export their data and delete their account in Settings → Your account.',
+      'The Alpaca side is hidden for friends. It stays invite-only until you open it to them.',
+    ]],
+    ['The friends league', [
+      'One season per calendar month. Everyone who joins gets a new league wallet with $10,000, so everyone starts on the same day with the same money.',
+      'No deposits, withdrawals, transfers, resets or backup restores in a league wallet, and cash interest doesn\'t apply. Bots are allowed and trade it like you would.',
+      'Joining is open for the first 3 trading days. Standings go by % return and update live. The final standings lock at the last close of the month, everyone gets their result, and the next season starts.',
+      'You\'re entered in the next season automatically unless you switch that off.',
+      'Pick what others see: returns only, returns and holdings (no dollar amounts), or everything (recent trades too). Only the league wallet is ever shown.',
+      'Share a card with your rank and return. Past seasons keep their final standings.',
+      'Find it at the top of Games, or in Settings → Friends league.',
+    ]],
+    ['Owner controls (Settings → Accounts and invites)', [
+      'See every account: when they were last on, whether it\'s awake, memory use, wallets and bots. Open anyone\'s trades.',
+      'Switch an account off or back on, reset a password (you get a temporary one to send), or delete an account and everything in it.',
+      'Make one-time invite links. An invite unlocks the Alpaca side for that person once it opens to friends.',
+      'Turn new sign-ups on or off, set the most accounts allowed, switch AI on or off for friends, and set how many AI requests each person gets a day (30 by default; one person can have their own limit).',
+      'End the league season early to start a fresh one.',
+      'Accounts sleep after an hour without use unless a bot is running, to save memory. Each awake account uses about 60 to 120 MB.',
+    ]],
+    ['Also', [
+      'Backups now never include the account list or league tables, so restoring one can\'t touch other people\'s accounts.',
+      'Your league profile (name, emoji, privacy) is in Settings → Your league profile.',
+    ]],
+  ] },
   { v: '4.4.0', d: '2026-10-27', title: 'Safety and quality of life', short: [
     'Cool-off timer: new buys pause for 30 minutes after 3 losing sales or a 5% down day',
     'Alerts in plain words, and type alerts in plain English',
@@ -9839,6 +9925,283 @@ PAGES.exports = {
 };
 
 // ===================================================================
+// Accounts for friends and the monthly league (V5)
+// Friends make their own account on the owner's server. Each account is its own world: its own wallets,
+// bots and history. The league is the one place accounts meet, and each person picks what others see.
+// ===================================================================
+App.me = store.get('me') || null;
+async function loadMe() { try { App.me = await api('me'); store.set('me', App.me); emit('me'); } catch (e) {} return App.me; }
+const isOwner = () => !isFriend();
+const PRIVACY = {
+  returns: ['Returns only', 'Others see your rank and your % return. Nothing else.'],
+  holdings: ['Returns and holdings', 'Also what you own and how much of the wallet each one is. No dollar amounts, no trades.'],
+  everything: ['Everything', 'Also your recent trades in the league wallet.'],
+};
+
+// ---------- the login screen: make an account, invites ----------
+const inviteFromHash = () => { const m = location.hash.match(/^#\/?invite\/([A-Za-z0-9]{6,20})$/); return m ? m[1].toUpperCase() : null; };
+(function signupSetup() {
+  const inv = inviteFromHash(); if (inv) store.set('invite', inv);
+  const alt = $('#login-alt'), form = $('#signup'); if (!alt || !form) return;
+  const toSignup = () => { $('#login').classList.add('hidden'); form.classList.remove('hidden'); const pend = store.get('invite'); $('#su-inv').classList.toggle('hidden', !pend); setTimeout(() => $('#su-n').focus(), 200); };
+  const toLogin = () => { form.classList.add('hidden'); $('#login').classList.remove('hidden'); setTimeout(() => $('#login-u').focus(), 200); };
+  $('#go-signup').addEventListener('click', toSignup);
+  $('#go-login').addEventListener('click', toLogin);
+  $('#su-eye').innerHTML = icon('eye');
+  $('#su-eye').addEventListener('click', () => { const p = $('#su-p'), on = p.type === 'password'; p.type = on ? 'text' : 'password'; $('#su-eye').innerHTML = icon(on ? 'eyeoff' : 'eye'); });
+  $('#su-u').addEventListener('input', e => { const v = e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''); if (v !== e.target.value) e.target.value = v; });
+  let open = false; const maybe = () => { if (open && store.get('invite') && !App.T && !$('#login').classList.contains('hidden')) toSignup(); };
+  api('hub/info').then(i => { if (i.signups && !i.full) { open = true; alt.classList.remove('hidden'); maybe(); } }).catch(() => {});
+  const show0 = show; show = id => { show0(id); if (id === 'login') { form.classList.add('hidden'); maybe(); } };
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn = $('#su-go'), err = $('#su-err'); err.textContent = '';
+    const name = $('#su-n').value.trim(), username = $('#su-u').value.trim(), password = $('#su-p').value, dob = $('#su-d').value;
+    if (!username || !password || !dob) { err.textContent = 'Fill in a username, a password and your date of birth'; return; }
+    if (password.length < 8) { err.textContent = 'Use at least 8 characters for your password'; return; }
+    busy(btn, true);
+    try {
+      const r = await api('signup', { method: 'POST', body: { name: name || username, username, password, dob } });
+      setToken(r.token); await loadState();
+    } catch (x) {
+      busy(btn, false); err.textContent = x.message;
+      const card = $('.login-card', form); card.classList.remove('shake'); void card.offsetWidth; card.classList.add('shake'); buzz(30);
+      return;
+    }
+    busy(btn, false); form.classList.add('hidden'); $('#su-p').value = '';
+    startApp();
+    toast(`Welcome, ${name || username}`, { sub: 'You have $10,000 of practice money. The league is in Games.' });
+  });
+})();
+// after logging in: load who I am, use a waiting invite
+on('state', () => {
+  if (!App.S) return;
+  if (!App.me || App.me._tok !== App.T?.slice(0, 12) || Date.now() - (App.me._t || 0) > 10 * 60e3) {
+    loadMe().then(m => { if (m) { m._tok = App.T?.slice(0, 12); m._t = Date.now(); store.set('me', m); } });
+  }
+  const inv = store.get('invite');
+  if (inv && isFriend() && !redeemInvite.busy) redeemInvite(inv);
+});
+async function redeemInvite(code) {
+  redeemInvite.busy = true;
+  try { const r = await post('invite/' + code); store.del('invite'); if (r.alpaca) toast('Invite used', { sub: 'The Alpaca side unlocks for you once it opens to friends.' }); await loadMe(); }
+  catch (e) { store.del('invite'); toastErr(e); }
+  redeemInvite.busy = false;
+}
+// a logged-in person opening an invite link
+PAGES.invite = {
+  mount(p, [code]) {
+    p.title('Invite', true);
+    if (isOwner()) { p.body.innerHTML = `<div class="empty"><p>This is your own invite link. Send it to a friend: it works once.</p></div>`; return; }
+    p.body.innerHTML = '<div class="sk sk-block mt16"></div>';
+    post('invite/' + String(code || '').toUpperCase()).then(async () => { store.del('invite'); await loadMe(); p.body.innerHTML = `<div class="empty"><div class="gate-ic">${icon('gift')}</div><h2>You're invited</h2><p>The Alpaca side (a real brokerage account) is invite-only. It unlocks for you here once the owner opens it to friends. Paper trading and the league are already yours.</p></div>`; })
+      .catch(e => { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; });
+  },
+};
+
+// ---------- Settings: the account rows ----------
+function hubRows() {
+  const me = App.me;
+  const acct = rowLink('user', isFriend() ? 'Your account' : 'Your league profile', isFriend() ? 'Name, league privacy, password, delete' : 'Your name and what friends see in the league', 'account', me ? `<span class="trail">${h(me.emoji || '')}</span>` : '');
+  return `<div class="group mt16">${acct}${rowLink('trophy', 'Friends league', 'Monthly season, everyone starts with $10,000', 'league')}${isOwner() ? rowLink('users', 'Accounts and invites', 'Who has an account, invites, AI limits, sign-ups', 'admin') : ''}</div>`;
+}
+PAGES.account = {
+  mount(p) {
+    p.title(isFriend() ? 'Your account' : 'League profile', true);
+    p.draw = () => {
+      const me = App.me; if (!me) { p.body.innerHTML = '<div class="sk sk-block mt16"></div>'; return; }
+      p.body.innerHTML = `<div class="acct-hero"><div class="acct-em">${h(me.emoji)}</div><div><div class="t-title">${h(me.name)}</div><div class="t-foot">@${h(me.username)}${isOwner() ? ' · owner' : ''}</div></div></div>
+        <div class="section-h"><h2>How you show up</h2></div>
+        <div class="card"><label class="field"><span>Name in the league</span><input class="input" id="ac-n" maxlength="24" value="${h(me.name)}"></label>
+          <label class="field"><span>Emoji</span><input class="input" id="ac-e" maxlength="8" value="${h(me.emoji)}" style="width:90px;text-align:center;font-size:22px"></label>
+          <button class="btn btn-quiet mt12" id="ac-save">Save</button></div>
+        <div class="section-h"><h2>What friends see</h2></div>
+        <div class="card">${seg('ac-priv', Object.entries(PRIVACY).map(([k, v]) => [k, v[0].replace('Returns and holdings', 'Holdings')]), me.privacy)}
+          <p class="t-sub" id="ac-priv-d" style="margin:12px 2px 0">${h(PRIVACY[me.privacy]?.[1] || '')}</p>
+          <p class="t-foot" style="margin:8px 2px 0">Only your league wallet is ever shown. Your other wallets, bots and history stay private${isFriend() ? ', though the owner of this server can see all of it' : ''}.</p></div>
+        <div class="group mt16"><div class="cell"><div class="main"><div class="title">Join every new season</div><div class="sub">When a season ends, you're entered in the next one with a fresh $10,000.</div></div>${sw(me.autoleague !== false, 'data-act="acAuto"')}</div></div>
+        ${isFriend() ? `<div class="section-h"><h2>Alpaca</h2></div><div class="card"><p class="t-sub" style="margin:0">${me.alpaca ? "You're invited. The Alpaca side (a real brokerage account) unlocks here once the owner opens it to friends." : 'The Alpaca side (a real brokerage account) is invite-only for now. Everything on the paper side is yours to use.'}</p></div>
+        <div class="group mt16"><button class="cell" data-act="changePass"><div class="lead">${icon('key')}</div><div class="main"><div class="title">Change password</div><div class="sub">Logs out your other devices</div></div>${icon('right', 'chev')}</button>
+          <button class="cell" data-act="acDelete"><div class="lead" style="color:var(--dn)">${icon('trash')}</div><div class="main"><div class="title" style="color:var(--dn)">Delete my account</div><div class="sub">Removes your wallets, bots and history for good</div></div></button></div>` : ''}`;
+      onSeg(p.body, 'ac-priv', async v => { try { App.me = await patch('me', { privacy: v }); store.set('me', App.me); $('#ac-priv-d', p.body).textContent = PRIVACY[v][1]; toast('Saved'); } catch (e) { toastErr(e); } });
+      $('#ac-save', p.body).addEventListener('click', async e => { busy(e.currentTarget, true); try { App.me = await patch('me', { name: $('#ac-n', p.body).value, emoji: $('#ac-e', p.body).value }); store.set('me', App.me); toast('Saved'); p.draw(); } catch (x) { toastErr(x); busy(e.currentTarget, false); } });
+      raf(() => placeThumbs(p.body));
+    };
+    p.draw();
+    if (!App.me) loadMe().then(() => p.draw());
+  },
+};
+ACT.acAuto = async el => { const v = !el.classList.contains('on'); el.classList.toggle('on', v); el.setAttribute('aria-checked', v); try { App.me = await patch('me', { autoleague: v }); store.set('me', App.me); } catch (e) { toastErr(e); } };
+ACT.acDelete = () => {
+  const s = sheet({ title: 'Delete your account', html: `<p class="t-sub" style="margin:0 2px 12px">Your wallets, bots, trades, alerts and league results are deleted from the server. This can't be undone. Export first if you want a copy (Settings → Your data).</p>
+    <label class="field"><span>Your password</span><input type="password" class="input" id="del-p" autocomplete="current-password"></label><p class="login-err" id="del-e"></p>`,
+    foot: `<button class="btn btn-danger btn-lg" id="del-go" style="width:100%">Delete my account</button>`,
+    mount: s => $('#del-go', s.footEl).addEventListener('click', async e => {
+      busy(e.currentTarget, true);
+      try { await post('me/delete', { password: $('#del-p', s.body).value }); s.close(); store.del('me'); logout(true); toast('Your account is deleted'); }
+      catch (x) { busy(e.currentTarget, false); $('#del-e', s.body).textContent = x.message; }
+    }) });
+  return s;
+};
+
+// ---------- the league ----------
+const leagueLeft = ms => { const d = Math.max(0, ms - Date.now()), days = Math.floor(d / 864e5); return days >= 2 ? `${days} days left` : days === 1 ? '1 day left' : `${Math.max(1, Math.round(d / 36e5))} hours left`; };
+const medal = r => r === 1 ? '🥇' : r === 2 ? '🥈' : r === 3 ? '🥉' : String(r);
+function standRow(x, act = true) {
+  return `<button class="cell lg-row ${x.me ? 'me' : ''}" ${act ? `data-act="go" data-to="league/m/${x.uid}"` : 'disabled'}><div class="lg-rank">${medal(x.rank)}</div><div class="lg-em">${h(x.emoji)}</div>
+    <div class="main"><div class="title">${h(x.name)}${x.me ? ' <span class="pill">you</span>' : ''}</div><div class="sub">@${h(x.username)}${x.bots ? ` · ${x.bots} bot${x.bots > 1 ? 's' : ''}` : ''}${x.day != null ? ` · today ${pct(x.day * 100, 1)}` : ''}</div></div>
+    <div class="lg-ret ${x.ret >= 0 ? 'up' : 'dn'}">${pct(x.ret * 100, 2)}</div></button>`;
+}
+PAGES.league = {
+  mount(p, [sub, id]) {
+    if (sub === 'm') return this.member(p, +id);
+    if (sub === 's') return this.season(p, +id);
+    p.title('Friends league', true);
+    p.body.innerHTML = '<div class="sk sk-block mt16" style="height:140px"></div><div class="sk sk-block mt12" style="height:260px"></div>';
+    p.load = async () => { try { p.d = await api('league'); this.draw(p); } catch (e) { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; } };
+    p.load(); const t = setInterval(() => { if (Router.top()?.page === p) p.load(); }, 30e3); p.cleanups.push(() => clearInterval(t));
+  },
+  draw(p) {
+    const d = p.d, s = d.season, mine = d.standings.find(x => x.me);
+    let html = `<h1 class="t-display" style="margin:8px 0 2px">${s ? h(s.name) : 'Friends league'}</h1>`;
+    if (!s) html += `<p class="t-sub">The next season starts on the 1st. Everyone starts with $10,000 on the same day.</p>`;
+    else {
+      html += `<p class="t-sub" style="margin:0 2px">${leagueLeft(s.ends)} · ${d.standings.length} player${d.standings.length === 1 ? '' : 's'} · everyone started with ${money(s.start, { dp: 0 })}</p>`;
+      if (d.canJoin) html += `<div class="card mt16 lg-join"><div><b>Join this season</b><p class="t-sub" style="margin:4px 0 0">You get a new league wallet with ${money(s.start, { dp: 0 })}. No deposits, no resets. Bots are allowed. Best % return on ${fmtDate(s.ends)} wins.</p></div><button class="btn btn-primary mt12" data-act="lgJoin" style="width:100%">Join ${h(s.name)}</button><p class="t-foot" style="margin:8px 0 0">Joining is open until ${fmtDate(s.joinUntil)}, so everyone starts together.</p></div>`;
+      else if (!d.joined) html += `<div class="card mt16"><p class="t-sub" style="margin:0">Joining closed after the first 3 trading days. You can play the next season: it starts on the 1st.</p></div>`;
+      if (mine) html += `<div class="card mt16 lg-me"><div class="lg-me-k">You're #${mine.rank} of ${d.standings.length}</div><div class="lg-me-v ${mine.ret >= 0 ? 'up' : 'dn'}">${pct(mine.ret * 100, 2)}</div>
+        <div class="btns mt12"><button class="btn btn-quiet" data-act="lgWallet" data-wid="${d.wid}">${icon("wallet")}League wallet</button><button class="btn btn-quiet" data-act="lgShare">${icon('send')}Share</button></div></div>`;
+      html += `<div class="section-h"><h2>Standings</h2><span class="t-foot">by % return</span></div>`;
+      html += d.standings.length ? `<div class="group">${d.standings.map(x => standRow(x)).join('')}</div>` : `<div class="empty"><p>Nobody has joined yet. Be first.</p></div>`;
+    }
+    html += `<div class="section-h"><h2>Rules</h2></div><div class="card"><ul class="lg-rules"><li>A season is one calendar month. Everyone starts with the same ${money(s?.start || 10000, { dp: 0 })}.</li><li>No deposits, withdrawals, transfers or resets in the league wallet.</li><li>Bots are allowed. They trade the league wallet like you would.</li><li>Joining closes after the first 3 trading days.</li><li>Final standings lock at the last close of the month. Each person picks what others can see: <button class="link" data-act="go" data-to="account">yours</button>.</li></ul></div>`;
+    if (d.past.length) html += `<div class="section-h"><h2>Past seasons</h2></div><div class="group">${d.past.map(x => rowLink('trophy', x.name, 'Final standings', 'league/s/' + x.id)).join('')}</div>`;
+    p.body.innerHTML = html;
+  },
+  async member(p, uid) {
+    p.title('Player', true); p.body.innerHTML = '<div class="sk sk-block mt16" style="height:200px"></div>';
+    try {
+      const m = await api('league/member/' + uid);
+      let html = `<div class="acct-hero"><div class="acct-em">${h(m.emoji)}</div><div><div class="t-title">${h(m.name)}</div><div class="t-foot">@${h(m.username)}</div></div></div>
+        <div class="stats-grid mt16" style="grid-template-columns:repeat(3,1fr)"><div><div class="k">Season</div><div class="v ${m.ret >= 0 ? 'up' : 'dn'}">${pct(m.ret * 100, 2)}</div></div><div><div class="k">Today</div><div class="v ${m.day >= 0 ? 'up' : 'dn'}">${m.day != null ? pct(m.day * 100, 2) : '–'}</div></div><div><div class="k">Bots</div><div class="v">${m.bots ?? 0}</div></div></div>`;
+      if (m.holdings) html += `<div class="section-h"><h2>Holdings</h2><span class="t-foot">share of the wallet</span></div>${m.holdings.length ? `<div class="group">${m.holdings.map(x => `<button class="cell arow" data-act="go" data-to="asset/${h(x.sym)}">${logo(x.sym, 'logo-sm')}<div class="main"><div class="sym">${h(nameOf(x.sym))}</div><div class="sub">${h(x.sym)}</div></div><div class="r"><div class="t-num">${pct0(x.weight * 100, 1)}</div><div class="t-foot ${x.ret >= 0 ? 'up' : 'dn'}">${pct(x.ret * 100, 1)}</div></div></button>`).join('')}</div>` : '<div class="empty"><p>All cash right now.</p></div>'}`;
+      if (m.trades) html += `<div class="section-h"><h2>Recent trades</h2></div>${m.trades.length ? `<div class="group">${m.trades.map(t => `<div class="cell arow">${logo(t.sym, 'logo-sm')}<div class="main"><div class="sym">${t.side === 'buy' ? 'Bought' : 'Sold'} ${h(t.sym)}${t.bot ? ' <span class="pill">bot</span>' : ''}</div><div class="sub">${timeAgo(t.ts)}</div></div><div class="r"><div class="t-num">${money(t.usd)}</div>${t.pnl != null ? `<div class="t-foot ${t.pnl >= 0 ? 'up' : 'dn'}">${money(t.pnl, { sign: true })}</div>` : ''}</div></div>`).join('')}</div>` : '<div class="empty"><p>No trades yet.</p></div>'}`;
+      if (!m.holdings && !m.trades) html += `<p class="note">${h(m.name)} shares returns only.</p>`;
+      else if (!m.trades && uid !== (App.me?.id ?? -1)) html += `<p class="note">${h(m.name)} shares returns and holdings, not trades.</p>`;
+      p.body.innerHTML = html;
+    } catch (e) { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; }
+  },
+  async season(p, id) {
+    p.title('Past season', true); p.body.innerHTML = '<div class="sk sk-block mt16" style="height:260px"></div>';
+    try {
+      const d = await api('league/season/' + id), meId = App.me?.id;
+      p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">${h(d.name)}</h1><p class="t-sub" style="margin:0 2px">Final standings</p>
+        ${d.standings.length ? `<div class="group mt16">${d.standings.map(x => standRow({ ...x, me: x.uid === meId }, false)).join('')}</div>` : '<div class="empty"><p>Nobody played this one.</p></div>'}`;
+    } catch (e) { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; }
+  },
+};
+ACT.lgJoin = async el => { busy(el, true); try { await post('league/join'); toast('You\'re in', { sub: 'Your league wallet has $10,000. Good luck.' }); await loadState(); const p = Router.top()?.page; if (p?.load) p.load(); } catch (e) { busy(el, false); toastErr(e); } };
+ACT.lgWallet = el => { const wid = +el.dataset.wid; if (!wid) return; if (typeof switchWallet === 'function') switchWallet(wid); else { App.W = wid; store.set('wallet', wid); loadState(); } Router.closeAll(); setTab('portfolio'); };
+ACT.lgShare = () => {
+  const p = Router.top()?.page, d = p?.d, mine = d?.standings.find(x => x.me); if (!mine) return;
+  shareSheet(usd => cardCanvas({ kicker: `${d.me.emoji} ${d.me.name} · friends league`, title: d.season.name, big: pct(mine.ret * 100, 1), bigUp: mine.ret >= 0, sub: `#${mine.rank} of ${d.standings.length} · ${leagueLeft(d.season.ends)}`,
+    rows: [['Leader', `${d.standings[0].name} ${pct(d.standings[0].ret * 100, 1)}`], ...(usd ? [['League wallet', money(mine.value)]] : []), ['Started with', money(d.season.start, { dp: 0 })]], foot: 'Paper trading · not real money' }), 'mango-league');
+};
+// a league card at the top of Games
+(function leagueInGames() {
+  const r0 = VIEWS.games.render;
+  VIEWS.games.render = function () {
+    r0.call(this);
+    const body = $('#gm-body', this.el); if (!body || !feature('games')) return;
+    const c = document.createElement('button'); c.className = 'card lg-card'; c.dataset.act = 'go'; c.dataset.to = 'league';
+    const d = leagueInGames.d;
+    const mine = d?.standings?.find(x => x.me);
+    c.innerHTML = `<span class="lg-card-ic">${icon('trophy')}</span><span class="grow"><b>${d?.season ? h(d.season.name) + ' league' : 'Friends league'}</b><span class="t-foot">${!d ? 'Monthly season with friends' : mine ? `You're #${mine.rank} of ${d.standings.length} · ${pct(mine.ret * 100, 1)}` : d.canJoin ? 'Joining is open. Everyone starts with $10,000.' : d.season ? `${d.standings.length} playing · ${leagueLeft(d.season.ends)}` : 'Next season starts on the 1st'}</span></span>${icon('right', 'chev')}`;
+    body.prepend(c);
+    if (!leagueInGames.t || Date.now() - leagueInGames.t > 60e3) { leagueInGames.t = Date.now(); api('league').then(x => { leagueInGames.d = x; if (App.tab === 'games') this.render(); }).catch(() => {}); }
+  };
+})();
+
+// ---------- the owner's controls ----------
+PAGES.admin = {
+  mount(p) {
+    p.title('Accounts', true);
+    if (isFriend()) { p.body.innerHTML = '<div class="empty"><p>Only the owner of this server can open this.</p></div>'; return; }
+    p.body.innerHTML = '<div class="sk sk-block mt16" style="height:300px"></div>';
+    p.load = async () => { try { p.d = await api('admin/users'); this.draw(p); } catch (e) { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; } };
+    p.load();
+  },
+  draw(p) {
+    const d = p.d, st = d.settings, mb = n => n ? Math.round(n / 1048576) + ' MB' : '–';
+    const running = d.users.filter(u => u.running).length;
+    p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Accounts</h1><p class="t-sub" style="margin:0 2px">${d.users.length} friend account${d.users.length === 1 ? '' : 's'} of ${st.maxUsers} · ${running} running now · server memory ${mb(d.mem)}</p>
+      <p class="t-foot" style="margin:6px 2px 0">Each account runs on its own (about 60 to 120 MB each while awake) and sleeps after an hour without use, unless it has a bot running.</p>
+      <div class="section-h"><h2>People</h2></div>
+      ${d.users.length ? `<div class="group">${d.users.map(u => `<button class="cell" data-act="adUser" data-id="${u.id}"><div class="lg-em">${h(u.emoji)}</div><div class="main"><div class="title">${h(u.name)} <span class="t-foot">@${h(u.username)}</span>${u.status !== 'active' ? ' <span class="pill dn">off</span>' : ''}${u.alpaca ? ' <span class="pill">invited</span>' : ''}</div>
+        <div class="sub">${u.lastSeen ? 'seen ' + timeAgo(u.lastSeen) : 'never opened'} · ${u.running ? `awake, ${mb(u.mem)}` : 'asleep'}${u.bots ? ` · ${u.bots} bot${u.bots > 1 ? 's' : ''}` : ''}${u.age != null ? ` · age ${u.age}` : ''}</div></div>${icon('right', 'chev')}</button>`).join('')}</div>` : '<div class="empty"><p>No friend accounts yet. Send someone the link to this app: they can make an account from the login screen.</p></div>'}
+      <div class="section-h"><h2>Invites</h2><button class="link" data-act="adInvite">New invite</button></div>
+      <p class="t-foot" style="margin:-4px 2px 10px">An invite unlocks the Alpaca side for one person when it opens to friends. Anyone can make a paper account without one.</p>
+      ${d.invites.length ? `<div class="group">${d.invites.map(i => `<div class="cell"><div class="lead">${icon('gift')}</div><div class="main"><div class="title t-num">${h(i.code)}</div><div class="sub">${i.usedBy ? `used by @${h(i.usedBy)}` : `not used yet${i.note ? ' · ' + h(i.note) : ''}`} · ${fmtDate(i.created)}</div></div>${i.usedBy ? '' : `<button class="btn btn-quiet btn-sm" data-act="adInvCopy" data-code="${h(i.code)}">${icon('copy')}</button><button class="btn btn-quiet btn-sm" data-act="adInvDel" data-code="${h(i.code)}">${icon('trash')}</button>`}</div>`).join('')}</div>` : ''}
+      <div class="section-h"><h2>Server rules</h2></div>
+      <div class="group"><div class="cell"><div class="main"><div class="title">New accounts</div><div class="sub">Anyone with the link can sign up</div></div>${sw(st.signups, 'data-act="adSet" data-k="signups"')}</div>
+        <div class="cell"><div class="main"><div class="title">AI for friends</div><div class="sub">Analysts, briefs and the plain-English alerts use your Anthropic key</div></div>${sw(st.aiOn, 'data-act="adSet" data-k="aiOn"')}</div>
+        <div class="cell"><div class="main"><div class="title">AI requests per person per day</div><div class="sub">Counts every AI call. Resets at midnight New York time.</div></div><input class="input" style="width:80px;height:40px;text-align:right" inputmode="numeric" data-ad="aiCap" value="${st.aiCap}"></div>
+        <div class="cell"><div class="main"><div class="title">Most accounts allowed</div><div class="sub">Keeps the server's memory in check</div></div><input class="input" style="width:80px;height:40px;text-align:right" inputmode="numeric" data-ad="maxUsers" value="${st.maxUsers}"></div></div>
+      <div class="section-h"><h2>League</h2></div>
+      <div class="group">${rowLink('trophy', 'Open the league', 'Standings for this season', 'league')}<button class="cell" data-act="adRestart"><div class="lead" style="color:var(--dn)">${icon('refresh')}</div><div class="main"><div class="title">End this season now</div><div class="sub">Locks the standings and starts a new season today</div></div></button></div>`;
+    p.body.querySelectorAll('[data-ad]').forEach(i => i.addEventListener('change', async () => { try { await post('admin/settings', { [i.dataset.ad]: num(i.value) }); toast('Saved'); p.load(); } catch (e) { toastErr(e); } }));
+  },
+};
+const adPage = () => { const t = Router.top()?.page; return t?.name === 'admin' ? t : null; };
+ACT.adSet = async el => { const v = !el.classList.contains('on'); el.classList.toggle('on', v); el.setAttribute('aria-checked', v); try { await post('admin/settings', { [el.dataset.k]: v }); toast('Saved'); } catch (e) { toastErr(e); } };
+ACT.adInvite = async () => {
+  try {
+    const r = await post('admin/invites', {}), link = r.link.startsWith('/') || r.link.startsWith('#') ? location.origin + r.link.replace(/^\/?/, '/') : r.link.includes('://') ? r.link : location.origin + '/#/invite/' + r.code;
+    try { await navigator.clipboard.writeText(link); toast('Invite link copied', { sub: 'It works once.' }); } catch (e) { toast('Invite made', { sub: link }); }
+    adPage()?.load();
+  } catch (e) { toastErr(e); }
+};
+ACT.adInvCopy = async el => { const link = location.origin + '/#/invite/' + el.dataset.code; try { await navigator.clipboard.writeText(link); toast('Invite link copied'); } catch (e) { toast(link); } };
+ACT.adInvDel = async el => { try { await del('admin/invites/' + el.dataset.code); adPage()?.load(); } catch (e) { toastErr(e); } };
+ACT.adRestart = async () => {
+  if (!(await confirmBox({ title: 'End this season now?', msg: 'The standings lock as they are, everyone gets their result, and a new season starts today with $10,000 each.', ok: 'End season', danger: true }))) return;
+  try { await post('admin/league/restart'); toast('New season started'); leagueInGames.t = 0; adPage()?.load(); } catch (e) { toastErr(e); }
+};
+ACT.adUser = el => {
+  const pg = adPage(), u = pg?.d.users.find(x => x.id === +el.dataset.id); if (!u) return;
+  const s = sheet({ title: `${u.emoji} ${u.name}`, html: `<p class="t-sub" style="margin:0 2px 12px">@${h(u.username)} · joined ${fmtDate(u.created)}${u.age != null ? ` · age ${u.age}` : ''} · shares ${h(PRIVACY[u.privacy]?.[0].toLowerCase() || u.privacy)}</p>
+    ${u.wallets ? `<div class="group">${u.wallets.map(w => `<div class="cell"><div class="lead">${h(w.emoji)}</div><div class="main"><div class="title">${h(w.name)}${w.league ? ' <span class="pill">league</span>' : ''}</div></div><div class="r"><div class="t-num">${money(w.value)}</div><div class="t-foot ${w.ret >= 0 ? 'up' : 'dn'}">${pct(w.ret * 100, 1)}</div></div></div>`).join('')}</div>` : '<p class="note">Asleep. Their wallets show here when the account is awake.</p>'}
+    <div class="group mt16"><button class="cell" data-u="trades"><div class="lead">${icon('list')}</div><div class="main"><div class="title">See their trades</div></div>${icon('right', 'chev')}</button>
+      <div class="cell"><div class="main"><div class="title">Alpaca invite</div><div class="sub">Lets them use the Alpaca side once it opens to friends</div></div>${sw(u.alpaca, 'data-u="alpaca"')}</div>
+      <div class="cell"><div class="main"><div class="title">AI requests per day</div><div class="sub">Empty uses the server setting</div></div><input class="input" style="width:80px;height:40px;text-align:right" inputmode="numeric" data-u="aiCap" value="${u.aiCap ?? ''}" placeholder="${pg.d.settings.aiCap}"></div>
+      <button class="cell" data-u="reset"><div class="lead">${icon('key')}</div><div class="main"><div class="title">Reset their password</div><div class="sub">Gives you a temporary one to send them</div></div></button>
+      <button class="cell" data-u="status"><div class="lead">${icon(u.status === 'active' ? 'pause' : 'play')}</div><div class="main"><div class="title">${u.status === 'active' ? 'Switch account off' : 'Switch account back on'}</div><div class="sub">${u.status === 'active' ? 'Logs them out and stops their bots' : 'They can log in again'}</div></div></button>
+      <button class="cell" data-u="delete"><div class="lead" style="color:var(--dn)">${icon('trash')}</div><div class="main"><div class="title" style="color:var(--dn)">Delete account</div><div class="sub">Removes everything of theirs for good</div></div></button></div>` });
+  const upd = async b => { try { const r = await patch('admin/users/' + u.id, b); pg.load(); return r; } catch (e) { toastErr(e); } };
+  s.body.addEventListener('click', async e => {
+    const b = e.target.closest('[data-u]'); if (!b) return; const k = b.dataset.u;
+    if (k === 'alpaca') { const v = !b.classList.contains('on'); b.classList.toggle('on', v); await upd({ alpaca: v }); }
+    if (k === 'trades') { s.close(); adTrades(u); }
+    if (k === 'reset' && await confirmBox({ title: `Reset @${u.username}'s password?`, msg: 'They get logged out everywhere. You get a temporary password to send them.', ok: 'Reset' })) { const r = await upd({ resetPassword: true }); if (r?.tempPassword) sheet({ title: 'Temporary password', html: `<p class="t-sub" style="margin:0 2px 12px">Send this to @${h(u.username)}. They can change it in Settings → Your account.</p><div class="card center t-num" style="font-size:24px;user-select:all">${h(r.tempPassword)}</div>` }); }
+    if (k === 'status') { await upd({ status: u.status === 'active' ? 'disabled' : 'active' }); s.close(); }
+    if (k === 'delete') {
+      s.close();
+      const d = sheet({ title: `Delete @${u.username}?`, html: `<p class="t-sub" style="margin:0 2px 12px">Their wallets, bots, trades and league results are deleted from the server. This can't be undone.</p><label class="field"><span>Type ${h(u.username)} to confirm</span><input class="input" id="adx" autocapitalize="off"></label><p class="login-err" id="adx-e"></p>`,
+        foot: `<button class="btn btn-danger btn-lg" id="adx-go" style="width:100%">Delete account</button>`,
+        mount: d => $('#adx-go', d.footEl).addEventListener('click', async ev => { busy(ev.currentTarget, true); try { await api('admin/users/' + u.id, { method: 'DELETE', body: { confirm: $('#adx', d.body).value.trim() } }); d.close(); toast('Account deleted'); pg.load(); } catch (x) { busy(ev.currentTarget, false); $('#adx-e', d.body).textContent = x.message; } }) });
+    }
+  });
+  s.body.querySelector('[data-u="aiCap"]').addEventListener('change', e => upd({ aiCap: e.target.value === '' ? null : num(e.target.value) }));
+};
+async function adTrades(u) {
+  const s = sheet({ title: `@${u.username}'s trades`, html: '<div class="sk sk-block"></div>' });
+  try {
+    const r = await api(`admin/users/${u.id}/trades`), list = (r.trades || []).filter(t => t.side === 'buy' || t.side === 'sell');
+    s.html(list.length ? `<div class="group">${list.slice(0, 150).map(t => `<div class="cell arow">${logo(t.sym, 'logo-sm')}<div class="main"><div class="sym">${t.side === 'buy' ? 'Bought' : 'Sold'} ${h(t.sym)}</div><div class="sub">${h(t.wallet)} · ${timeAgo(t.ts)}</div></div><div class="r"><div class="t-num">${money(t.qty * t.price)}</div>${t.pnl != null ? `<div class="t-foot ${t.pnl >= 0 ? 'up' : 'dn'}">${money(t.pnl, { sign: true })}</div>` : ''}</div></div>`).join('')}</div>` : '<div class="empty"><p>No trades yet.</p></div>');
+  } catch (e) { s.html(`<div class="empty"><p>${h(e.message)}</p></div>`); }
+}
+
+// ===================================================================
 // Settings
 // ===================================================================
 function applyLook(s) {
@@ -9888,11 +10251,11 @@ PAGES.settings = {
     const S = App.S;
     return `<div class="set-hero"><svg viewBox="0 0 120 120" class="av"><use href="#mango-mark"/></svg><div><div class="t-title">Mango <span class="set-ver">v${h(APP_VERSION)}</span></div><div class="t-foot">Logged in as ${h(S.user || 'you')} · ${(S.wallets || []).filter(w => !w.archived).length} wallet${(S.wallets || []).length === 1 ? '' : 's'}</div></div></div>
       <div class="group mt16">${rowLink('sparkle', 'What\'s new', `v${APP_VERSION}: ${(CHANGELOG.find(r => r.v === APP_VERSION) || CHANGELOG[0]).title}`, 'whatsnew')}</div>
-      ${standbyCard()}${panicCard()}${marketRulesCard()}${guardsCard()}${promoCard()}${briefsCard()}${widgetCard()}${opsCard()}${councilCard()}${nightCard()}${analystCard()}
-      <div class="group mt16">${Object.entries(SECTIONS).map(([k, v]) => rowLink(v.icon, v.title, v.sub, 'settings/' + k)).join('')}</div>
+      ${isFriend() ? '' : standbyCard() + panicCard()}${marketRulesCard()}${guardsCard()}${promoCard()}${briefsCard()}${widgetCard()}${isFriend() ? '' : opsCard()}${councilCard()}${nightCard()}${analystCard()}
+      ${hubRows()}<div class="group mt16">${Object.entries(SECTIONS).filter(([k]) => !(isFriend() && k === 'broker')).map(([k, v]) => rowLink(v.icon, v.title, v.sub, 'settings/' + k)).join('')}</div>
       <div class="group mt16">${rowLink('wallet', 'Wallets', 'Create, rename, reset, move cash', 'wallets')}${rowToggle('hideBalances', 'Hide balances', 'Blur dollar amounts. Press and hold to peek.')}</div>
       <div class="group mt16">${profileRow()}${rowLink('lock', 'Face ID and backups', 'Log in with Face ID, protect real money, save your data', 'security')}</div>
-      <div class="group mt16"><button class="cell" data-act="changePass"><div class="lead">${icon('key')}</div><div class="main"><div class="title">Change password</div></div>${icon('right', 'chev')}</button><button class="cell" data-act="logout"><div class="lead">${icon('logout')}</div><div class="main"><div class="title">Log out of this device</div></div></button><button class="cell" data-act="logoutAll"><div class="lead" style="color:var(--dn)">${icon('lock')}</div><div class="main"><div class="title">Log out everywhere</div><div class="sub">Signs out every phone and computer</div></div></button></div>
+      <div class="group mt16"><button class="cell" data-act="changePass"><div class="lead">${icon('key')}</div><div class="main"><div class="title">Change password</div></div>${icon('right', 'chev')}</button><button class="cell" data-act="logout"><div class="lead">${icon('logout')}</div><div class="main"><div class="title">Log out of this device</div></div></button>${isFriend() ? '' : `<button class="cell" data-act="logoutAll"><div class="lead" style="color:var(--dn)">${icon('lock')}</div><div class="main"><div class="title">Log out everywhere</div><div class="sub">Signs out every phone and computer</div></div></button>`}</div>
       <p class="note center">Mango v${h(APP_VERSION)} · build ${h(BUILD.slice(0, 7))} · ${S.broker?.on && S.broker.env === 'live' ? 'a live Alpaca account is connected' : 'practice money only'}</p>`;
   },
   trading() {
@@ -10010,14 +10373,15 @@ ACT.backup = async () => {
 ACT.resetWallet = () => resetSheet(App.S.wallets.find(w => w.id === App.W) || W());
 ACT.clearLocal = async () => { const t = App.T, w = App.W; try { Object.keys(localStorage).filter(k => k.startsWith('mango_')).forEach(k => localStorage.removeItem(k)); } catch (e) {} setToken(t); store.set('wallet', w); try { const ks = await caches.keys(); await Promise.all(ks.map(k => caches.delete(k))); } catch (e) {} toast('Cache cleared'); setTimeout(() => location.reload(), 700); };
 ACT.reloadApp = () => location.reload();
-ACT.logout = async () => { if (await confirmBox({ title: 'Log out?', msg: "You'll need your username and password to get back in on this device.", ok: 'Log out' })) logout(); };
+ACT.logout = async () => { if (await confirmBox({ title: 'Log out?', msg: "You'll need your username and password to get back in on this device.", ok: 'Log out' })) { if (isFriend()) await post('me/logout').catch(() => {}); logout(); } };
 ACT.logoutAll = async () => { if (!(await confirmBox({ title: 'Log out everywhere?', msg: 'Every phone and computer gets signed out. This device stays logged in.', ok: 'Log out everywhere', danger: true }))) return; try { const r = await post('logout-all'); setToken(r.token); connect(); toast('Every other device is logged out'); } catch (e) { toastErr(e); } };
 ACT.changePass = () => {
   const s = sheet({ title: 'Change password', html: `<label class="field"><span>Current password</span><input type="password" id="cp-c" autocomplete="current-password"></label><label class="field"><span>New password</span><input type="password" id="cp-n" autocomplete="new-password"></label><label class="field"><span>New password again</span><input type="password" id="cp-n2" autocomplete="new-password"></label><p class="note">This replaces the APP_PASS from Railway. Other devices stay logged in.</p><p class="dn" id="cp-e" style="font-weight:600;min-height:20px"></p>`, foot: `<button class="btn btn-primary btn-lg btn-block" id="cp-go">Change password</button>`,
     mount: s => $('#cp-go', s.footEl).addEventListener('click', async () => {
       const c = $('#cp-c', s.body).value, n = $('#cp-n', s.body).value, n2 = $('#cp-n2', s.body).value, e = $('#cp-e', s.body);
       if (n !== n2) return e.textContent = "The new passwords don't match"; if (n.length < 6) return e.textContent = 'Use at least 6 characters';
-      try { await post('password', { current: c, next: n }); toast('Password changed'); s.close(); } catch (x) { e.textContent = x.message; }
+      if (isFriend() && n.length < 8) return e.textContent = 'Use at least 8 characters';
+      try { if (isFriend()) { const r = await post('me/password', { current: c, next: n }); setToken(r.token); connect(); } else await post('password', { current: c, next: n }); toast('Password changed'); s.close(); } catch (x) { e.textContent = x.message; }
     }) });
   return s;
 };
@@ -10055,11 +10419,11 @@ async function pushBox(el) {
 // ===================================================================
 let started = false;
 function show(id) {
-  for (const x of ['login', 'app']) $('#' + x).classList.toggle('hidden', x !== id);
+  for (const x of ['login', 'signup', 'app']) $('#' + x).classList.toggle('hidden', x !== id);
   const sp = $('#splash'); if (sp && !sp.classList.contains('out')) { sp.classList.add('out'); setTimeout(() => sp.remove(), 700); }
 }
 function logout(silent) {
-  setToken(null); store.del('cache'); App.S = null; started = false;
+  setToken(null); store.del('cache'); store.del('me'); App.me = null; App.S = null; started = false;
   try { App.ws && App.ws.close(); } catch (e) {}
   for (const l of Router.layers.splice(0)) { if (l.page) l.page.el.remove(); if (l.sheet) l.sheet.wrap.remove(); }
   for (const t of TABS) { const v = VIEWS[t]; if (v) v.mounted = false; $('#tab-' + t).innerHTML = ''; }

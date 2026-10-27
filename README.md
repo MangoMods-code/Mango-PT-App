@@ -2,7 +2,7 @@
 
 A paper trading app for iPhone with real market prices. It runs from the Home Screen and is built on Node and Postgres.
 
-**⬇️ [Download the latest version](https://github.com/MangoMods-code/Mango-PT-App/releases/latest)** · Current: [V4.4.0, Safety and quality of life](https://github.com/MangoMods-code/Mango-PT-App/releases/tag/V4.4.0) · [All releases](https://github.com/MangoMods-code/Mango-PT-App/releases)
+**⬇️ [Download the latest version](https://github.com/MangoMods-code/Mango-PT-App/releases/latest)** · Current: [V5.0.0, Friends and the monthly league](https://github.com/MangoMods-code/Mango-PT-App/releases/tag/V5.0.0) · [All releases](https://github.com/MangoMods-code/Mango-PT-App/releases)
 
 Trade stocks, ETFs and crypto with practice money. You can also put strategies to work as bots, let Autopilot run a mix of them, and watch it all happen in **Mango HQ**: a small isometric world where your bots walk around and a Council of up to ten members votes on every trade. If you connect an Alpaca account, the same app can trade it, on paper or with real money, on a separate side with its own safeguards.
 
@@ -80,6 +80,12 @@ Trade stocks, ETFs and crypto with practice money. You can also put strategies t
 - **Home Screen widget** via the Shortcuts app: a secret read-only link (text or JSON) with your balance, today's change and top movers. You can make a new link at any time.
 - New weekly challenges for these tools in Games.
 
+**Friends and the league**
+- Friends can make their own free account from the login screen. Each account has its own wallets, bots and history, runs as its own process and keeps its data in its own database schema.
+- Friends never see your keys. Prices and AI go through your server; Alpaca stays yours (invite-only for friends until you open it).
+- A monthly league: everyone starts with $10,000 on the same day, no deposits, bots allowed, live standings and final results. Each person picks what others see.
+- Owner controls for accounts, invites, sign-ups and per-person AI limits.
+
 **Alpaca (real brokerage)**
 - A separate side of the app for an Alpaca account, paper or live.
 - Safeguards on that side: a kill switch, a daily loss limit, a per-order cap, a real-money cap per bot, and Face ID confirmation for real-money actions.
@@ -129,6 +135,8 @@ It needs **Node 20+** and a **Postgres** database. The database tables are creat
 | `STANDBY_URL` | optional | On the main server: the standby's address, so the main keeps it awake |
 | `MAIN_URL` | optional | On the standby: the main server's address, so the standby watches it and notifies you if it goes down |
 | `PORT` | set by host | The port to listen on |
+
+Friend accounts need no extra variables. Each awake account uses about 60 to 120 MB of memory, and accounts sleep after an hour without use unless a bot is running, so watch your plan's memory if many people join (Settings → Accounts and invites shows it). `HUB_WORKER_LOG=1` adds friends' account logs to the server log.
 
 Keep secrets in your host's variables. Never put them in the code or commit them to the repo.
 

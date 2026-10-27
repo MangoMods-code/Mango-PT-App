@@ -9,6 +9,8 @@ const http = require('http'), crypto = require('crypto'), zlib = require('zlib')
 const WebSocket = require('ws'), { Pool } = require('pg'), webpush = require('web-push');
 
 const ENV = process.env;
+// One process per account: the owner's process is the hub (it also runs the owner's own app); each friend's account runs in its own worker process with its own database schema.
+const WORKER = ENV.MANGO_ROLE === 'worker';
 const FINNHUB_KEY = (ENV.FINNHUB_KEY || '').trim();
 const APP_PASS = ENV.APP_PASS, DATABASE_URL = ENV.DATABASE_URL;
 const PORT = +ENV.PORT || 3000;
@@ -41,6 +43,7 @@ const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = se
 class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
 const fail = (msg, status = 400) => { throw new HttpError(status, msg); };
 const routes = [];
+let preHandler = null; // the hub sends friends' requests on to their own process
 function route(method, pattern, ...handlers) {
   const keys = [];
   const re = new RegExp('^' + pattern.replace(/:(\w+)/g, (_, k) => (keys.push(k), '([^/]+)')) + '/?$');
@@ -89,6 +92,7 @@ const server = http.createServer(async (req, res) => {
   let u; try { u = new URL(req.url, 'http://x'); } catch (e) { return send(req, res, 400, { error: 'Bad URL' }); }
   req.path = u.pathname; req.query = Object.fromEntries(u.searchParams);
   const method = req.method === 'HEAD' ? 'GET' : req.method;
+  if (preHandler) { try { if (await preHandler(req, res, u)) return; } catch (e) { return send(req, res, e.status || 500, { error: e.status ? e.message : 'Something went wrong' }); } }
   const r = routes.find(r => r.method === method && r.re.test(req.path));
   if (!r) {
     if (method === 'GET' && staticHandler && staticHandler(req, res)) return;
@@ -115,9 +119,18 @@ const server = http.createServer(async (req, res) => {
 const pool = new Pool({
   connectionString: DATABASE_URL,
   ssl: /railway\.internal|localhost|127\.0\.0\.1/.test(DATABASE_URL) ? false : { rejectUnauthorized: false },
-  max: 8,
+  max: +ENV.PG_POOL_MAX || 8,
+  ...(ENV.PG_SCHEMA && /^t_\d+$/.test(ENV.PG_SCHEMA) ? { options: `-c search_path=${ENV.PG_SCHEMA}` } : {}),
 });
 pool.on('error', e => warn('database', e.message));
+// A friend's account only ever sees its own schema: every connection is pinned to it before any query runs.
+const PG_SCHEMA = ENV.PG_SCHEMA && /^t_\d+$/.test(ENV.PG_SCHEMA) ? ENV.PG_SCHEMA : null;
+if (WORKER && !PG_SCHEMA) { console.error('A worker needs its own schema'); process.exit(1); }
+if (PG_SCHEMA) {
+  const rawConnect = pool.connect.bind(pool);
+  pool.connect = async () => { const c = await rawConnect(); if (!c._mangoSchema) { await c.query(`set search_path to ${PG_SCHEMA}`); c._mangoSchema = true; } return c; };
+  pool.query = async (text, params) => { const c = await pool.connect(); try { return await c.query(text, params); } finally { c.release(); } };
+}
 const Q = (sql, params) => pool.query(sql, params);
 const rows = async (sql, params) => (await pool.query(sql, params)).rows;
 const row = async (sql, params) => (await pool.query(sql, params)).rows[0];
@@ -317,9 +330,12 @@ const MIGRATIONS = [
   },
   // 10: the daily call
   async c => { await c.query('create table if not exists dcall(d text primary key, pick text not null, made timestamptz not null default now(), close numeric, prev numeric, result text, house text)'); },
+  // 11: league wallets
+  async c => { await c.query('alter table wallets add column if not exists league int'); },
 ];
 
 async function migrate() {
+  if (PG_SCHEMA) { const sp = String((await row('show search_path')).search_path || ''); if (sp.replace(/"/g, '').trim() !== PG_SCHEMA) { console.error('Refusing to start: this account is not pinned to its own schema (' + sp + ')'); process.exit(1); } }
   await Q(BASE_SCHEMA);
   let v = +(await kvGet('schema', '0')) || 0;
   for (let i = v; i < MIGRATIONS.length; i++) {
@@ -518,6 +534,7 @@ const spark = new Map();    // sym -> [[minute, close], ...] for the last 24 hou
 const dirty = new Set();
 const feeds = { crypto: { ok: false, last: 0, err: null }, stocks: { ok: false, last: 0, err: null, ws: 0, polled: 0 } };
 let engineHook = () => {};
+let tickHook = null; const tenantSyms = new Set(); // symbols friends' accounts need
 function tick(sym, p, { prev, src = 'ws', hi, lo, open } = {}) {
   if (!(p > 0) || !Number.isFinite(p)) return;
   let q = prices.get(sym);
@@ -530,6 +547,7 @@ function tick(sym, p, { prev, src = 'ws', hi, lo, open } = {}) {
   if (open > 0) q.open = open;
   sparkPush(sym, p, q.t);
   dirty.add(sym);
+  if (tickHook) tickHook(sym);
   try { engineHook(sym, p, src); } catch (e) { warn('engine', e.message); }
 }
 function sparkPush(sym, p, t) {
@@ -578,7 +596,7 @@ function stockPriority() {
   const now = Date.now(), out = [], seen = new Set();
   const add = s => { if (!seen.has(s) && kindOf(s) === 'stock') { seen.add(s); out.push(s); } };
   [...focus.entries()].filter(([, t]) => now - t < 3 * 60e3).sort((a, b) => b[1] - a[1]).forEach(([s]) => add(s));
-  userSyms.pos.forEach(add); userSyms.orders.forEach(add); userSyms.alerts.forEach(add); add('SPY'); userSyms.watch.forEach(add);
+  userSyms.pos.forEach(add); userSyms.orders.forEach(add); userSyms.alerts.forEach(add); add('SPY'); tenantSyms.forEach(add); userSyms.watch.forEach(add);
   INDEXES.forEach(add); STOCK_DEFAULT.forEach(add); userSyms.extra.forEach(add); [...assets.keys()].forEach(add);
   return out;
 }
@@ -1378,7 +1396,7 @@ const walletJson = w => ({
   id: w.id, name: w.name, emoji: w.emoji, color: w.color, cash: +w.cash, start: +w.start_bal, created: tsMs(w.created), seasonStart: tsMs(w.season_start),
   archived: w.archived, sort: w.sort, profile: w.profile || 'robinhood', acct: w.acct || 'instant', gold: !!w.gold, drip: !!w.drip, lotMethod: w.lot_method || 'fifo',
   cryptoRoute: w.crypto_route || 'mm', marginMax: w.margin_max == null ? null : +w.margin_max, broker: w.broker || null, brokerEnv: w.broker ? (BROKER?.env || null) : null,
-  call: +w.call_amt > 0 ? { amount: +w.call_amt, since: tsMs(w.call_since) } : null, optLevel: +w.opt_level || 0,
+  call: +w.call_amt > 0 ? { amount: +w.call_amt, since: tsMs(w.call_since) } : null, optLevel: +w.opt_level || 0, league: w.league || null,
 });
 async function positions(wid, c = null) {
   const out = ((await (c || pool).query('select * from pos where wid=$1 order by sym', [wid])).rows).map(p => ({ sym: p.sym, qty: +p.qty, avg: +p.avg, since: tsMs(p.since) }));
@@ -2695,6 +2713,7 @@ POST('/api/ira/preview', auth, async req => { const w = await walletRow(await ac
 async function deposit(wid, amount, how = 'bank') {
   const w = await walletRow(wid);
   if (w.broker) fail('Move money in and out with your broker. This wallet mirrors that account.');
+  if (w.league) fail('League wallets can\'t add or take out money during the season: everyone plays with the same $10,000.');
   if (!(amount > 0) || amount > 1e9) fail('Enter a valid amount');
   if (isIra(w)) await checkContribution(pool, w, amount);
   if (!isReal(w) || how === 'practice') {
@@ -2717,6 +2736,7 @@ async function deposit(wid, amount, how = 'bank') {
 async function withdraw(wid, amount, how = 'bank') {
   const w = await walletRow(wid);
   if (w.broker) fail('Move money in and out with your broker. This wallet mirrors that account.');
+  if (w.league) fail('League wallets can\'t add or take out money during the season: everyone plays with the same $10,000.');
   if (!(amount > 0)) fail('Enter a valid amount');
   if (!isReal(w) || how === 'practice') { let cost = null; await tx(async c => { await moveCash(c, wid, -amount, 'withdrawal'); cost = await noteWithdrawal(c, w, amount); }); return { done: true, ira: cost }; }
   const acct = await accountInfo(wid, { w });
@@ -4174,7 +4194,7 @@ async function runBotInner(id, { manual, dry, night }) {
   if (brk && S.realHalt && !dry) fail('Alpaca trading is stopped by the kill switch.');
   if (liveMoney && !m.allowLive) fail('This bot is on a real-money wallet but real-money trading is off for it. Turn it on in its limits.');
   // ---- weekly money in: paper wallets get the deposit, Alpaca bots get a bigger budget (you deposit at Alpaca) ----
-  if (m.addWeekly > 0 && !dry) {
+  if (m.addWeekly > 0 && !dry && !w.league) { // league wallets take no deposits
     const wk = weekOf(etDate());
     if (!state._addWeek) state._addWeek = wk; // the starting money counts as the first week
     else if (state._addWeek !== wk) {
@@ -6414,6 +6434,7 @@ function rateLimit(ip) {
   list.push(now);
 }
 function auth(req) {
+  if (WORKER) { if (!hubAuthOk(req)) fail('Please log in again', 401); req.token = 'hub'; stepCheck(req); return; } // a friend's account: the hub already checked who it is
   const t = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   if (!tokenValid(t)) fail('Please log in again', 401);
   req.token = t;
@@ -6423,6 +6444,8 @@ function auth(req) {
 POST('/api/login', async req => {
   const ip = clientIp(req); rateLimit(ip);
   const { u, p } = req.body || {};
+  if (WORKER) fail('Not found', 404);
+  if (!safeEq(String(u || '').trim().toLowerCase(), APP_USER.toLowerCase())) return friendLogin(req, u, p || '');
   const ok = safeEq(String(u || '').trim().toLowerCase(), APP_USER.toLowerCase()) && await passwordOk(p || '');
   if (!ok) { await sleep(600); fail('That username or password is wrong', 401); }
   tries.delete(ip);
@@ -6498,7 +6521,7 @@ GET('/api/state', auth, async req => {
     feeds: { crypto: { ok: feeds.crypto.ok, last: feeds.crypto.last }, stocks: { ok: feeds.stocks.ok, last: feeds.stocks.last, key: !!FINNHUB_KEY, live: feeds.stocks.ws } },
     push: { key: VAPID_PUB, on: pushOn }, standby: standbyJson(), night: nightJson(), analyst: { key: !!AI_KEY, on: S.aiOn !== false, debate: S.aiDebate !== false, bench: AI_BENCH.map(m => ({ k: m.k, name: m.name, on: S[m.set] !== false })) }, councilNames: await getCouncilNames(),
   };
-  if (tokenExpiry(req.token) - Date.now() < (TOKEN_DAYS - 30) * 864e5) out.token = newToken(); // keeps you logged in while you use the app
+  if (!WORKER && tokenExpiry(req.token) - Date.now() < (TOKEN_DAYS - 30) * 864e5) out.token = newToken(); // keeps you logged in while you use the app
   return out;
 });
 GET('/api/band/:sym', auth, req => { const sym = cleanSym(req.params.sym); const h = haltOf(sym); return { sym, halt: h ? { kind: h.kind, why: h.why, until: h.until } : null, band: isCrypto(sym) || !luldOn() ? null : luldOf(sym) }; });
@@ -6792,6 +6815,7 @@ POST('/api/wallets', auth, async req => {
 });
 PATCH('/api/wallets/:id', auth, async req => {
   const w = await walletRow(+req.params.id), b = req.body;
+  if (w.league && (b.archived === true || (b.profile && b.profile !== w.profile) || (b.acct && b.acct !== w.acct))) fail('A league wallet keeps its rules until the season ends.');
   if (b.archived === true) { const n = +(await row('select count(*) n from wallets where not archived and id<>$1', [w.id])).n; if (!n) fail("You can't archive your only wallet"); }
   await Q('update wallets set name=$1, emoji=$2, color=$3, archived=$4, sort=$5 where id=$6', [
     b.name !== undefined ? (String(b.name).trim().slice(0, 30) || w.name) : w.name, b.emoji !== undefined ? String(b.emoji).slice(0, 8) : w.emoji,
@@ -6814,6 +6838,7 @@ PATCH('/api/wallets/:id', auth, async req => {
 async function resetWallet(wid, start) {
   const w = await walletRow(wid);
   if (w.broker) fail("A broker wallet mirrors your real account, so it can't be reset here.");
+  if (w.league) fail('A league wallet can\'t be reset during the season.');
   const pos = await positions(wid), v = +w.cash + marketValue(pos);
   const tr = await row("select count(*) n, count(*) filter (where side='sell') closed, count(*) filter (where side='sell' and pnl>0) wins from trd where wid=$1 and side in ('buy','sell')", [wid]);
   await tx(async c => {
@@ -6828,14 +6853,18 @@ POST('/api/reset', auth, async req => { const wid = await activeWalletId(req); c
 DEL('/api/wallets/:id', auth, async req => {
   const w = await walletRow(+req.params.id);
   if (+(await row('select count(*) n from wallets where id<>$1', [w.id])).n === 0) fail("You can't delete your only wallet");
+  if (w.league) fail('A league wallet can\'t be deleted during the season.');
   await tx(async c => { for (const t of ['pos', 'ord', 'lim', 'trd', 'snap', 'divpaid', 'seasons', 'lots', 'realized', 'settle', 'xfer', 'splits', 'optpos', 'opttrd']) await c.query(`delete from ${t} where wid=$1`, [w.id]); await c.query('delete from wallets where id=$1', [w.id]); });
   if (w.broker) await Q("delete from kv where k='alpaca_after'");
   if (S.defaultWallet === w.id) await saveSettings({ defaultWallet: (await row('select id from wallets order by archived, sort, id limit 1')).id });
   await loadOrders(); await refreshUserSyms();
 });
 // Money in and out. Deposits don't count as profit: the starting balance moves with them.
+// a backup can't be restored while you're playing a league season (it would rewrite the league wallet)
+async function noLeagueRestore() { if (await row('select 1 from wallets where league is not null limit 1')) fail('You can\'t restore a backup while you\'re in a league season. It would change your league wallet. Try again after the season ends.'); }
 async function moveCash(c, wid, delta, why) {
   const w = (await c.query('select * from wallets where id=$1 for update', [wid])).rows[0]; if (!w) fail('That wallet does not exist', 404);
+  if (w.league) fail('A league wallet takes no deposits, withdrawals or transfers. Everyone plays the season with the same starting money.');
   const next = +w.cash + delta; if (delta < 0 && next < -0.005) fail(`${w.name} only has ${money(+w.cash)} in cash`);
   await c.query('update wallets set cash=$1, start_bal=greatest(start_bal+$2, 1) where id=$3', [delta < 0 ? Math.max(0, next) : next, delta, wid]);
   await c.query("insert into trd(wid,sym,side,qty,price,why) values($1,'','cash',1,$2,$3)", [wid, delta, why]);
@@ -6920,11 +6949,12 @@ GET('/api/export', auth, async (req, res) => {
 POST('/api/import', auth, async req => {
   const b = req.body?.backup; if (!b || b.app !== 'mango' || !b.tables?.wallets?.length) fail('That file is not a Mango backup');
   if (req.body.confirm !== 'RESTORE') fail('Type RESTORE to confirm');
+  await noLeagueRestore();
   await tx(async c => {
     for (const t of BACKUP_TABLES) await c.query(`delete from ${t}`);
     for (const t of BACKUP_TABLES) {
       const list = b.tables[t] || []; if (!list.length) continue;
-      const cols = (await c.query(`select column_name from information_schema.columns where table_name=$1`, [t])).rows.map(r => r.column_name);
+      const cols = (await c.query(`select column_name from information_schema.columns where table_name=$1 and table_schema=current_schema()`, [t])).rows.map(r => r.column_name);
       for (let i = 0; i < list.length; i += 500) {
         const chunk = list.slice(i, i + 500).map(r => Object.fromEntries(Object.entries(r).filter(([k]) => cols.includes(k))));
         const keys = cols.filter(k => chunk.some(r => k in r));
@@ -6934,6 +6964,7 @@ POST('/api/import', auth, async req => {
     for (const t of ['wallets', 'ord', 'lim', 'trd', 'alert', 'seasons', 'preds', 'notifs', 'lots', 'realized', 'settle', 'xfer', 'optpos', 'opttrd']) await c.query(`select setval(pg_get_serial_sequence('${t}','id'), greatest((select coalesce(max(id),1) from ${t}),1))`);
   });
   if (b.settings) await saveSettings(b.settings);
+  await Q('update wallets set league=null where league is not null').catch(() => {});
   lastSnap.clear(); await loadAssets(); await loadOrders(); await loadAlerts(); await refreshUserSyms();
   return { ok: true };
 });
@@ -7390,12 +7421,12 @@ function stepCheck(req) {
 }
 
 // ---------- backups ----------
-const BACKUP_SKIP = new Set(['backups', 'bars', 'prices']); // price data comes back on its own
-async function backupTables() { return (await rows("select table_name t from information_schema.tables where table_schema='public' and table_type='BASE TABLE' order by 1")).map(r => r.t).filter(t => !BACKUP_SKIP.has(t)); }
+const BACKUP_SKIP = new Set(['backups', 'bars', 'prices', 'hub_users', 'hub_tokens', 'hub_invites', 'league_seasons', 'league_members']); // price data comes back on its own; friends' accounts and the league are never in a backup
+async function backupTables() { return (await rows("select table_name t from information_schema.tables where table_schema=current_schema() and table_type='BASE TABLE' order by 1")).map(r => r.t).filter(t => !BACKUP_SKIP.has(t)); }
 async function makeBackup() {
   const out = { app: 'mango', v: 1, made: new Date().toISOString(), schema: +(await kvGet('schema', '0')), tables: {} };
   for (const t of await backupTables()) {
-    const cols = (await rows("select column_name c from information_schema.columns where table_schema='public' and table_name=$1 order by ordinal_position", [t])).map(r => r.c);
+    const cols = (await rows("select column_name c from information_schema.columns where table_schema=current_schema() and table_name=$1 order by ordinal_position", [t])).map(r => r.c);
     const data = (await pool.query(`select * from "${t}"`)).rows;
     out.tables[t] = { cols, rows: data.map(r => cols.map(c => r[c] instanceof Date ? r[c].toISOString() : Buffer.isBuffer(r[c]) ? { $b: r[c].toString('base64') } : r[c])) };
   }
@@ -7419,7 +7450,7 @@ async function restoreBackup(gz) {
     for (const t of tables) if (d.tables[t]) await c.query(`delete from "${t}"`);
     for (const [t, v] of Object.entries(d.tables)) {
       if (!tables.includes(t) || !v.rows.length) continue;
-      const have = new Set((await c.query("select column_name c from information_schema.columns where table_schema='public' and table_name=$1", [t])).rows.map(r => r.c));
+      const have = new Set((await c.query("select column_name c from information_schema.columns where table_schema=current_schema() and table_name=$1", [t])).rows.map(r => r.c));
       const idx = v.cols.map((c, i) => [c, i]).filter(([c]) => have.has(c));
       for (let i = 0; i < v.rows.length; i += 400) {
         const chunk = v.rows.slice(i, i + 400), vals = [], ph = [];
@@ -7449,7 +7480,9 @@ POST('/api/backup/restore', auth, async req => {
   if (b.id) { const d = (await row('select data from backups where id=$1', [+b.id]))?.data; gz = d ? Buffer.from(d, 'base64') : null; }
   else if (b.file) gz = Buffer.from(String(b.file), 'base64');
   if (!gz) fail('Pick a backup to restore');
+  await noLeagueRestore();
   const r = await restoreBackup(gz);
+  await Q('update wallets set league=null where league is not null').catch(() => {});
   broadcast({ t: 'evt', e: 'settings' });
   return r;
 });
@@ -8924,7 +8957,7 @@ async function daily() {
   // interest on cash, once a day
   if (S.cashAPY > 0 && mins >= 5 && (await kvGet('job_interest')) !== today) {
     await kvSet('job_interest', today);
-    for (const w of await rows('select * from wallets where not archived and cash > 0 and broker is null')) {
+    for (const w of await rows('select * from wallets where not archived and cash > 0 and broker is null and league is null')) {
       const amt = round(+w.cash * S.cashAPY / 100 / 365, 4); if (amt < 0.0001) continue;
       await tx(async c => { await c.query('update wallets set cash=cash+$1 where id=$2', [amt, w.id]); await c.query("insert into trd(wid,sym,side,qty,price,why) values($1,'','int',1,$2,'interest')", [w.id, amt]); });
     }
@@ -8967,7 +9000,7 @@ function startJobs() {
   every(60e3, savePriceCache, 'prices');
   every(10e3, resolvePredictions, 'predictions');
   every(30e3, expireOrders, 'expiry');
-  every(1200, pollOneQuote, 'quotes');
+  if (!WORKER) {every(1200, pollOneQuote, 'quotes');}
   every(60e3, daily, 'daily');
   every(30e3, () => { fhSync(); const st = market().state; if (st !== lastMarketState) { lastMarketState = st; broadcast({ t: 'evt', e: 'market', market: market() }); } }, 'market');
   every(5 * 60e3, refreshUserSyms, 'symbols');
@@ -8976,9 +9009,9 @@ function startJobs() {
   every(fast ? 5e3 : 60e3, xferJob, 'transfers');
   every(60e3, marginDaily, 'margin interest');
   every(fast ? 5e3 : 60e3, marginWatch, 'margin');
-  every(fast ? 3000 : 5000, pollExtended, 'extended hours');
+  if (!WORKER) {every(fast ? 3000 : 5000, pollExtended, 'extended hours');}
   every(fast ? 5e3 : 60e3, () => { if (S.f_bots !== false && !standbyPaused()) return botScheduler(); }, 'bots');
-  every(fast ? 5e3 : 10 * 60e3, standbyPing, 'standby keep-awake'); setTimeout(() => standbyPing().catch(() => {}), 20e3);
+  if (!WORKER) {every(fast ? 5e3 : 10 * 60e3, standbyPing, 'standby keep-awake'); setTimeout(() => standbyPing().catch(() => {}), 20e3);}
   every(fast ? 5e3 : 10 * 60e3, backupJob, 'backups');
   every(fast ? 5e3 : 30 * 60e3, settleCouncil, 'council');
   // smarter bots: weekly bench check, one re-tune an hour (each bot about monthly), tournaments scored every 6 hours
@@ -8997,8 +9030,8 @@ function startJobs() {
   every(fast ? 10e3 : 60e3, () => dcallJob(), 'daily call'); // each bot checked about weekly setTimeout(() => { if (!standbyPaused()) warmFunds(); }, fast ? 15e3 : 5 * 60e3); // famous investors' 13F filings
   every(fast ? 10e3 : 30 * 60e3, () => reviewJob(), 'monthly review');
   // safety: offsite backup (nightly), uptime watch between main and standby
-  every(fast ? 10e3 : 10 * 60e3, () => offsiteJob(), 'offsite backup');
-  every(fast ? 5e3 : 3 * 60e3, () => uptimeJob(), 'uptime');
+  if (!WORKER) {every(fast ? 10e3 : 10 * 60e3, () => offsiteJob(), 'offsite backup');}
+  if (!WORKER) {every(fast ? 5e3 : 3 * 60e3, () => uptimeJob(), 'uptime');}
   setTimeout(() => upgradeAllBots().catch(e => warn('upgrade', e.message)), 8e3); // bring every bot up to the latest version of its strategy
   every(3600e3, () => Q("delete from bot_log where ts < now() - interval '2 years'"), 'bot log cleanup');
   every(3600e3, () => Q("delete from settle where settles < now() - interval '7 days'"), 'settlement cleanup');
@@ -9089,7 +9122,7 @@ const ICONS = {};
 const icon = (name, fn) => ICONS[name] || (ICONS[name] = fn());
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD646"/><stop offset=".5" stop-color="#FFA028"/><stop offset="1" stop-color="#FA5256"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="#1E1430"/><ellipse cx="31" cy="36" rx="18" ry="22" transform="rotate(30 31 36)" fill="url(#g)"/><path d="M20 41l6.5-6 5 3.5 9.5-10" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37 28.5h4.5V33" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="45" cy="11.5" rx="9" ry="4.6" transform="rotate(-24 45 11.5)" fill="#3BD68A"/></svg>`;
 let BUILD = 'dev', INDEX = null, INDEX_GZ = null;
-const APP_VERSION = '4.4.0'; // stamped by build.sh from package.json
+const APP_VERSION = '5.0.0'; // stamped by build.sh from package.json
 function loadIndex() {
   const file = path.join(__dirname, 'index.html');
   let html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<!doctype html><title>Mango</title><p>index.html is missing next to server.js.</p>';
@@ -9168,7 +9201,8 @@ staticHandler = (req, res) => {
 server.on('upgrade', (req, sock, head) => {
   let u; try { u = new URL(req.url, 'http://x'); } catch (e) { return sock.destroy(); }
   if (u.pathname !== '/stream') return sock.destroy();
-  if (!tokenValid(u.searchParams.get('t'))) { sock.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); return sock.destroy(); }
+  if (!WORKER && /^u\d+\./.test(u.searchParams.get('t') || '')) { hubUpgrade(req, sock, head, u).catch(() => sock.destroy()); return; } // a friend: their own account's live connection
+  if (WORKER ? !hubAuthOk(req) : !tokenValid(u.searchParams.get('t'))) { sock.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); return sock.destroy(); }
   if (wss.clients.size >= 30) { sock.write('HTTP/1.1 503 Busy\r\n\r\n'); return sock.destroy(); }
   wss.handleUpgrade(req, sock, head, ws => {
     ws.alive = true;
@@ -9200,6 +9234,405 @@ process.on('unhandledRejection', e => warn('unhandled', e && (e.stack || e.messa
   tokenSalt = (await kvGet('token_salt', '')) || '';
   await loadSettings(); await refreshPasskeysOn(); await loadAssets(); await loadPriceCache(); await migrateOptSandbox().catch(e => warn('options sandbox', e.message)); await loadOrders(); await loadMstate(); await loadProfile(); await loadAlerts(); await initPush();
   await refreshUserSyms(); await walletsSummary();
-  server.listen(PORT, () => log(`🥭 Mango is running on port ${PORT} · v${APP_VERSION} (build ${BUILD}) · ${FINNHUB_KEY ? 'stocks on' : 'stocks off (no FINNHUB_KEY)'}${BROKER ? ` · Alpaca ${BROKER.env}` : ''}`));
-  cbConnect(); fhConnect(); if (BROKER) adConnect(); startJobs();
+  server.listen(PORT, WORKER ? '127.0.0.1' : undefined, () => log(`🥭 Mango is running on port ${PORT} · v${APP_VERSION} (build ${BUILD}) · ${FINNHUB_KEY ? 'stocks on' : 'stocks off (no FINNHUB_KEY)'}${BROKER ? ` · Alpaca ${BROKER.env}` : ''}`));
+  if (!WORKER) { cbConnect(); fhConnect(); if (BROKER) adConnect(); } startJobs(); hubStart();
 })().catch(e => { console.error('Mango could not start:', e); process.exit(1); });
+// =====================================================================
+// Accounts for friends, and the friends league
+// =====================================================================
+// The owner's process is the hub. Everyone else who signs up gets their own account that runs in its own
+// worker process, with its own database schema (t_<id>), so nothing about one account can reach another.
+// The hub checks logins, passes each friend's requests to their own process, shares live prices with them,
+// and runs the league. Real-money (Alpaca) keys never leave the hub.
+const cp = require('child_process');
+const HUB_SECRET = WORKER ? String(ENV.HUB_SECRET || '') : crypto.randomBytes(24).toString('hex');
+const hubHash = s => crypto.createHash('sha256').update(String(s)).digest('hex');
+// the hub's own settings (sign-ups, AI limits, the owner's league profile), kept apart from the app settings
+let HS = {};
+async function saveHub(patch) { HS = { ...HS, ...patch }; await kvSet('hub_settings', JSON.stringify(HS)); }
+const MAX_USERS = () => clamp(Math.round(num(HS.hubMaxUsers, 25)), 1, 500);
+
+// ---------------------------------------------------------------- worker side ----------------------------------------------------------------
+if (WORKER) {
+  // requests only come from the hub on this machine, with the hub's secret
+  const ipcCalls = new Map(); let ipcN = 0;
+  const ipc = (msg, timeout = 30e3) => new Promise((resolve, reject) => { const id = ++ipcN; ipcCalls.set(id, { resolve, reject }); process.send({ ...msg, id }); setTimeout(() => { if (ipcCalls.delete(id)) reject(new HttpError(503, 'Stock data is busy right now. Try again shortly.')); }, timeout); });
+  process.on('message', m => {
+    if (!m || typeof m !== 'object') return;
+    if (m.t === 'ticks') for (const x of m.list) { tick(x[0], x[1], { prev: x[2], hi: x[3], lo: x[4], open: x[5], src: x[6] === 'cache' ? 'cache' : 'ws' }); const q = prices.get(x[0]); if (q && x[7] > 0 && x[8] > 0) { q.bid = x[7]; q.ask = x[8]; q.bqT = Date.now(); } }
+    else if (m.t === 'reply') { const c = ipcCalls.get(m.id); if (!c) return; ipcCalls.delete(m.id); m.ok ? c.resolve(m.data) : c.reject(new HttpError(m.status || 502, m.err || 'Data source error')); }
+    else if (m.t === 'status') process.send({ t: 'status', id: m.id, mem: process.memoryUsage().rss, bots: null });
+  });
+  fhApi = (pathq, priority = 1) => FINNHUB_KEY ? ipc({ t: 'fh', pathq, priority }) : Promise.reject(new HttpError(503, 'Stock data is off on this server'));
+  const ru0 = refreshUserSyms;
+  refreshUserSyms = async function () { await ru0(); const list = [...userSyms.pos, ...userSyms.orders, ...userSyms.alerts, ...userSyms.watch].map(s => [s, kindOf(s)]); try { process.send({ t: 'syms', list }); } catch (e) {} };
+  process.on('disconnect', () => process.exit(0)); // the hub went away
+}
+function hubAuthOk(req) { return WORKER && HUB_SECRET.length >= 32 && safeEq(String(req.headers['x-mango-hub'] || ''), HUB_SECRET); }
+const hubOnly = req => { if (!hubAuthOk(req)) fail('Not found', 404); };
+// the league side of a friend's own account (the hub asks; nobody else can)
+async function leagueWalletJson(wid, deep) {
+  const w = await row('select * from wallets where id=$1', [wid]); if (!w) return null;
+  const pos = await positions(wid), value = +w.cash + marketValue(pos), d = dayChange(pos);
+  const out = { value, start: +w.start_bal, ret: value / +w.start_bal - 1, day: d.pct, bots: +(await row("select count(*) n from bots where wid=$1 and status='running'", [wid])).n, positions: pos.length };
+  if (deep) {
+    out.holdings = pos.map(p => { const px = priceOf(p.sym) || p.avg; return { sym: p.sym, weight: p.qty * px / value, ret: px / p.avg - 1 }; }).sort((a, b) => b.weight - a.weight);
+    out.trades = (await rows("select ts, sym, side, qty, price, pnl, why from trd where wid=$1 and side in ('buy','sell') order by id desc limit 30", [wid])).map(t => ({ ts: tsMs(t.ts), sym: t.sym, side: t.side, usd: +t.qty * +t.price, pnl: t.pnl == null ? null : +t.pnl, bot: t.why === 'bot' || /bot/.test(t.why || '') }));
+  }
+  return out;
+}
+async function leagueJoinLocal({ season, name, start }) {
+  const ex = await row('select id from wallets where league=$1', [season]); if (ex) return { wid: ex.id };
+  const w = await row(`insert into wallets(name,emoji,color,cash,start_bal,sort,profile,acct,league) values($1,'🏆','mango',$2,$2,(select coalesce(max(sort),0)+1 from wallets),'robinhood','instant',$3) returning *`, [String(name).slice(0, 30), start, season]);
+  await loadWalletMeta(); await snapshot(w.id).catch(() => {});
+  return { wid: w.id };
+}
+async function leagueEndLocal(season) { await Q('update wallets set league=null, name=left(name, 22) || \' (final)\' where league=$1', [season]); await loadWalletMeta(); }
+GET('/internal/league/wallet', async req => { hubOnly(req); return (await leagueWalletJson(+req.query.wid, req.query.deep === '1')) || { gone: true }; });
+POST('/internal/league/join', async req => { hubOnly(req); return leagueJoinLocal(req.body || {}); });
+POST('/internal/league/end', async req => { hubOnly(req); await leagueEndLocal(+req.body.season); return { ok: true }; });
+POST('/internal/notify', async req => { hubOnly(req); await notify(req.body.kind || 'game', String(req.body.title || '').slice(0, 120), String(req.body.body || '').slice(0, 600), { url: req.body.url || '/#/league' }); return { ok: true }; });
+POST('/internal/profile', async req => { hubOnly(req); PROFILE = { ...(PROFILE || {}), dob: req.body.dob, set: true }; await kvSet('profile', JSON.stringify(PROFILE)); return { ok: true }; });
+GET('/internal/trades', async req => { hubOnly(req); return (await rows('select t.*, w.name wn from trd t join wallets w on w.id=t.wid order by t.id desc limit 300')).map(t => ({ ...tradeJson(t), wallet: t.wn })); });
+GET('/internal/summary', async req => { hubOnly(req); const ws = await walletsSummary(); return { wallets: ws.filter(w => !w.archived).map(w => ({ id: w.id, name: w.name, emoji: w.emoji, value: w.value, ret: w.ret, league: w.league || null })), bots: +(await row("select count(*) n from bots where status='running'")).n, mem: process.memoryUsage().rss }; });
+
+// ---------------------------------------------------------------- hub side ----------------------------------------------------------------
+const USERS = new Map(); // id -> user row
+const WORKERS = new Map(); // id -> { proc, port, ready, readyP, last, aiToken }
+const TOKCACHE = new Map(); // token hash -> { uid, t }
+async function hubInit() {
+  try { HS = JSON.parse(await kvGet('hub_settings', '{}')) || {}; } catch (e) { HS = {}; }
+  await Q(`create table if not exists hub_users(id serial primary key, username text unique not null, name text, emoji text not null default '🙂', pass text not null, dob text not null,
+      created timestamptz not null default now(), last_seen timestamptz, status text not null default 'active', alpaca boolean not null default false, privacy text not null default 'everything', ai_cap int, autoleague boolean not null default true);
+    create table if not exists hub_tokens(hash text primary key, uid int not null, created timestamptz not null default now(), expires timestamptz not null);
+    create table if not exists hub_invites(code text primary key, kind text not null default 'alpaca', note text, created timestamptz not null default now(), used_by int, used_at timestamptz);
+    create table if not exists league_seasons(id serial primary key, name text not null, starts timestamptz not null, ends timestamptz not null, start_bal numeric not null default 10000, status text not null default 'open', join_until timestamptz not null);
+    create table if not exists league_members(season int not null, uid int not null, wid int not null, joined timestamptz not null default now(), final_value numeric, final_ret numeric, rank int, primary key(season, uid));
+    alter table wallets add column if not exists league int;`);
+  for (const u of await rows('select * from hub_users')) USERS.set(u.id, u);
+}
+const schemaOf = uid => `t_${+uid}`;
+const passHash = p => { const salt = crypto.randomBytes(12).toString('hex'); return salt + ':' + crypto.scryptSync(String(p), salt, 32).toString('hex'); };
+const passOk = (p, h) => { const [salt, hash] = String(h).split(':'); return !!salt && safeEq(crypto.scryptSync(String(p), salt, 32).toString('hex'), hash); };
+// only what a friend's process needs: never the real-money keys, backups, standby links or the owner's password
+const WORKER_ENV_KEEP = ['DATABASE_URL', 'NODE_ENV', 'TZ', 'MARKET_OVERRIDE', 'MANGO_FAST_JOBS', 'PUBLIC_URL', 'VAPID_EMAIL', 'SEC_CONTACT', 'REDDIT_ID', 'REDDIT_SECRET', 'NODE_OPTIONS', 'PATH', 'HOME', 'PUSH_LOG'];
+function workerEnv(u, port, aiToken) {
+  const e = {}; for (const k of WORKER_ENV_KEEP) if (ENV[k] != null) e[k] = ENV[k];
+  return { ...e, MANGO_ROLE: 'worker', PORT: String(port), PG_SCHEMA: schemaOf(u.id), PG_POOL_MAX: '3', HUB_SECRET, APP_USER: u.username, APP_PASS: crypto.randomBytes(18).toString('hex'), SESSION_SECRET: crypto.randomBytes(24).toString('hex'),
+    FINNHUB_KEY: FINNHUB_KEY ? 'via-hub' : '', ...(AI_KEY ? { ANTHROPIC_API_KEY: aiToken, ANTHROPIC_BASE: `http://127.0.0.1:${PORT}/internal/ai/${u.id}` } : {}) };
+}
+function startWorker(u) {
+  const have = WORKERS.get(u.id); if (have?.proc && !have.dead) return have;
+  const port = PORT + 1000 + u.id * 3, aiToken = crypto.randomBytes(24).toString('hex');
+  const W = { port, ready: false, last: Date.now(), aiToken, dead: false, mem: 0 };
+  W.readyP = new Promise(res => { W.resolveReady = res; });
+  W.proc = cp.fork(process.argv[1], [], { env: workerEnv(u, port, aiToken), execArgv: [...process.execArgv.filter(a => !/max-old-space/.test(a)), '--max-old-space-size=200'], stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+  const tag = `[${u.username}] `;
+  W.proc.stdout.on('data', d => { const s = String(d); if (/is running on port/.test(s)) { W.ready = true; W.resolveReady(); sendTicks(W, [...prices.keys()]); } if (ENV.HUB_WORKER_LOG) process.stdout.write(tag + s); });
+  W.proc.stderr.on('data', d => process.stderr.write(tag + String(d)));
+  W.proc.on('message', m => workerMsg(u.id, W, m));
+  W.proc.on('exit', code => { W.dead = true; W.ready = false; if (WORKERS.get(u.id) === W) WORKERS.delete(u.id); if (code) warn('account', u.username, 'stopped with code', code); });
+  WORKERS.set(u.id, W);
+  return W;
+}
+async function ensureWorker(uid) {
+  const u = USERS.get(uid); if (!u || u.status !== 'active') fail('This account is switched off. Ask the owner.', 403);
+  const W = startWorker(u); W.last = Date.now();
+  if (!W.ready) await Promise.race([W.readyP, sleep(25e3).then(() => fail('Your account is starting up. Try again in a few seconds.', 503))]);
+  return W;
+}
+async function workerMsg(uid, W, m) {
+  if (!m || typeof m !== 'object') return;
+  if (m.t === 'fh') { try { const data = await fhApi(m.pathq, Math.max(2, m.priority || 1)); W.proc.send({ t: 'reply', id: m.id, ok: true, data }); } catch (e) { try { W.proc.send({ t: 'reply', id: m.id, ok: false, status: e.status, err: e.message }); } catch (_) {} } }
+  else if (m.t === 'syms') { W.syms = new Set(); for (const [s, k] of m.list || []) { const c = cleanSym(s); if (!c) continue; W.syms.add(c); if (!assets.has(c)) addAsset(c, k === 'crypto' ? 'crypto' : 'stock'); } tenantSyms.clear(); for (const w of WORKERS.values()) for (const s of w.syms || []) tenantSyms.add(s); cbSync(); fhSync(); }
+  else if (m.t === 'status') { W.mem = m.mem; }
+}
+// live prices: every tick the hub gets goes to every running account, in small batches
+const tickOut = new Set();
+tickHook = WORKER ? null : sym => { if (WORKERS.size) tickOut.add(sym); };
+function sendTicks(W, syms) {
+  const list = []; for (const s of syms) { const q = prices.get(s); if (q?.p > 0) list.push([s, q.p, q.prev || null, q.hi || null, q.lo || null, q.open || null, q.src, q.bid || null, q.ask || null]); }
+  for (let i = 0; i < list.length; i += 400) try { W.proc.send({ t: 'ticks', list: list.slice(i, i + 400) }); } catch (e) {}
+}
+if (!WORKER) setInterval(() => { if (!tickOut.size) return; const syms = [...tickOut]; tickOut.clear(); for (const W of WORKERS.values()) if (W.ready) sendTicks(W, syms); }, 400);
+// accounts nobody has used for a day, with no bots running, are put to sleep and wake on the next visit
+async function idleJob() {
+  for (const [uid, W] of WORKERS) {
+    if (!W.ready || Date.now() - W.last < 24 * 3600e3) continue;
+    const s = await hubFetch(uid, 'GET', '/internal/summary').catch(() => null);
+    if (s && s.bots > 0) continue;
+    try { W.proc.kill('SIGTERM'); } catch (e) {}
+  }
+  for (const W of WORKERS.values()) try { W.proc.send({ t: 'status', id: 0 }); } catch (e) {}
+}
+// one request to an account's own process
+async function hubFetch(uid, method, path, body = null) {
+  const W = await ensureWorker(uid);
+  return new Promise((resolve, reject) => {
+    const data = body ? Buffer.from(JSON.stringify(body)) : null;
+    const r = http.request({ host: '127.0.0.1', port: W.port, method, path, headers: { 'x-mango-hub': HUB_SECRET, 'content-type': 'application/json', ...(data ? { 'content-length': data.length } : {}) } }, res => {
+      const ch = []; res.on('data', c => ch.push(c)); res.on('end', () => { let j = null; try { j = JSON.parse(Buffer.concat(ch).toString()); } catch (e) {} if (res.statusCode >= 400) reject(new HttpError(res.statusCode, j?.error || 'Account error')); else resolve(j); });
+    });
+    r.on('error', e => reject(new HttpError(503, 'That account is restarting. Try again.'))); r.setTimeout(60e3, () => r.destroy());
+    if (data) r.write(data); r.end();
+  });
+}
+// tokens for friends look like "u<id>.<random>"; only a hash is stored
+async function friendOf(token) {
+  const t = String(token || ''); const m = /^u(\d+)\.[a-f0-9]{48}$/.exec(t); if (!m) return null;
+  const hsh = hubHash(t), c = TOKCACHE.get(hsh);
+  if (c && Date.now() - c.t < 60e3) return USERS.get(c.uid) || null;
+  const r = await row('select uid from hub_tokens where hash=$1 and expires > now()', [hsh]); if (!r || r.uid !== +m[1]) { TOKCACHE.delete(hsh); return null; }
+  TOKCACHE.set(hsh, { uid: r.uid, t: Date.now() }); return USERS.get(r.uid) || null;
+}
+async function newFriendToken(uid) { const t = `u${uid}.${crypto.randomBytes(24).toString('hex')}`; await Q("insert into hub_tokens(hash,uid,expires) values($1,$2,now() + interval '180 days')", [hubHash(t), uid]); return t; }
+// friends' requests that the hub answers itself (accounts, the league); everything else goes to their own process
+const HUB_FRIEND = [/^\/api\/me(\/|$)/, /^\/api\/league(\/|$)/, /^\/api\/invite\//];
+async function hubPre(req, res, u) {
+  if (!req.path.startsWith('/api/') || /^\/api\/(login|signup|hub\/info|health)$/.test(req.path)) return false;
+  const tok = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (!/^u\d+\./.test(tok)) return false; // the owner, or nobody: normal routes
+  const f = await friendOf(tok); if (!f) { send(req, res, 401, { error: 'Please log in again' }); return true; }
+  if (f.status !== 'active') { send(req, res, 403, { error: 'This account is switched off. Ask the owner.' }); return true; }
+  req.friend = f;
+  if (!f.last_seen || Date.now() - tsMs(f.last_seen) > 10 * 60e3) { f.last_seen = new Date(); Q('update hub_users set last_seen=now() where id=$1', [f.id]).catch(() => {}); }
+  if (HUB_FRIEND.some(re => re.test(req.path))) return false;
+  if (/^\/api\/(real|broker|alpaca|standby|backup\/offsite|offsite|uptime|password|logout-all|passkey\/login|admin|signup|internal)(\/|$|-)/.test(req.path)) { send(req, res, 403, { error: req.path.startsWith('/api/password') ? 'Change your password in Settings → Account.' : 'That part of Mango is invite-only for now.' }); return true; }
+  const W = await ensureWorker(f.id);
+  await new Promise(resolve => {
+    const headers = { ...req.headers }; delete headers.authorization; delete headers['x-mango-hub']; headers['x-forwarded-host'] = req.headers['x-forwarded-host'] || req.headers.host || ''; delete headers.host; headers['x-mango-hub'] = HUB_SECRET; headers['x-forwarded-for'] = clientIp(req);
+    const pr = http.request({ host: '127.0.0.1', port: W.port, method: req.method, path: u.pathname + u.search, headers }, wr => {
+      const h = { ...wr.headers }; delete h['transfer-encoding']; res.writeHead(wr.statusCode, h); wr.pipe(res); wr.on('end', resolve);
+    });
+    pr.on('error', () => { if (!res.headersSent) send(req, res, 503, { error: 'Your account is restarting. Try again in a moment.' }); resolve(); });
+    pr.setTimeout(120e3, () => pr.destroy());
+    req.pipe(pr);
+  });
+  return true;
+}
+// the live connection: the hub opens one to the friend's process and passes messages both ways
+async function hubUpgrade(req, sock, head, u) {
+  const f = await friendOf(u.searchParams.get('t')); if (!f || f.status !== 'active') { sock.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); return sock.destroy(); }
+  let W; try { W = await ensureWorker(f.id); } catch (e) { sock.write('HTTP/1.1 503 Busy\r\n\r\n'); return sock.destroy(); }
+  wss.handleUpgrade(req, sock, head, client => {
+    client.friend = true; client.alive = true; client.on('pong', () => { client.alive = true; });
+    const up = new WebSocket(`ws://127.0.0.1:${W.port}/stream?t=hub`, { headers: { 'x-mango-hub': HUB_SECRET } }), queue = [];
+    up.on('open', () => { for (const q of queue.splice(0)) up.send(q); });
+    up.on('message', m => { try { client.send(String(m)); } catch (e) {} });
+    up.on('close', () => { try { client.close(); } catch (e) {} }); up.on('error', () => { try { client.close(); } catch (e) {} });
+    client.on('message', m => { if (up.readyState === 1) up.send(String(m)); else queue.push(String(m)); W.last = Date.now(); });
+    client.on('close', () => { try { up.close(); } catch (e) {} });
+  });
+}
+// ---------- signing up, logging in, the account ----------
+const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
+POST('/api/signup', async req => {
+  if (WORKER) fail('Not found', 404);
+  rateLimit(clientIp(req));
+  if (HS.hubSignups === false) fail('New accounts are closed right now. Ask the owner for an invite.');
+  const b = req.body || {}, username = String(b.username || '').trim().toLowerCase(), pass = String(b.password || ''), dob = String(b.dob || '');
+  if (!USERNAME_RE.test(username)) fail('Usernames are 3 to 20 letters, numbers or underscores');
+  if (username === APP_USER.toLowerCase()) fail('That username is taken');
+  if (pass.length < 8) fail('Use at least 8 characters for your password');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dob)) fail('Enter your date of birth');
+  const [y, m, d] = dob.split('-').map(Number), now = new Date(), age = now.getFullYear() - y - ((now.getMonth() + 1 < m || (now.getMonth() + 1 === m && now.getDate() < d)) ? 1 : 0);
+  if (!(age >= 13 && age < 120)) fail('You need to be 13 or older to make an account.');
+  if (USERS.size >= MAX_USERS()) fail('This server is full right now. Ask the owner.');
+  if (await row('select 1 from hub_users where username=$1', [username])) fail('That username is taken');
+  const name = String(b.name || username).trim().slice(0, 24) || username, emoji = String(b.emoji || '🙂').slice(0, 8);
+  const u = await row('insert into hub_users(username,name,emoji,pass,dob) values($1,$2,$3,$4,$5) returning *', [username, name, emoji, passHash(pass), dob]);
+  await Q(`create schema if not exists ${schemaOf(u.id)}`);
+  USERS.set(u.id, u);
+  await ensureWorker(u.id); await hubFetch(u.id, 'POST', '/internal/profile', { dob });
+  await notify('info', `🙂 ${name} joined Mango`, `@${username} made an account on your server.`, { url: '/#/admin' }).catch(() => {});
+  return { token: await newFriendToken(u.id) };
+});
+async function friendLogin(req, username, p) {
+  const u = await row('select * from hub_users where username=$1', [String(username || '').trim().toLowerCase()]);
+  if (!u || !passOk(p, u.pass)) { await sleep(600); fail('That username or password is wrong', 401); }
+  if (u.status !== 'active') fail('This account is switched off. Ask the owner.', 403);
+  tries.delete(clientIp(req)); USERS.set(u.id, u);
+  return { token: await newFriendToken(u.id) };
+}
+GET('/api/hub/info', () => ({ signups: !WORKER && HS.hubSignups !== false, full: USERS.size >= MAX_USERS() }));
+// who am I: the owner or a friend
+async function anyUser(req) {
+  if (req.friend) return;
+  const t = (req.headers.authorization || '').replace(/^Bearer\s+/i, ''); if (!tokenValid(t)) fail('Please log in again', 401);
+  req.owner = true;
+}
+const meJson = u => u ? { role: 'friend', id: u.id, username: u.username, name: u.name, emoji: u.emoji, privacy: u.privacy, alpaca: !!u.alpaca, autoleague: u.autoleague }
+  : { role: 'owner', id: 0, username: APP_USER, name: HS.hubOwnerName || APP_USER, emoji: HS.hubOwnerEmoji || '🥭', privacy: HS.hubOwnerPrivacy || 'everything', alpaca: true, autoleague: HS.hubOwnerAuto !== false };
+GET('/api/me', anyUser, async req => meJson(req.friend));
+PATCH('/api/me', anyUser, async req => {
+  const b = req.body || {}, priv = ['returns', 'holdings', 'everything'].includes(b.privacy) ? b.privacy : undefined;
+  const name = b.name != null ? String(b.name).trim().slice(0, 24) : undefined, emoji = b.emoji != null ? String(b.emoji).slice(0, 8) : undefined;
+  if (req.friend) {
+    const u = req.friend;
+    await Q('update hub_users set privacy=coalesce($1,privacy), name=coalesce($2,name), emoji=coalesce($3,emoji), autoleague=coalesce($4,autoleague) where id=$5', [priv || null, name || null, emoji || null, typeof b.autoleague === 'boolean' ? b.autoleague : null, u.id]);
+    USERS.set(u.id, await row('select * from hub_users where id=$1', [u.id])); return meJson(USERS.get(u.id));
+  }
+  await saveHub({ ...(priv ? { hubOwnerPrivacy: priv } : {}), ...(name ? { hubOwnerName: name } : {}), ...(emoji ? { hubOwnerEmoji: emoji } : {}), ...(typeof b.autoleague === 'boolean' ? { hubOwnerAuto: b.autoleague } : {}) });
+  return meJson(null);
+});
+POST('/api/me/password', anyUser, async req => {
+  if (!req.friend) fail('Use Settings → Security to change the owner password.');
+  const u = await row('select * from hub_users where id=$1', [req.friend.id]);
+  if (!passOk(req.body?.current || '', u.pass)) fail('Your current password is wrong');
+  if (String(req.body?.next || '').length < 8) fail('Use at least 8 characters for the new password');
+  await Q('update hub_users set pass=$1 where id=$2', [passHash(req.body.next), u.id]);
+  await Q('delete from hub_tokens where uid=$1', [u.id]); TOKCACHE.clear();
+  return { token: await newFriendToken(u.id) };
+});
+POST('/api/me/logout', anyUser, async req => { if (req.friend) { await Q('delete from hub_tokens where hash=$1', [hubHash((req.headers.authorization || '').replace(/^Bearer\s+/i, ''))]); TOKCACHE.clear(); } return { ok: true }; });
+async function deleteAccount(uid) {
+  const W = WORKERS.get(uid); if (W) { try { W.proc.kill('SIGTERM'); } catch (e) {} WORKERS.delete(uid); await sleep(500); }
+  await Q(`drop schema if exists ${schemaOf(uid)} cascade`);
+  await Q('delete from hub_tokens where uid=$1', [uid]); await Q('delete from league_members where uid=$1', [uid]); await Q('delete from hub_users where id=$1', [uid]);
+  USERS.delete(uid); TOKCACHE.clear();
+}
+POST('/api/me/delete', anyUser, async req => {
+  if (!req.friend) fail('The owner account can\'t be deleted here.');
+  const u = await row('select * from hub_users where id=$1', [req.friend.id]);
+  if (!passOk(req.body?.password || '', u.pass)) fail('That password is wrong');
+  await deleteAccount(u.id); return { ok: true };
+});
+// invites: for now they unlock the Alpaca side (it stays invite-only until it's ready for everyone)
+POST('/api/invite/:code', anyUser, async req => {
+  if (!req.friend) return { ok: true, owner: true };
+  const code = String(req.params.code || '').toUpperCase(), inv = await row('select * from hub_invites where code=$1', [code]);
+  if (!inv || inv.used_by) fail('That invite link has already been used or doesn\'t exist.');
+  await Q('update hub_invites set used_by=$1, used_at=now() where code=$2', [req.friend.id, code]); await Q('update hub_users set alpaca=true where id=$1', [req.friend.id]);
+  USERS.set(req.friend.id, await row('select * from hub_users where id=$1', [req.friend.id]));
+  return { ok: true, alpaca: true };
+});
+
+// ---------- the owner's controls ----------
+GET('/api/admin/users', auth, async () => {
+  const list = [];
+  for (const u of await rows('select * from hub_users order by id')) {
+    const W = WORKERS.get(u.id), s = W?.ready ? await hubFetch(u.id, 'GET', '/internal/summary').catch(() => null) : null;
+    list.push({ id: u.id, username: u.username, name: u.name, emoji: u.emoji, created: tsMs(u.created), lastSeen: tsMs(u.last_seen), status: u.status, alpaca: u.alpaca, privacy: u.privacy, aiCap: u.ai_cap, running: !!W?.ready, mem: s?.mem || W?.mem || null, wallets: s?.wallets || null, bots: s?.bots ?? null, age: ageFrom(u.dob) });
+  }
+  const invites = (await rows('select * from hub_invites order by created desc limit 50')).map(i => ({ code: i.code, note: i.note, created: tsMs(i.created), usedBy: i.used_by ? USERS.get(i.used_by)?.username || i.used_by : null }));
+  return { users: list, invites, settings: { signups: HS.hubSignups !== false, maxUsers: MAX_USERS(), aiCap: HS.hubAiCap ?? 30, aiOn: HS.hubAiOn !== false }, mem: process.memoryUsage().rss };
+});
+const ageFrom = dob => { const [y, m, d] = String(dob).split('-').map(Number), n = new Date(); return n.getFullYear() - y - ((n.getMonth() + 1 < m || (n.getMonth() + 1 === m && n.getDate() < d)) ? 1 : 0); };
+PATCH('/api/admin/users/:id', auth, async req => {
+  const u = USERS.get(+req.params.id); if (!u) fail('No such account', 404); const b = req.body || {};
+  if (b.status && ['active', 'disabled'].includes(b.status)) { await Q('update hub_users set status=$1 where id=$2', [b.status, u.id]); if (b.status === 'disabled') { const W = WORKERS.get(u.id); if (W) try { W.proc.kill('SIGTERM'); } catch (e) {} await Q('delete from hub_tokens where uid=$1', [u.id]); TOKCACHE.clear(); } }
+  if (typeof b.alpaca === 'boolean') await Q('update hub_users set alpaca=$1 where id=$2', [b.alpaca, u.id]);
+  if (b.aiCap !== undefined) await Q('update hub_users set ai_cap=$1 where id=$2', [b.aiCap == null ? null : clamp(Math.round(num(b.aiCap)), 0, 1000), u.id]);
+  let temp = null; if (b.resetPassword) { temp = crypto.randomBytes(5).toString('hex'); await Q('update hub_users set pass=$1 where id=$2', [passHash(temp), u.id]); await Q('delete from hub_tokens where uid=$1', [u.id]); TOKCACHE.clear(); }
+  USERS.set(u.id, await row('select * from hub_users where id=$1', [u.id]));
+  return { ok: true, tempPassword: temp };
+});
+DEL('/api/admin/users/:id', auth, async req => { const u = USERS.get(+req.params.id); if (!u) fail('No such account', 404); if (req.body?.confirm !== u.username) fail(`Type ${u.username} to delete this account`); await deleteAccount(u.id); return { ok: true }; });
+GET('/api/admin/users/:id/trades', auth, async req => { const u = USERS.get(+req.params.id); if (!u) fail('No such account', 404); return { user: u.username, trades: await hubFetch(u.id, 'GET', '/internal/trades') }; });
+POST('/api/admin/invites', auth, async req => { const code = crypto.randomBytes(5).toString('hex').toUpperCase(); await Q('insert into hub_invites(code,note) values($1,$2)', [code, String(req.body?.note || '').slice(0, 80) || null]); return { code, link: `${(ENV.PUBLIC_URL || '').replace(/\/$/, '')}/#/invite/${code}` }; });
+DEL('/api/admin/invites/:code', auth, async req => { await Q('delete from hub_invites where code=$1 and used_by is null', [String(req.params.code).toUpperCase()]); return { ok: true }; });
+POST('/api/admin/settings', auth, async req => { const b = req.body || {}; await saveHub({ ...(typeof b.signups === 'boolean' ? { hubSignups: b.signups } : {}), ...(b.maxUsers ? { hubMaxUsers: clamp(Math.round(num(b.maxUsers)), 1, 500) } : {}), ...(b.aiCap != null ? { hubAiCap: clamp(Math.round(num(b.aiCap)), 0, 1000) } : {}), ...(typeof b.aiOn === 'boolean' ? { hubAiOn: b.aiOn } : {}) }); return { ok: true }; });
+// the AI members for friends: their process never sees the Anthropic key; each account has a daily cap the owner sets
+const aiDay = new Map();
+POST('/internal/ai/:uid/v1/messages', async (req, res) => {
+  if (WORKER) fail('Not found', 404);
+  const uid = +req.params.uid, W = WORKERS.get(uid), u = USERS.get(uid);
+  if (!W || !u || !safeEq(String(req.headers['x-api-key'] || ''), W.aiToken)) fail('Not found', 404);
+  if (HS.hubAiOn === false) fail('The owner has switched AI off for friends.', 403);
+  const k = uid + ':' + etDate(), n = (aiDay.get(k) || 0) + 1, cap = u.ai_cap ?? HS.hubAiCap ?? 30;
+  if (n > cap) fail(`You've used today's ${cap} AI requests. They reset at midnight New York time.`, 429);
+  aiDay.set(k, n);
+  const r = await fetch(AI_BASE + '/v1/messages', { method: 'POST', signal: AbortSignal.timeout(30e3), headers: { 'content-type': 'application/json', 'x-api-key': AI_KEY, 'anthropic-version': '2023-06-01' }, body: JSON.stringify(req.body) });
+  const j = await r.json().catch(() => ({})); send(req, res, r.status, j);
+});
+
+// ---------- the friends league ----------
+// Monthly seasons: everyone starts with the same $10,000 on day one, no deposits, bots allowed. Returns decide it.
+const monthName = (y, m) => new Date(Date.UTC(y, m - 1, 15)).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+async function currentSeason() {
+  const p = etParts(), name = monthName(p.y, p.m);
+  let s = await row("select * from league_seasons where status='open' order by id desc limit 1");
+  if (s && tsMs(s.ends) > Date.now()) return s;
+  if (s) await finishSeason(s);
+  const nThis = +(await row('select count(*) n from league_seasons where name like $1', [name + '%'])).n;
+  const lastDay = new Date(Date.UTC(p.y, p.m, 0)).getUTCDate(); let d = lastDay; while (d > 1 && !isTradingDay(p.y, p.m, d)) d--;
+  const ends = etToUtc(p.y, p.m, d, earlyClose(p.y, p.m, d) ? 13 : 16, 5), starts = nThis ? Date.now() : etToUtc(p.y, p.m, 1, 0, 0);
+  if (ends <= Date.now() + 864e5) return null; // the month is basically over: the next season starts on the 1st
+  // joining stays open for the first 3 trading days of the season, so everyone starts together
+  let j = 0, [jy, jm, jd] = [p.y, p.m, nThis ? p.d : 1]; let until = Date.now() + 3 * 864e5;
+  for (let k = 0; k < 20 && j < 3; k++) { if (isTradingDay(jy, jm, jd) && etToUtc(jy, jm, jd, 16, 0) > starts) { j++; until = etToUtc(jy, jm, jd, 16, 0); } [jy, jm, jd] = addDays(jy, jm, jd, 1); }
+  s = await row('insert into league_seasons(name,starts,ends,join_until) values($1,$2,$3,$4) returning *', [nThis ? `${name} · round ${nThis + 1}` : name, new Date(starts), new Date(ends), new Date(Math.max(until, Date.now() + 864e5))]);
+  // last season's players who want to keep playing join automatically
+  const prev = await row("select id from league_seasons where status='done' order by id desc limit 1");
+  if (prev) for (const mm of await rows('select uid from league_members where season=$1', [prev.id])) { const ok = mm.uid === 0 ? HS.hubOwnerAuto !== false : USERS.get(mm.uid)?.autoleague; if (ok) await joinSeason(s, mm.uid).catch(e => warn('league', e.message)); }
+  return s;
+}
+async function joinSeason(s, uid) {
+  if (await row('select 1 from league_members where season=$1 and uid=$2', [s.id, uid])) return;
+  const args = { season: s.id, name: `League · ${s.name.split(' ')[0]}`, start: +s.start_bal };
+  const r = uid === 0 ? await leagueJoinLocal(args) : await hubFetch(uid, 'POST', '/internal/league/join', args);
+  await Q('insert into league_members(season,uid,wid) values($1,$2,$3) on conflict do nothing', [s.id, uid, r.wid]);
+}
+async function memberValue(uid, wid, deep = false) {
+  if (uid === 0) return leagueWalletJson(wid, deep);
+  if (!USERS.has(uid) || USERS.get(uid).status !== 'active') return null;
+  return hubFetch(uid, 'GET', `/internal/league/wallet?wid=${+wid}&deep=${deep ? 1 : 0}`).catch(() => null);
+}
+const standCache = new Map();
+async function standings(s) {
+  const hit = standCache.get(s.id); if (hit && Date.now() - hit.t < 30e3) return hit.v;
+  const out = [];
+  for (const m of await rows('select * from league_members where season=$1', [s.id])) {
+    const who = m.uid === 0 ? meJson(null) : USERS.get(m.uid) ? meJson(USERS.get(m.uid)) : null; if (!who) continue;
+    const v = s.status === 'done' ? { value: +m.final_value, ret: +m.final_ret } : await memberValue(m.uid, m.wid);
+    if (!v || v.gone) continue;
+    out.push({ uid: m.uid, name: who.name, username: who.username, emoji: who.emoji, privacy: who.privacy, ret: v.ret, value: v.value, day: v.day ?? null, bots: v.bots ?? null, positions: v.positions ?? null, rank: m.rank });
+  }
+  out.sort((a, b) => b.ret - a.ret); out.forEach((x, i) => { x.rank = x.rank || i + 1; });
+  standCache.set(s.id, { t: Date.now(), v: out }); return out;
+}
+async function finishSeason(s) {
+  const list = await standings({ ...s, status: 'open' }).catch(() => []);
+  for (const [i, x] of list.entries()) await Q('update league_members set final_value=$1, final_ret=$2, rank=$3 where season=$4 and uid=$5', [x.value, x.ret, i + 1, s.id, x.uid]);
+  await Q("update league_seasons set status='done' where id=$1", [s.id]); standCache.delete(s.id);
+  for (const [i, x] of list.entries()) {
+    const title = i === 0 ? `🏆 You won the ${s.name} league!` : `${s.name} league: you finished #${i + 1} of ${list.length}`, body = `${pct(x.ret * 100)} for the month. ${list[0] && i ? `${list[0].name} won with ${pct(list[0].ret * 100)}.` : ''} A new season starts now.`;
+    if (x.uid === 0) await notify('game', title, body, { url: '/#/league' }).catch(() => {}); else await hubFetch(x.uid, 'POST', '/internal/notify', { title, body, url: '/#/league' }).catch(() => {});
+    if (x.uid === 0) await leagueEndLocal(s.id); else await hubFetch(x.uid, 'POST', '/internal/league/end', { season: s.id }).catch(() => {});
+  }
+}
+const canSee = (viewer, member, what) => viewer.owner || viewer.uid === member.uid || (what === 'holdings' ? ['holdings', 'everything'].includes(member.privacy) : member.privacy === 'everything');
+GET('/api/league', anyUser, async req => {
+  const s = await currentSeason(), uid = req.friend ? req.friend.id : 0, me = meJson(req.friend || null);
+  const list = s ? await standings(s) : [], mine = s ? await row('select * from league_members where season=$1 and uid=$2', [s.id, uid]) : null;
+  const past = (await rows("select * from league_seasons where status='done' order by id desc limit 12")).map(x => ({ id: x.id, name: x.name }));
+  const viewer = { owner: !!req.owner, uid };
+  return { me, season: s ? { id: s.id, name: s.name, starts: tsMs(s.starts), ends: tsMs(s.ends), joinUntil: tsMs(s.join_until), start: +s.start_bal } : null, joined: !!mine, wid: mine?.wid || null,
+    canJoin: !!s && !mine && Date.now() < tsMs(s.join_until), standings: list.map(x => ({ ...x, me: x.uid === uid, holdings: canSee(viewer, x, 'holdings'), trades: canSee(viewer, x, 'trades') })), past, owner: !!req.owner };
+});
+POST('/api/league/join', anyUser, async req => {
+  const s = await currentSeason(); if (!s) fail('No season is running right now');
+  if (Date.now() > tsMs(s.join_until)) fail(`Joining closed after the first 3 trading days, so everyone starts together. The next season starts on the 1st.`);
+  await joinSeason(s, req.friend ? req.friend.id : 0); standCache.delete(s.id); return { ok: true };
+});
+GET('/api/league/member/:uid', anyUser, async req => {
+  const s = await currentSeason(), uid = +req.params.uid, m = s ? await row('select * from league_members where season=$1 and uid=$2', [s.id, uid]) : null; if (!m) fail('Not in this season', 404);
+  const who = uid === 0 ? meJson(null) : meJson(USERS.get(uid)), viewer = { owner: !!req.owner, uid: req.friend ? req.friend.id : 0 }, mem = { uid, privacy: who.privacy };
+  const deep = canSee(viewer, mem, 'holdings'), v = await memberValue(uid, m.wid, deep); if (!v) fail('Not available', 404);
+  return { name: who.name, emoji: who.emoji, username: who.username, ret: v.ret, value: v.value, day: v.day, bots: v.bots, privacy: who.privacy,
+    holdings: deep ? v.holdings : null, trades: canSee(viewer, mem, 'trades') ? v.trades : null };
+});
+GET('/api/league/season/:id', anyUser, async req => { const s = await row('select * from league_seasons where id=$1', [+req.params.id]); if (!s) fail('No such season', 404); return { name: s.name, status: s.status, standings: await standings(s) }; });
+POST('/api/admin/league/restart', auth, async () => { const s = await row("select * from league_seasons where status='open' order by id desc limit 1"); if (s) { await Q("update league_seasons set ends=now() - interval '1 second' where id=$1", [s.id]); await currentSeason(); } return { ok: true }; });
+
+// ---------- start ----------
+async function hubStart() {
+  if (WORKER) return;
+  await hubInit();
+  preHandler = hubPre;
+  setInterval(() => idleJob().catch(e => warn('accounts', e.message)), 15 * 60e3);
+  setInterval(() => currentSeason().catch(e => warn('league', e.message)), 60e3);
+  // accounts with running bots start right away, so their bots keep trading after a restart
+  for (const u of USERS.values()) if (u.status === 'active') { const n = await row(`select count(*) n from ${schemaOf(u.id)}.bots where status='running'`).catch(() => null); if (n && +n.n > 0) startWorker(u); }
+  process.on('exit', () => { for (const W of WORKERS.values()) try { W.proc.kill('SIGTERM'); } catch (e) {} });
+}
