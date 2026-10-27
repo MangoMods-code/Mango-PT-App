@@ -1531,7 +1531,7 @@ async function execTrade(wid, sym, side, o = {}) {
         JSON.stringify(feeMap), pl.quote.bid, pl.quote.ask, o.otype || 'market', o.tif || null, pl.sess, pl.settle ? new Date(pl.settle) : null, pl.liq, pl.via, pl.imp ? round(pl.imp, 6) : null])).rows[0];
     let tax = null;
     if (side === 'buy') await addLot(c, wid, sym, pl.qty, (pl.notional + pl.fees.total) / pl.qty, t.id);
-    else tax = await consumeLots(c, w, sym, pl.qty, pl.notional - pl.fees.total, t.id);
+    else tax = await consumeLots(c, o.lotPick ? { ...w, lotPick: o.lotPick } : w, sym, pl.qty, pl.notional - pl.fees.total, t.id);
     if (side === 'buy') await noteUnsettledBuy(c, w, acct, sym, pl.qty, pl.notional + pl.fees.total, t.id);
     let gfvCount = null; if (gfv) gfvCount = await recordGfv(c, w, sym, gfv, t.id);
     if (pl.settle) await c.query('insert into settle(wid,amount,settles,trd_id) values($1,$2,$3,$4)', [wid, round(pl.notional - pl.fees.total, 6), new Date(pl.settle), t.id]);
@@ -2344,6 +2344,169 @@ async function analytics(wid) {
   };
 }
 // =====================================================================
+// Tax planning: estimates with your bracket and state, the long-term countdown, loss harvesting,
+// the $3,000 loss limit and carryover, dividend types, and a Form 8949 / Schedule D style summary.
+// Estimates for learning, not tax advice. 2026 figures: IRS Rev. Proc. 2025-32 (brackets, standard deduction),
+// IRS capital gains thresholds, New York FY2026 budget (first five rates cut 0.1 point for 2026).
+// =====================================================================
+const TAX = {
+  2026: {
+    std: { single: 16100, joint: 32200, hoh: 24150, sep: 16100 },
+    ord: { // [top of bracket, rate]
+      single: [[12400, .10], [50400, .12], [105700, .22], [201775, .24], [256225, .32], [640600, .35], [Infinity, .37]],
+      joint: [[24800, .10], [100800, .12], [211400, .22], [403550, .24], [512450, .32], [768700, .35], [Infinity, .37]],
+      hoh: [[17700, .10], [67450, .12], [105700, .22], [201750, .24], [256200, .32], [640600, .35], [Infinity, .37]],
+      sep: [[12400, .10], [50400, .12], [105700, .22], [201775, .24], [256225, .32], [384350, .35], [Infinity, .37]],
+    },
+    ltcg: { single: [49450, 545500], joint: [98900, 613700], hoh: [66200, 579600], sep: [49450, 306850] }, // top of 0%, top of 15%
+    niit: { single: 200000, joint: 250000, hoh: 200000, sep: 125000 },
+    lossLimit: { single: 3000, joint: 3000, hoh: 3000, sep: 1500 },
+    states: {
+      NY: { name: 'New York', std: { single: 8000, joint: 16050, hoh: 11200, sep: 8000 },
+        brackets: {
+          single: [[8500, .039], [11700, .044], [13900, .0515], [80650, .054], [215400, .059], [1077550, .0685], [5e6, .0965], [25e6, .103], [Infinity, .109]],
+          joint: [[17150, .039], [23600, .044], [27900, .0515], [161550, .054], [323200, .059], [2155350, .0685], [5e6, .0965], [25e6, .103], [Infinity, .109]],
+          hoh: [[12800, .039], [17650, .044], [20900, .0515], [107650, .054], [269300, .059], [1616450, .0685], [5e6, .0965], [25e6, .103], [Infinity, .109]],
+        },
+        city: { name: 'New York City', brackets: { single: [[12000, .03078], [25000, .03762], [50000, .03819], [Infinity, .03876]], joint: [[21600, .03078], [45000, .03762], [90000, .03819], [Infinity, .03876]], hoh: [[14400, .03078], [30000, .03762], [60000, .03819], [Infinity, .03876]] } } },
+    },
+    noTax: ['AK', 'FL', 'NV', 'NH', 'SD', 'TN', 'TX', 'WA', 'WY'],
+  },
+};
+const taxYearRules = y => TAX[y] || TAX[Math.max(...Object.keys(TAX).map(Number))];
+const bracketTax = (br, x) => { let t = 0, lo = 0; for (const [hi, r] of br) { if (x <= lo) break; t += (Math.min(x, hi) - lo) * r; lo = hi; } return t; };
+// federal + state tax on a year: ordinary income, short-term gains (ordinary), long-term gains and qualified dividends (stacked on top)
+function taxOf({ ordinary = 0, short = 0, long = 0, qdiv = 0, odiv = 0 }, prof = PROFILE, y = +etDate().slice(0, 4)) {
+  const R = taxYearRules(y), f = prof?.filing && R.ord[prof.filing] ? prof.filing : 'single';
+  const ord = Math.max(0, ordinary + short + odiv), pref = Math.max(0, long + qdiv);
+  const taxable = Math.max(0, ord + pref - R.std[f]), ordTaxable = Math.max(0, Math.min(taxable, ord - R.std[f])), prefTaxable = taxable - ordTaxable;
+  let fed = bracketTax(R.ord[f], ordTaxable);
+  const [z, m] = R.ltcg[f]; let at = ordTaxable, left = prefTaxable;
+  const at0 = Math.max(0, Math.min(left, z - at)); left -= at0; at += at0;
+  const at15 = Math.max(0, Math.min(left, m - at)); left -= at15; fed += at15 * 0.15 + left * 0.20;
+  const magi = ord + pref, niit = Math.max(0, Math.min(short + long + qdiv + odiv, magi - R.niit[f])) * 0.038;
+  let state = 0, city = 0; const st = prof?.state;
+  if (st && R.states[st]) {
+    const S0 = R.states[st], sf = S0.brackets[f] ? f : 'single', base = Math.max(0, ord + pref - (S0.std[f] || 0)); // New York taxes gains as ordinary income
+    state = bracketTax(S0.brackets[sf], base);
+    if (prof.city && S0.city) city = bracketTax(S0.city.brackets[sf] || S0.city.brackets.single, base);
+  } else if (st && st !== 'none' && !R.noTax.includes(st) && prof?.stateRate > 0) state = Math.max(0, ord + pref) * prof.stateRate / 100;
+  return { fed, niit, state, city, total: fed + niit + state + city };
+}
+// the extra tax this one change adds on top of your income
+function taxOn(extra, prof = PROFILE) {
+  const base = { ordinary: Math.max(0, prof?.income || 0) }, b = taxOf(base, prof), a = taxOf({ ...base, ...extra, ordinary: base.ordinary + (extra.ordinary || 0) }, prof);
+  const out = {}; for (const k of ['fed', 'niit', 'state', 'city', 'total']) out[k] = a[k] - b[k];
+  return out;
+}
+const taxSetupOk = () => !!PROFILE && PROFILE.income != null;
+const taxedWallets = async () => (await rows('select * from wallets where not archived and broker is null')).filter(w => !isIra(w));
+// realized gains for a year across every taxable wallet, with the loss carried in from earlier years
+async function yearGains(y) {
+  const ws = await taxedWallets(), ids = ws.map(w => w.id); if (!ids.length) return { short: 0, long: 0, carryIn: 0, ids };
+  const all = await rows("select extract(year from sold at time zone 'America/New_York')::int y, term, sum(proceeds - basis + wash) g from realized where wid = any($1) group by 1, 2 order by 1", [ids]);
+  const years = [...new Set(all.map(r => r.y))].filter(v => v <= y).sort();
+  let carryS = 0, carryL = 0, res = null; const lim = taxYearRules(y).lossLimit[PROFILE?.filing || 'single'] || 3000;
+  for (const yy of [...years, ...(years.includes(y) ? [] : [y])]) {
+    const s = all.filter(r => r.y === yy && r.term === 'short').reduce((t, r) => t + +r.g, 0), l = all.filter(r => r.y === yy && r.term === 'long').reduce((t, r) => t + +r.g, 0);
+    const carryIn = carryS + carryL;
+    let ns = s - carryS, nl = l - carryL; // carried losses keep their kind
+    const net = ns + nl, deduct = net < 0 ? Math.min(lim, -net) : 0;
+    if (yy === y) res = { short: s, long: l, carryIn, netShort: ns, netLong: nl, net, deduct, carryOut: net < 0 ? -net - deduct : 0, ids };
+    // what's left of a net loss carries into next year, short-term first
+    if (net < 0) { let rest = -net - deduct; const sh = Math.min(rest, Math.max(0, -ns)); carryS = sh; carryL = rest - sh; } else { carryS = 0; carryL = 0; }
+  }
+  return res;
+}
+// dividends: qualified if the shares were held more than 60 days around the ex-date (we use the pay date as the ex-date);
+// bond, T-bill and real-estate funds pay ordinary dividends
+const ORD_DIV = new Set(['TLT', 'IEF', 'SHY', 'BIL', 'SGOV', 'AGG', 'BND', 'TIP', 'VNQ', 'LQD', 'HYG', 'JNK', 'MUB', 'O', 'XLRE']);
+const INTL_FUNDS = new Set(['EFA', 'EEM', 'VEA', 'VWO', 'VXUS', 'IEFA', 'IEMG', 'VT', 'ACWI']);
+async function dividendsYear(y, ids) {
+  const from = new Date(etToUtc(y, 1, 1)), to = new Date(etToUtc(y + 1, 1, 1));
+  const divs = await rows("select * from trd where wid = any($1) and side='div' and ts >= $2 and ts < $3 order by ts", [ids, from, to]);
+  const out = [];
+  for (const d of divs) {
+    const amt = +d.qty * +d.price, ex = tsMs(d.ts);
+    // oldest shares of it held at the time (still held, or sold later)
+    const lot = await row('select min(ts) t from (select ts from lots where wid=$1 and sym=$2 and ts < $3 union all select acquired ts from realized where wid=$1 and sym=$2 and acquired < $3 and sold > $3) x', [d.wid, d.sym, new Date(ex)]);
+    const held = lot?.t ? (Math.min(Date.now(), ex + 60 * 864e5) - tsMs(lot.t)) / 864e5 : 0;
+    const kind = ORD_DIV.has(d.sym) ? 'ordinary' : held > 60 ? 'qualified' : 'ordinary';
+    out.push({ sym: d.sym, ts: ex, amount: amt, kind, why: ORD_DIV.has(d.sym) ? 'Bond, T-bill and real-estate funds pay ordinary dividends' : held > 60 ? 'Held more than 60 days around the ex-date' : `Held ${Math.max(0, Math.floor(held))} days around the ex-date (needs more than 60)`, intl: INTL_FUNDS.has(d.sym) });
+  }
+  return out;
+}
+// funds to hold while waiting out a wash sale: similar, but tracking a different index or a wider group
+const SWAP = { SPY: 'SCHX', VOO: 'SCHX', IVV: 'SCHX', QQQ: 'VGT', VTI: 'SCHB', IWM: 'VB', DIA: 'SPY', EFA: 'VEA', EEM: 'VWO', TLT: 'VGLT', IEF: 'VGIT', GLD: 'GLDM', XLK: 'VGT', XLF: 'VFH', XLE: 'VDE', XLV: 'VHT', XLY: 'VCR', XLI: 'VIS', XLU: 'VPU', XLP: 'VDC', XLB: 'VAW', XLC: 'VOX', VNQ: 'SCHH', BTC: 'ETH', ETH: 'BTC' };
+const SECTOR_ETF = { Technology: 'XLK', 'Information Technology': 'XLK', Semiconductors: 'SMH', 'Financial Services': 'XLF', Financials: 'XLF', Banking: 'XLF', Healthcare: 'XLV', 'Health Care': 'XLV', Pharmaceuticals: 'XLV', Biotechnology: 'XBI', Energy: 'XLE', 'Consumer Cyclical': 'XLY', Retail: 'XLY', Automobiles: 'XLY', 'Consumer Defensive': 'XLP', Beverages: 'XLP', 'Food Products': 'XLP', Industrials: 'XLI', 'Aerospace & Defense': 'ITA', Utilities: 'XLU', 'Communication Services': 'XLC', Media: 'XLC', 'Real Estate': 'XLRE', 'Basic Materials': 'XLB' };
+const swapFor = sym => SWAP[sym] || SECTOR_ETF[assets.get(sym)?.industry] || 'SPY';
+const daysToLong = acq => { const a = etParts(tsMs(acq)), ann = Date.UTC(a.y + 1, a.m - 1, a.d + 1), now = Date.parse(etDate() + 'T00:00:00Z'); return Math.ceil((ann - now) / 864e5); };
+async function taxPlan(y = +etDate().slice(0, 4)) {
+  const ws = await taxedWallets(), ids = ws.map(w => w.id), wname = Object.fromEntries(ws.map(w => [w.id, `${w.emoji} ${w.name}`]));
+  const g = await yearGains(y), divs = await dividendsYear(y, ids);
+  const qdiv = divs.filter(d => d.kind === 'qualified').reduce((t, d) => t + d.amount, 0), odiv = divs.filter(d => d.kind === 'ordinary').reduce((t, d) => t + d.amount, 0);
+  const inc = await row("select coalesce(sum(case when side='int' and price>0 then price end),0) intr from trd where wid = any($1) and ts >= $2 and ts < $3", [ids, new Date(etToUtc(y, 1, 1)), new Date(etToUtc(y + 1, 1, 1))]);
+  // the year so far: short-term net is taxed like pay, long-term net at the lower rates; a net loss takes up to $3,000 off your income
+  const st = Math.max(0, g.netShort + Math.min(0, g.netLong)), lt = Math.max(0, g.netLong + Math.min(0, g.netShort));
+  const est = taxOn({ short: st, long: lt, qdiv, odiv: odiv + +inc.intr, ordinary: -(g.deduct || 0) });
+  // every open lot: how long until it's long term, and what that saves; losses you could harvest
+  const lots = await rows("select l.*, w.name wn from lots l join wallets w on w.id=l.wid where l.wid = any($1) and l.qty > 0 order by l.ts", [ids]);
+  const countdown = [], bySym = {};
+  for (const l of lots) {
+    const px = priceOf(l.sym); if (!px) continue;
+    const qty = +l.qty, gain = (px - +l.basis) * qty, days = daysToLong(l.ts), k = l.wid + ':' + l.sym;
+    (bySym[k] ||= { wid: l.wid, wallet: wname[l.wid], sym: l.sym, qty: 0, basis: 0, value: 0, lots: [] });
+    bySym[k].qty += qty; bySym[k].basis += +l.basis * qty; bySym[k].value += px * qty; bySym[k].lots.push({ qty, gain, days, short: days > 0 });
+    if (days > 0 && gain > 1) {
+      const asShort = taxOn({ short: gain }).total, asLong = taxOn({ long: gain }).total;
+      countdown.push({ wid: l.wid, wallet: wname[l.wid], sym: l.sym, qty, gain, days, longOn: (() => { const a = etParts(tsMs(l.ts)); return new Date(Date.UTC(a.y + 1, a.m - 1, a.d + 1)).toISOString().slice(0, 10); })(), save: Math.max(0, asShort - asLong), taxNow: asShort });
+    }
+  }
+  countdown.sort((a, b) => a.days - b.days || b.save - a.save);
+  const harvest = [];
+  for (const p of Object.values(bySym)) {
+    const loss = p.value - p.basis; if (loss > -5) continue;
+    const shortLoss = p.lots.filter(l => l.short && l.gain < 0).reduce((t, l) => t + l.gain, 0), longLoss = p.lots.filter(l => !l.short && l.gain < 0).reduce((t, l) => t + l.gain, 0);
+    const saves = -(taxOn({ short: st + shortLoss, long: lt + longLoss, qdiv, odiv }).total - taxOn({ short: st, long: lt, qdiv, odiv }).total);
+    const recent = await row("select max(ts) t, sum(qty) q from lots where wid=$1 and sym=$2 and ts > now() - interval '30 days'", [p.wid, p.sym]);
+    const crypto = isCrypto(p.sym), swap = swapFor(p.sym);
+    harvest.push({ wid: p.wid, wallet: p.wallet, sym: p.sym, qty: p.qty, loss, value: p.value, saves: Math.max(0, saves), swap: swap === p.sym ? null : swap, crypto,
+      wash: !crypto && recent?.t ? { bought: tsMs(recent.t), qty: +recent.q, text: `You bought ${+(+recent.q).toFixed(4)} ${p.sym} in the last 30 days: selling those at a loss now is a wash sale, so the loss moves into the newer shares.` } : null,
+      rebuyAfter: crypto ? null : new Date(Date.now() + 31 * 864e5).toISOString().slice(0, 10) });
+  }
+  harvest.sort((a, b) => b.saves - a.saves || a.loss - b.loss);
+  return { y, setup: taxSetupOk(), profile: profileJson(), wallets: ws.length, gains: g, dividends: { qualified: qdiv, ordinary: odiv, list: divs }, interest: +inc.intr, estimate: est, countdown: countdown.slice(0, 40), harvest: harvest.slice(0, 30),
+    note: 'Estimates for learning, not tax advice. They assume the income you entered, the standard deduction and no other gains or credits.' };
+}
+GET('/api/taxes/plan', auth, async req => taxPlan(clamp(num(req.query.y, +etDate().slice(0, 4)), 2000, 2100)));
+// one step: sell the loser, buy the stand-in with the money
+POST('/api/taxes/harvest', auth, async req => {
+  const wid = +req.body.wid, sym = cleanSym(req.body.sym), w = await walletRow(wid); if (isIra(w)) fail('Losses inside an IRA don\'t count for taxes');
+  const p = (await positions(wid)).find(x => x.sym === sym); if (!p) fail(`You don't own ${sym} in ${w.name}`);
+  const sell = await execTrade(wid, sym, 'sell', { pct: 100, why: 'tax-loss harvest', note: 'Tax-loss harvest' });
+  let buy = null; const swap = req.body.swap === false ? null : cleanSym(req.body.swap || swapFor(sym));
+  if (swap && swap !== sym) {
+    if (!assets.has(swap)) await trackAsset(swap, isCrypto(swap) ? 'crypto' : 'stock').catch(() => {});
+    for (let i = 0; i < 12 && !priceOf(swap); i++) await sleep(500); // a new symbol's first price takes a moment
+    try { buy = await execTrade(wid, swap, 'buy', { usd: Math.floor(sell.qty * sell.price * 0.995 * 100) / 100, why: 'tax-loss harvest swap', note: `Holding while ${sym}'s wash-sale window passes` }); }
+    catch (e) { return { sell, buy: null, buyError: e.message }; }
+  }
+  return { sell, buy, rebuyAfter: new Date(Date.now() + 31 * 864e5).toISOString().slice(0, 10) };
+});
+// Form 8949 boxes: A/D = basis reported to the IRS (stocks), C/F = not reported (crypto)
+async function form8949(y) {
+  const ws = await taxedWallets(), ids = ws.map(w => w.id), from = new Date(etToUtc(y, 1, 1)), to = new Date(etToUtc(y + 1, 1, 1));
+  const rs = await rows('select r.*, w.name wn from realized r join wallets w on w.id=r.wid where r.wid = any($1) and r.sold >= $2 and r.sold < $3 order by r.sold, r.id', [ids, from, to]);
+  const box = r => r.term === 'short' ? (r.crypto ? 'C' : 'A') : (r.crypto ? 'F' : 'D');
+  const lines = rs.map(r => ({ box: box(r), desc: `${+(+r.qty).toFixed(8)} ${r.sym}`, wallet: r.wn, acquired: tsMs(r.acquired), sold: tsMs(r.sold), proceeds: +r.proceeds, basis: +r.basis, adj: +r.wash, code: +r.wash > 0 ? 'W' : '', gain: +r.proceeds - +r.basis + +r.wash }));
+  const tot = b => { const l = lines.filter(x => x.box === b); return { count: l.length, proceeds: l.reduce((t, x) => t + x.proceeds, 0), basis: l.reduce((t, x) => t + x.basis, 0), adj: l.reduce((t, x) => t + x.adj, 0), gain: l.reduce((t, x) => t + x.gain, 0) }; };
+  const boxes = Object.fromEntries(['A', 'C', 'D', 'F'].map(b => [b, tot(b)])), g = await yearGains(y);
+  return { y, lines, boxes, scheduleD: { line7: g?.netShort ?? boxes.A.gain + boxes.C.gain, line15: g?.netLong ?? boxes.D.gain + boxes.F.gain, net: g?.net ?? 0, deduct: g?.deduct ?? 0, carryOut: g?.carryOut ?? 0, carryIn: g?.carryIn ?? 0 } };
+}
+GET('/api/taxes/8949', auth, async req => form8949(clamp(num(req.query.y, +etDate().slice(0, 4)), 2000, 2100)));
+// estimated tax on one sale, for the sell screen
+function saleTaxEst(st, lt) { if (!PROFILE) return null; const t = taxOn({ short: st, long: lt }); return t.total; }
+// =====================================================================
 // Account types and the rules that come with them
 // - Your profile: date of birth (asked once), filing status, income. Real ages drive the age rules.
 // - Cash accounts: you can buy with money from a sale that hasn't settled, but selling that new position before
@@ -2364,7 +2527,7 @@ const isIra = w => IRA_ACCTS.includes(w?.acct);
 // ---------- profile ----------
 let PROFILE = null;
 async function loadProfile() { try { PROFILE = JSON.parse(await kvGet('profile', 'null') || 'null'); } catch (e) { PROFILE = null; } return PROFILE; }
-const profileJson = () => PROFILE ? { dob: PROFILE.dob, filing: PROFILE.filing || 'single', income: PROFILE.income ?? null, earned: PROFILE.earned ?? null, age: ageOn(), set: true } : { set: false };
+const profileJson = () => PROFILE ? { dob: PROFILE.dob, filing: PROFILE.filing || 'single', income: PROFILE.income ?? null, earned: PROFILE.earned ?? null, state: PROFILE.state || null, city: !!PROFILE.city, stateRate: PROFILE.stateRate ?? null, age: ageOn(), set: true } : { set: false };
 // age in whole years on a date (ET)
 function ageOn(iso = etDate()) { if (!PROFILE?.dob) return null; const [y, m, d] = PROFILE.dob.split('-').map(Number), [Y, M, D] = iso.split('-').map(Number); return Y - y - ((M < m || (M === m && D < d)) ? 1 : 0); }
 // the date someone turns 59½
@@ -2380,7 +2543,10 @@ POST('/api/profile', auth, async req => {
   if (cur.dob && cur.dob !== dob && !b.confirmDob) fail('Changing your date of birth changes your age rules. Confirm to change it.');
   const filing = ['single', 'joint', 'hoh', 'sep'].includes(b.filing) ? b.filing : cur.filing || 'single';
   const money0 = v => v === null || v === '' ? null : clamp(num(v, 0), 0, 1e9);
-  PROFILE = { dob, filing, income: b.income !== undefined ? money0(b.income) : cur.income ?? null, earned: b.earned !== undefined ? money0(b.earned) : cur.earned ?? null, at: cur.at || Date.now() };
+  const STATES = ['none', 'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'DC', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY', 'OT'];
+  const state = b.state !== undefined ? (STATES.includes(b.state) ? b.state : 'none') : cur.state || null;
+  PROFILE = { dob, filing, income: b.income !== undefined ? money0(b.income) : cur.income ?? null, earned: b.earned !== undefined ? money0(b.earned) : cur.earned ?? null,
+    state, city: b.city !== undefined ? !!b.city : !!cur.city, stateRate: b.stateRate !== undefined ? clamp(num(b.stateRate, 0), 0, 15) : cur.stateRate ?? null, at: cur.at || Date.now() };
   await kvSet('profile', JSON.stringify(PROFILE));
   // under 18: no margin (brokers require an adult for margin); margin wallets act as cash-and-instant
   broadcast({ t: 'evt', e: 'settings' });
@@ -2666,7 +2832,7 @@ async function addLot(c, wid, sym, qty, basis, trdId, ts = new Date()) {
   return r.id;
 }
 async function consumeLots(c, w, sym, qty, proceedsNet, trdId, sold = new Date()) {
-  const order = { fifo: 'ts, id', lifo: 'ts desc, id desc', hifo: 'basis desc, ts' }[w.lot_method] || 'ts, id';
+  const order = { fifo: 'ts, id', lifo: 'ts desc, id desc', hifo: 'basis desc, ts' }[w.lotPick || w.lot_method] || 'ts, id'; // lotPick: a tax-aware bot sells its highest-cost shares first
   const lots = (await c.query(`select * from lots where wid=$1 and sym=$2 and qty > 0 order by ${order} for update`, [w.id, sym])).rows;
   let left = qty; const made = [];
   const crypto = isCrypto(sym);
@@ -3841,13 +4007,13 @@ function gridCombos(grid) {
 const MANDATE_DEF = {
   budget: 0, maxPosPct: 25, dailyLossPct: 5, maxDDPct: 20, maxTradesDay: 12, minTrade: 10, runAt: '15:45', stops: true, notify: 'trades',
   newsFilter: true, earningsDays: 2, minSentiment: -0.35, blockSevere: true, sellOnSevere: false, tilt: false, flattenOnKill: true, allowLive: false, liveCap: 0, councilVeto: false,
-  takeProfitPct: 15, timeStopDays: 30, trailTighten: true, addWeekly: 0,
+  takeProfitPct: 15, timeStopDays: 30, trailTighten: true, addWeekly: 0, taxAware: true,
 };
 function cleanMandate(m = {}, base = MANDATE_DEF) {
   const o = { ...base };
   const nums = { liveCap: [0, 1e7], budget: [0, 1e9], maxPosPct: [5, 100], dailyLossPct: [0, 50], maxDDPct: [0, 90], maxTradesDay: [1, 100], minTrade: [1, 10000], earningsDays: [0, 10], minSentiment: [-1, 0], takeProfitPct: [0, 500], timeStopDays: [0, 365], addWeekly: [0, 100000] };
   for (const [k, [lo, hi]] of Object.entries(nums)) if (m[k] !== undefined) o[k] = clamp(num(m[k], base[k]), lo, hi);
-  for (const k of ['stops', 'newsFilter', 'blockSevere', 'sellOnSevere', 'tilt', 'flattenOnKill', 'allowLive', 'councilVeto', 'trailTighten']) if (m[k] !== undefined) o[k] = !!m[k];
+  for (const k of ['stops', 'newsFilter', 'blockSevere', 'sellOnSevere', 'tilt', 'flattenOnKill', 'allowLive', 'councilVeto', 'trailTighten', 'taxAware']) if (m[k] !== undefined) o[k] = !!m[k];
   if (['trades', 'all', 'off'].includes(m.notify)) o.notify = m.notify;
   if (/^\d\d:\d\d$/.test(m.runAt || '') && m.runAt >= '09:45' && m.runAt <= '15:55') o.runAt = m.runAt;
   return o;
@@ -4060,6 +4226,15 @@ async function runBotInner(id, { manual, dry, night }) {
     if (m.takeProfitPct > 0 && gain * 100 >= m.takeProfitPct && !s0.tookProfit && d.target * capital > d.have * 0.6) { d.aiTrim = true; d.target = d.have / 2 / capital; d.takeProfit = true; if (d.mood) { d.why = d.why.filter(w => !/New buys at/.test(w)); delete d.mood; } d.why.push(`Trimming by half: up ${(gain * 100).toFixed(1)}%, past the ${m.takeProfitPct}% take-profit. The rest keeps running with a tighter stop.`); continue; }
     if (m.timeStopDays > 0 && st.rebalance === 'none' && !st.auto && bot.strategy !== 'hold' && (h.days || 0) >= m.timeStopDays && gain < 0.03) { d.target = 0; d.why.push(`Selling: time stop. ${h.days} trading days and only ${(gain * 100).toFixed(1)}%, so the money can work somewhere else.`); }
   }
+  // ---- tax-aware selling: an exit that can wait a few days for shares to turn long term waits (not for serious news or a time stop)
+  if (m.taxAware && !isIra(w) && !w.broker) for (const d of Object.values(decisions)) {
+    const h = held[d.sym], px = priceOf(d.sym); if (!h || !px || d.target > 0 || d.halted || d.why.some(x => /serious news|time stop|Analyst/.test(x))) continue;
+    let soon = 0, days = 0, on = null;
+    for (const l of await rows('select ts, qty, basis from lots where wid=$1 and sym=$2 and qty > 0', [bot.wid, d.sym])) { const dd = daysToLong(l.ts), g = (px - +l.basis) * +l.qty; if (dd > 0 && dd <= 10 && g > 0) { soon += g; if (dd > days) { days = dd; on = tsMs(l.ts) + 366 * 864e5; } } }
+    if (!(soon > 0)) continue;
+    const save = taxOn({ short: soon }).total - taxOn({ long: soon }).total;
+    if (save >= Math.max(10, d.have * 0.005)) { d.target = d.have / capital; d.taxWait = true; d.why.push(`Waiting ${days} day${days === 1 ? '' : 's'} to sell: then ${money(soon)} of gains turns long term, which saves about ${money(save)} in tax. Its stop stays in place.`); }
+  }
   // ---- the council: six kinds of evidence vote on each buy and sell ----
   phase('council');
   const sessions = [], councilRec = await councilRecord();
@@ -4129,7 +4304,7 @@ async function runBotInner(id, { manual, dry, night }) {
         return r;
       }
       if (!isCrypto(s) && sessionAt(prof) !== 'regular' && real) { const q = await addLimit(bot.wid, s, { side, kind: 'moo', amount: o.usd ?? o.qty ?? o.pct, units: o.usd ? 'usd' : o.qty ? 'qty' : 'pct', why: 'bot: ' + bot.name }); r = { queued: true, id: q.id }; }
-      else r = await execTrade(bot.wid, s, side, { ...o, why: 'bot: ' + bot.name.slice(0, 40), auto: true, bot: true, note: label });
+      else r = await execTrade(bot.wid, s, side, { ...o, why: 'bot: ' + bot.name.slice(0, 40), auto: true, bot: true, note: label, lotPick: m.taxAware && !isIra(w) ? 'hifo' : undefined });
       tradeBudget--;
       const text = r.queued ? `${side === 'buy' ? 'Buy' : 'Sell'} queued for the open` : `${side === 'buy' ? 'Bought' : 'Sold'} ${+r.qty.toFixed(6)} ${s} at ${pxStr(r.price)}${r.pnl != null ? ` (${r.pnl >= 0 ? '+' : ''}${money(r.pnl)})` : ''}`;
       log.orders.push({ sym: s, side, text, label, fill: r.queued ? null : { qty: r.qty, price: r.price, fee: r.fee, pnl: r.pnl } });
@@ -5267,7 +5442,7 @@ POST('/api/preview', auth, async req => {
         let left = pl.qty, st = 0, lt = 0, washRisk = false; const net = pl.notional - pl.fees.total;
         for (const l of lotsL) { if (left <= 1e-12) break; const t = Math.min(+l.qty, left); const g = net * t / pl.qty - +l.basis * t; if (isLongTerm(l.ts, new Date())) lt += g; else st += g; left -= t; }
         if (st + lt < 0) washRisk = !!(await row("select 1 from lots where wid=$1 and sym=$2 and ts > now() - interval '30 days' limit 1", [wid, sym]));
-        out.tax = { short: st, long: lt, washRisk };
+        out.tax = { short: st, long: lt, washRisk, est: isIra(w) ? 0 : saleTaxEst(Math.max(0, st), Math.max(0, lt)), sheltered: isIra(w) };
       }
     }
   } catch (e) { out.err = e.message; }
@@ -7286,7 +7461,7 @@ const ICONS = {};
 const icon = (name, fn) => ICONS[name] || (ICONS[name] = fn());
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD646"/><stop offset=".5" stop-color="#FFA028"/><stop offset="1" stop-color="#FA5256"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="#1E1430"/><ellipse cx="31" cy="36" rx="18" ry="22" transform="rotate(30 31 36)" fill="url(#g)"/><path d="M20 41l6.5-6 5 3.5 9.5-10" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37 28.5h4.5V33" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="45" cy="11.5" rx="9" ry="4.6" transform="rotate(-24 45 11.5)" fill="#3BD68A"/></svg>`;
 let BUILD = 'dev', INDEX = null, INDEX_GZ = null;
-const APP_VERSION = '3.8.0'; // stamped by build.sh from package.json
+const APP_VERSION = '3.9.0'; // stamped by build.sh from package.json
 function loadIndex() {
   const file = path.join(__dirname, 'index.html');
   let html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<!doctype html><title>Mango</title><p>index.html is missing next to server.js.</p>';

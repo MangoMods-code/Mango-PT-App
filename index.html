@@ -1132,6 +1132,20 @@ button.tile:active { transform: scale(.98); }
 .dialog-msg { white-space: pre-line; }
 html[data-standby] #halt-bar { bottom: calc(var(--nav-h, 64px) + env(safe-area-inset-bottom, 0px) + 46px); }
 
+/* ---------- taxes ---------- */
+.tax-year .t-foot { margin-top: 6px; }
+.cell.harvest { align-items: flex-start; }
+.cell.harvest .harvest-go { flex: none; align-self: center; padding: 6px 12px; min-height: 0; }
+.tax-divs summary { cursor: pointer; font-weight: 600; color: var(--tx2); padding: 4px 2px; }
+.f8949 { overflow-x: auto; border-radius: 14px; background: var(--card); box-shadow: var(--hi); }
+.f8949 table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.f8949 th, .f8949 td { padding: 7px 8px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.f8949 th:first-child, .f8949 td:first-child { text-align: left; }
+.f8949 th { color: var(--mu); font-weight: 600; font-size: 11.5px; }
+.f8949 tfoot td { font-weight: 700; border-bottom: 0; }
+.f8949 .up { color: var(--up); } .f8949 .dn { color: var(--dn); }
+@media print { html.printing body { background: #fff; color: #000; } html.printing nav, html.printing .page-head, html.printing #halt-bar, html.printing #standby-bar { display: none !important; } html.printing .f8949 { box-shadow: none; overflow: visible; } }
+
 /* ---------- Paper / Alpaca sides ---------- */
 .space-sw { display: inline-flex; gap: 4px; padding: 4px; border-radius: 14px; background: var(--card); box-shadow: var(--hi); margin: 2px 0 10px; }
 .space-sw button { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: 10px; font-size: 14px; font-weight: 650; color: var(--mu); transition: background .2s, color .2s; }
@@ -1470,7 +1484,7 @@ html[data-standby] #halt-bar { bottom: calc(var(--nav-h, 64px) + env(safe-area-i
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '3.8.0';
+const BUILD = '__BUILD__', APP_VERSION = '3.9.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -3091,6 +3105,7 @@ function tradeSheet(sym, side = 'buy', preset = {}) {
           <div class="kv total"><span class="k">${buy ? 'Estimated total' : "You'll receive about"}</span><span class="v">${money(pv.total)}</span></div>
           ${pv.pnl != null ? `<div class="kv"><span class="k">Profit / loss on this sale</span><span class="v ${cls(pv.pnl)}">${money(pv.pnl, { sign: true })}</span></div>` : ''}
           ${pv.tax && (pv.tax.short || pv.tax.long) ? `<div class="kv"><span class="k">Taxable gain</span><span class="v">${pv.tax.short ? `<span class="${cls(pv.tax.short)}">${money(pv.tax.short, { sign: true })}</span> short term` : ''}${pv.tax.short && pv.tax.long ? ' · ' : ''}${pv.tax.long ? `<span class="${cls(pv.tax.long)}">${money(pv.tax.long, { sign: true })}</span> long term` : ''}</span></div>` : ''}
+          ${pv.tax?.sheltered ? `<div class="kv"><span class="k">Tax</span><span class="v">None: it's in an IRA</span></div>` : pv.tax?.est > 0.5 ? `<div class="kv"><span class="k">Estimated tax on this sale</span><span class="v">${money(pv.tax.est)}${App.S.profile?.income == null ? ' <span class="t-cap">at $0 income</span>' : ''}</span></div>` : ''}
           ${pv.frac ? '' : ''}${pv.settle ? `<div class="kv"><span class="k">Cash settles</span><span class="v">${fmtDay(pv.settle)}${App.S.wallet.acct === 'cash' ? '' : ' · usable now'}</span></div>` : ''}
           ${pv.borrow > 0 ? `<div class="kv"><span class="k">Borrowed on margin</span><span class="v dn">${money(pv.borrow)}</span></div>` : ''}
           ${pv.cashAfter != null ? `<div class="kv"><span class="k">Cash after</span><span class="v priv ${pv.cashAfter < 0 ? 'dn' : ''}">${money(pv.cashAfter)}</span></div>` : ''}`;
@@ -3967,6 +3982,7 @@ PAGES.taxes = {
     const st = d.rows.filter(r => r.term === 'short'), lt = d.rows.filter(r => r.term === 'long');
     p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Taxes</h1><p class="t-sub" style="margin:0 2px">${h(W().emoji)} ${h(W().name)} · gains and income like a 1099</p>
       ${d.years.length > 1 ? `<div class="mt12">${seg('ty', d.years.slice(0, 4).map(y => [y, String(y)]), d.y)}</div>` : ''}
+      <div id="tx-plan"></div><div class="section-h"><h2>This wallet</h2><span class="t-foot">${h(W().emoji)} ${h(W().name)}</span></div>
       ${d.sheltered ? `<div class="callout mt12">${icon('shield')}<div><b>Nothing here is taxed this year.</b> ${d.sheltered === 'roth' ? 'This is a Roth IRA: gains and dividends inside it are never taxed if you wait until 59½ and the account is 5 years old.' : 'This is a traditional IRA: gains and dividends inside it are not taxed. Money you take out counts as income instead.'} The list below is for your records only.</div></div>` : ''}
       <div class="tax-big mt16"><div class="tile"><div class="k">Short term</div><div class="v ${cls(d.short.gain + d.cryptoShort.gain)}">${money(d.short.gain + d.cryptoShort.gain, { sign: true })}</div><div class="s">Held a year or less, taxed like pay</div></div><div class="tile"><div class="k">Long term</div><div class="v ${cls(d.long.gain + d.cryptoLong.gain)}">${money(d.long.gain + d.cryptoLong.gain, { sign: true })}</div><div class="s">Held over a year, lower rates</div></div></div>
       <div class="section-h"><h2>Sales</h2><span class="t-foot">${d.all.count} lot${d.all.count === 1 ? '' : 's'}</span></div><div class="card">
@@ -3982,6 +3998,7 @@ PAGES.taxes = {
       <p class="note">Lots are matched ${{ fifo: 'oldest first (FIFO)', lifo: 'newest first (LIFO)', hifo: 'highest cost first' }[W().lotMethod] || 'oldest first'}, set per wallet. Wash sales apply to stocks: a loss is disallowed when you buy the same stock within 30 days before or after, and it's added to the new shares' cost. This is practice data, not tax advice.</p>`;
     raf(() => placeThumbs(p.body));
     onSeg(p.body, 'ty', y => { p.y = +y; p.load(); });
+    taxPlanDraw(p);
   },
 };
 ACT.taxCsv = async el => {
@@ -4388,7 +4405,7 @@ function mandateFields(m, pre) {
     <div class="group mt12">${t('stops', 'Stop loss on every position', 'Uses the strategy\'s stop, checked all day')}${t('flattenOnKill', 'Sell everything if it stops itself', 'When the drop limit is hit')}</div>
     <div class="section-h"><h2>Exits</h2></div>
     <div class="pf-grid">${n('takeProfitPct', 'Sell half when up (%)', '0 = never. Once per position')}${n('timeStopDays', 'Sell if flat after (trading days)', '0 = never. Flat means under +3%')}</div>
-    <div class="group mt12">${t('trailTighten', 'Tighten the stop as it wins', 'Break-even at +6%, 7% under the high at +12%, 5% under at +20%')}</div>
+    <div class="group mt12">${t('trailTighten', 'Tighten the stop as it wins', 'Break-even at +6%, 7% under the high at +12%, 5% under at +20%')}${t('taxAware', 'Tax-aware selling', 'Sell the highest-cost shares first, and wait up to 10 days when shares are about to turn long term')}</div>
     <div class="group mt12">${t('newsFilter', 'Check news and social media before buying', 'Headlines, StockTwits and Reddit')}${t('blockSevere', 'Skip stocks with serious news', 'Fraud, bankruptcy, halts, investigations')}${t('sellOnSevere', 'Sell on serious news', 'Even if the strategy still likes it')}${t('tilt', 'Size by the mood', 'Buy smaller when the mood is negative')}</div>
     <div class="group mt12">${t('councilVeto', 'Council veto', 'If most of the Council in Mango HQ votes no, skip the buy')}</div>
     <div class="pf-grid">${n('earningsDays', 'Skip if earnings are within (trading days)')}${n('minSentiment', 'Skip if the mood is below (−1 to 0)', '', 0.05)}</div>
@@ -8403,6 +8420,26 @@ PAGES.costs = {
 // Newest first. Each release: version, date, a one-line headline and grouped notes.
 // ===================================================================
 const CHANGELOG = [
+  { v: '3.9.0', d: '2026-10-26', title: 'Taxes you can act on', groups: [
+    ['Your tax setting', [
+      'Add your filing status, income and state in Settings → Your profile, and every tax number becomes "what you would actually pay": 2026 federal brackets and standard deduction, the 0/15/20% long-term rates, the 3.8% investment income tax at high incomes, and your state.',
+      'New York is built in with its 2026 rates (the first five brackets cut by 0.1 point this year), plus New York City tax if you live there. For other states, enter your rate.',
+    ]],
+    ['On the Taxes page', [
+      'The year so far across all your taxable wallets: short- and long-term gains, loss carried in, the loss taken off your pay, loss carried into next year, qualified and ordinary dividends, and the estimated tax with the federal and state split.',
+      'Almost long term: holdings within 60 days of turning long term, the date, and how much tax waiting saves.',
+      'Losses you could harvest: what each one saves, a wash-sale check on recent buys, and a stand-in fund to hold for 31 days. One Harvest button sells it and buys the stand-in.',
+      'Each dividend marked qualified (held more than 60 days around the ex-date, taxed like a long-term gain) or ordinary. Bond, T-bill and real-estate funds pay ordinary dividends; international funds note foreign tax.',
+      'Form 8949 and Schedule D: every sale in boxes A, C, D and F with wash-sale code W, and the Schedule D lines. Print it or save it as a PDF.',
+    ]],
+    ['The $3,000 rule', ['A net loss takes up to $3,000 a year off your income ($1,500 married filing separately). The rest carries into the next year and keeps its short- or long-term kind.']],
+    ['Selling', ['The sell screen shows the estimated tax on that sale. In an IRA it says there\'s none.']],
+    ['Tax-aware bots (on by default)', [
+      'Bots sell their highest-cost shares first, so each sale realizes the smallest gain.',
+      'When a bot wants to sell shares that turn long term within 10 days, and waiting saves real money, it waits and says why. Its stop stays in place, and it doesn\'t wait on serious news or a time stop.',
+      'Switch it off per bot under Limits and news.',
+    ]],
+  ] },
   { v: '3.8.0', d: '2026-10-26', title: 'Account types: real cash accounts, IRAs and Roth IRAs', groups: [
     ['Your profile', [
       'Mango asks for your date of birth once, and the account rules use your real age, the way a broker does: margin needs you to be 18 or older, IRA withdrawals are penalty-free from 59½, and required withdrawals start at 73 (75 if you were born in 1960 or later).',
@@ -8831,12 +8868,18 @@ function profileSheet({ first = false } = {}) {
     <div class="field"><span>Tax filing status</span>${seg('pf-fil', [['single', 'Single'], ['joint', 'Married, jointly'], ['hoh', 'Head of household']], st.filing)}</div>
     <div class="pf-grid"><label class="field"><span>Income this year ($)</span><input type="number" inputmode="decimal" id="pf-inc" value="${h(st.income)}" placeholder="For the Roth limit"></label>
       <label class="field"><span>Earned from work ($)</span><input type="number" inputmode="decimal" id="pf-ear" value="${h(st.earned)}" placeholder="Caps IRA deposits"></label></div>
+    <div class="section-h"><h2>For tax estimates</h2><span class="t-foot">Optional</span></div>
+    <label class="field"><span>State you live in</span><select id="pf-st">${[['', 'Not set'], ['none', 'No state income tax'], ['NY', 'New York'], ['CA', 'California'], ['NJ', 'New Jersey'], ['PA', 'Pennsylvania'], ['FL', 'Florida'], ['TX', 'Texas'], ['other', 'Another state (enter a rate)']].map(([v, l]) => `<option value="${v}" ${(pr.state || '') === v || (v === 'other' && pr.state && !['none', 'NY', 'CA', 'NJ', 'PA', 'FL', 'TX'].includes(pr.state)) ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+    <div id="pf-stx"></div>
     <p class="note">Stays on your own server. It's used only for these rules. IRA deposits can't be more than what you earned from work that year.</p>`,
     foot: `<button class="btn btn-primary btn-block btn-lg" id="pf-go">${first ? 'Continue' : 'Save'}</button>` });
   raf(() => placeThumbs(s.body)); onSeg(s.body, 'pf-fil', v => { st.filing = v; });
+  const stx = () => { const v = $('#pf-st', s.body).value; $('#pf-stx', s.body).innerHTML = v === 'NY' ? `<div class="group"><div class="cell"><div class="main"><div class="title">I live in New York City</div><div class="sub">Adds the city's income tax (about 3.1% to 3.9%)</div></div>${sw(!!pr.city, 'id="pf-nyc"')}</div></div>` : ['CA', 'NJ', 'PA', 'other'].includes(v) ? `<label class="field"><span>Your state's tax rate on gains (%)</span><input type="number" inputmode="decimal" id="pf-rate" value="${h(pr.stateRate ?? '')}" placeholder="e.g. 5"></label>` : ''; const n = $('#pf-nyc', s.body); if (n) n.addEventListener('click', () => n.classList.toggle('on')); };
+  $('#pf-st', s.body).addEventListener('change', stx); stx();
   $('#pf-go', s.footEl).addEventListener('click', async e => {
     const dob = $('#pf-dob', s.body).value; if (!dob) { toast('Enter your date of birth', { kind: 'err' }); return; }
-    const body = { dob, filing: st.filing, income: $('#pf-inc', s.body).value, earned: $('#pf-ear', s.body).value };
+    const sv = $('#pf-st', s.body).value, body = { dob, filing: st.filing, income: $('#pf-inc', s.body).value, earned: $('#pf-ear', s.body).value };
+    if (sv) { body.state = sv === 'other' ? 'none' : sv; if ($('#pf-rate', s.body)) { body.stateRate = $('#pf-rate', s.body).value; if (sv === 'other') body.state = 'OT'; } body.city = !!$('#pf-nyc.on', s.body); }
     if (pr.dob && pr.dob !== dob) { if (!(await confirmBox({ title: 'Change your date of birth?', msg: 'Your age rules (margin, IRA penalties, required withdrawals) follow it.', ok: 'Change it' }))) return; body.confirmDob = true; }
     busy(e.currentTarget, true);
     try { await post('profile', body); s.close(); await loadState(); toast('Saved'); } catch (err) { busy(e.currentTarget, false); toastErr(err); }
@@ -8844,10 +8887,76 @@ function profileSheet({ first = false } = {}) {
   return s;
 }
 // asked once, after the update, before anything else
-on('state', function askDob() { if (askDob.shown || !App.S || App.S.profile?.set || !App.T) return; askDob.shown = true; setTimeout(() => profileSheet({ first: true }), 900); });
+on('state', function askDob() { if (askDob.shown || !App.S || App.S.profile?.set || !App.T) return; askDob.shown = true; setTimeout(() => { if (!App.S?.profile?.set) profileSheet({ first: true }); else askDob.shown = true; }, 900); });
 const askDobAgain = () => { if (!App.S?.profile?.set) profileSheet({ first: true }); }; // until it's set, it comes back a minute later
 ACT.profile = () => profileSheet();
 const profileRow = () => { const pr = App.S?.profile; return `<button class="cell" data-act="profile"><div class="lead">${icon('key')}</div><div class="main"><div class="title">Your profile</div><div class="sub">${pr?.set ? `Age ${pr.age} · used for margin, options and IRA rules` : 'Add your date of birth for the age rules'}</div></div>${icon('right', 'chev')}</button>`; };
+
+// ===================================================================
+// Tax planning on the Taxes page: the year so far with an estimate, the long-term countdown, loss harvesting,
+// dividend types, and a printable Form 8949 / Schedule D summary.
+// ===================================================================
+async function taxPlanDraw(p) {
+  const el = $('#tx-plan', p.body); if (!el) return;
+  el.innerHTML = '<div class="sk sk-block mt16" style="height:180px"></div>';
+  let d; try { d = await api('taxes/plan?y=' + p.y); } catch (e) { el.innerHTML = ''; return; }
+  const g = d.gains || {}, e = d.estimate, kv = (k, v, c = '') => `<div class="kv"><span class="k">${k}</span><span class="v ${c}">${v}</span></div>`;
+  const pr = d.profile, where = pr.state === 'NY' ? `New York${pr.city ? ' and New York City' : ''}` : pr.state && pr.state !== 'none' ? pr.state : 'federal only';
+  const now = new Date().getFullYear() === p.y;
+  el.innerHTML = `<div class="section-h"><h2>${p.y}${now ? ' so far' : ''}</h2><span class="t-foot">All ${d.wallets} taxable wallet${d.wallets === 1 ? '' : 's'}</span></div>
+    <div class="card tax-year">
+      ${kv('Short-term gains', money(g.short || 0, { sign: true }), cls(g.short))}${kv('Long-term gains', money(g.long || 0, { sign: true }), cls(g.long))}
+      ${g.carryIn ? kv('Loss carried in from earlier years', money(-g.carryIn, { sign: true }), 'dn') : ''}
+      ${g.deduct ? kv('Loss taken off your pay', money(g.deduct)) : ''}${g.carryOut ? kv(`Loss carried into ${p.y + 1}`, money(g.carryOut)) : ''}
+      ${kv('Dividends: qualified / ordinary', `${money(d.dividends.qualified)} / ${money(d.dividends.ordinary)}`)}${d.interest ? kv('Interest', money(d.interest)) : ''}
+      <div class="kv total"><span class="k">${d.setup && e.total < 0 ? 'Estimated tax saved' : 'Estimated tax on all of it'}</span><span class="v ${d.setup && e.total < 0 ? 'up' : ''}">${d.setup ? money(Math.abs(e.total)) : '–'}</span></div>
+      ${d.setup && e.total < 0 ? '<div class="t-foot">Your net loss lowers the tax on your pay, up to $3,000 of loss a year.</div>' : ''}
+      ${d.setup ? `<div class="t-foot">Federal ${money(e.fed + e.niit)}${e.state ? ` · state ${money(e.state)}` : ''}${e.city ? ` · NYC ${money(e.city)}` : ''} · ${h(where)}, ${h({ single: 'single', joint: 'married filing jointly', hoh: 'head of household', sep: 'married filing separately' }[pr.filing] || 'single')}, ${money(pr.income)} income</div>`
+        : `<button class="btn btn-quiet btn-block mt8" data-act="profile">${icon('key')}Add your income and state to estimate tax</button>`}
+    </div>
+    ${(d.countdown = d.countdown.filter(c => c.days <= 60)).length ? `<div class="section-h"><h2>Almost long term</h2><span class="t-foot">Hold and keep more</span></div><div class="group">${d.countdown.slice(0, 8).map(c => `<button class="cell arow" data-act="asset" data-sym="${h(c.sym)}">${logo(c.sym, 'logo-sm')}<div class="main"><div class="sym">${h(c.sym)} <span class="t-cap">${h(c.wallet)}</span></div><div class="sub">${c.days} day${c.days === 1 ? '' : 's'} left · long term on ${fmtDate(c.longOn + 'T12:00')}</div></div><div class="trail col" style="align-items:flex-end"><b class="n up">${d.setup ? `+${money(c.save)}` : money(c.gain, { sign: true })}</b><span class="t-cap">${d.setup ? 'kept by waiting' : 'gain'}</span></div></button>`).join('')}</div>
+      <p class="note">Sell after the date and the gain is taxed at the long-term rate (0%, 15% or 20%) instead of like pay.</p>` : ''}
+    ${d.harvest.length ? `<div class="section-h"><h2>Losses you could harvest</h2></div><div class="group">${d.harvest.slice(0, 8).map((x, i) => `<div class="cell harvest"><div class="lead">${logo(x.sym, 'logo-sm')}</div><div class="main"><div class="sym">${h(x.sym)} <span class="t-cap">${h(x.wallet)}</span></div>
+        <div class="sub">${money(x.loss, { sign: true })} loss${d.setup && x.saves > 0 ? ` · saves about <b class="up">${money(x.saves)}</b>` : ''}${x.swap ? ` · hold ${h(x.swap)} meanwhile` : ''}</div>${x.wash ? `<div class="sub dn">${h(x.wash.text)}</div>` : ''}</div>
+        <button class="btn btn-quiet harvest-go" data-hv="${i}">Harvest</button></div>`).join('')}</div>
+      <p class="note">Selling a loser turns its loss into a tax write-off against your gains, and up to $3,000 of income a year. Don't buy the same stock back for 31 days, or it's a wash sale. The stand-in tracks a different index or a wider group: the IRS hasn't defined "substantially identical", and different-index funds are the common choice.</p>` : ''}
+    ${d.dividends.list.length ? `<details class="tax-divs mt12"><summary>${d.dividends.list.length} dividend${d.dividends.list.length === 1 ? '' : 's'}: ${d.dividends.list.filter(x => x.kind === 'qualified').length} qualified</summary><div class="group mt8">${d.dividends.list.slice(-30).reverse().map(x => `<div class="cell"><div class="main"><div class="title">${h(x.sym)} · ${money(x.amount)}</div><div class="sub">${x.kind === 'qualified' ? 'Qualified: taxed like a long-term gain' : 'Ordinary: taxed like pay'}. ${h(x.why)}${x.intl ? '. International fund: some foreign tax may have been withheld, which you can usually claim back as a credit' : ''}.</div></div><span class="t-cap">${fmtDate(x.ts)}</span></div>`).join('')}</div></details>` : ''}
+    <button class="btn btn-quiet btn-block mt12" data-act="go" data-to="form8949/${p.y}">${icon('note')}Form 8949 and Schedule D for ${p.y}</button>
+    <p class="note">${h(d.note)}</p>`;
+  el.onclick = async ev => {
+    const b = ev.target.closest('[data-hv]'); if (!b) return;
+    const x = d.harvest[+b.dataset.hv];
+    const msg = `Sell all ${+x.qty.toFixed(4)} ${x.sym} in ${x.wallet} for a ${money(x.loss)} loss${x.swap ? `, and buy ${x.swap} with the money so you stay invested` : ''}.${x.wash ? '\\n\\n' + x.wash.text : ''}\\n\\nDon't buy ${x.sym} back before ${fmtDate(x.rebuyAfter + 'T12:00')}.`;
+    if (!(await confirmBox({ title: `Harvest ${x.sym}?`, msg, ok: 'Harvest' }))) return;
+    busy(b, true);
+    try { const r = await post('taxes/harvest', { wid: x.wid, sym: x.sym, swap: x.swap || false }); toast(`Harvested ${x.sym}`, { sub: r.buy ? `Bought ${money(r.buy.qty * r.buy.price)} of ${x.swap}.` : r.buyError ? `Couldn't buy ${x.swap}: ${r.buyError}` : 'Sold.' }); await loadState(); p.load(); }
+    catch (err) { busy(b, false); toastErr(err); }
+  };
+}
+// a printable Form 8949 / Schedule D summary (print or save as PDF from the share sheet)
+PAGES.form8949 = {
+  mount(p, [y]) {
+    p.y = +y || new Date().getFullYear(); p.title(`Form 8949 · ${p.y}`, true);
+    p.acts(`<button class="icon-btn" data-act="print8949" aria-label="Print or save as PDF">${icon('download')}</button>`);
+    p.body.innerHTML = '<div class="sk sk-block mt16"></div>';
+    api('taxes/8949?y=' + p.y).then(d => this.draw(p, d)).catch(e => { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; });
+  },
+  draw(p, d) {
+    const BOX = { A: 'Part I, box A: short term, basis reported (stocks)', C: 'Part I, box C: short term, basis not reported (crypto)', D: 'Part II, box D: long term, basis reported (stocks)', F: 'Part II, box F: long term, basis not reported (crypto)' };
+    const dt = t => new Date(t).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric', timeZone: 'America/New_York' });
+    const sec = b => { const l = d.lines.filter(x => x.box === b), t = d.boxes[b]; if (!l.length) return ''; return `<div class="section-h"><h2>${h(BOX[b])}</h2></div><div class="f8949"><table><thead><tr><th>(a) Description</th><th>(b) Acquired</th><th>(c) Sold</th><th>(d) Proceeds</th><th>(e) Cost</th><th>(f) Code</th><th>(g) Adjustment</th><th>(h) Gain or loss</th></tr></thead><tbody>${l.map(x => `<tr><td>${h(x.desc)}</td><td>${dt(x.acquired)}</td><td>${dt(x.sold)}</td><td>${money(x.proceeds)}</td><td>${money(x.basis)}</td><td>${x.code}</td><td>${x.adj ? money(x.adj) : ''}</td><td class="${cls(x.gain)}">${money(x.gain)}</td></tr>`).join('')}</tbody><tfoot><tr><td colspan="3">Totals (${t.count})</td><td>${money(t.proceeds)}</td><td>${money(t.basis)}</td><td></td><td>${t.adj ? money(t.adj) : ''}</td><td class="${cls(t.gain)}">${money(t.gain)}</td></tr></tfoot></table></div>`; };
+    const sd = d.scheduleD;
+    p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Form 8949</h1><p class="t-sub" style="margin:0 2px">Every sale in ${d.y} across your taxable wallets, laid out like the IRS form, with the Schedule D totals. Practice numbers for learning.</p>
+      <div class="card mt16"><div class="t-cap">Schedule D</div>
+        <div class="kv"><span class="k">Line 7: net short-term</span><span class="v ${cls(sd.line7)}">${money(sd.line7)}</span></div>
+        <div class="kv"><span class="k">Line 15: net long-term</span><span class="v ${cls(sd.line15)}">${money(sd.line15)}</span></div>
+        <div class="kv total"><span class="k">Line 16: total</span><span class="v ${cls(sd.net)}">${money(sd.net)}</span></div>
+        ${sd.deduct ? `<div class="kv"><span class="k">Line 21: loss taken off income</span><span class="v">${money(-sd.deduct)}</span></div>` : ''}${sd.carryOut ? `<div class="kv"><span class="k">Carried into ${d.y + 1}</span><span class="v">${money(sd.carryOut)}</span></div>` : ''}${sd.carryIn ? `<div class="kv"><span class="k">Carried in from ${d.y - 1}</span><span class="v">${money(-sd.carryIn)}</span></div>` : ''}</div>
+      ${['A', 'C', 'D', 'F'].map(sec).join('') || '<div class="group mt16"><div class="empty"><p>No sales this year.</p></div></div>'}
+      <p class="note">Code W marks a wash sale: the disallowed loss is the adjustment in column (g). Brokers report stock cost basis to the IRS (boxes A and D); crypto sales are listed as not reported (C and F).</p>`;
+  },
+};
+ACT.print8949 = () => { document.documentElement.classList.add('printing'); setTimeout(() => { window.print(); document.documentElement.classList.remove('printing'); }, 60); };
 
 // ===================================================================
 // Settings

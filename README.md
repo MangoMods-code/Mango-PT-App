@@ -2,7 +2,7 @@
 
 A paper trading app for iPhone with real market prices. It runs from the Home Screen and is built on Node and Postgres.
 
-**⬇️ [Download the latest version](https://github.com/MangoMods-code/Mango-PT-App/releases/latest)** · Current: [V3.8.0, Account types](https://github.com/MangoMods-code/Mango-PT-App/releases/tag/V3.8.0) · [All releases](https://github.com/MangoMods-code/Mango-PT-App/releases)
+**⬇️ [Download the latest version](https://github.com/MangoMods-code/Mango-PT-App/releases/latest)** · Current: [V3.9.0, Taxes you can act on](https://github.com/MangoMods-code/Mango-PT-App/releases/tag/V3.9.0) · [All releases](https://github.com/MangoMods-code/Mango-PT-App/releases)
 
 Trade stocks, ETFs and crypto with practice money. You can also put strategies to work as bots, let Autopilot run a mix of them, and watch it all happen in **Mango HQ**: a small isometric world where your bots walk around and a Council of up to ten members votes on every trade. If you connect an Alpaca account, the same app can trade it, on paper or with real money, on a separate side with its own safeguards.
 
@@ -22,6 +22,7 @@ Trade stocks, ETFs and crypto with practice money. You can also put strategies t
 - Limits are per bot: position size, trades per day, daily loss, a drawdown stop and a budget.
 - **Autopilot 2** tests 32 strategy tryouts on pretend money and backs the ones that are working. It favors what has worked in the current kind of market, splits money by score per unit of risk, re-plans monthly (and weekly when things shift a lot), breeds variations of its best tryouts that are judged only on what happens after they're born, parks idle money in T-bills, scales down for small accounts, and has the Analyst review each plan. It also keeps volatility targeting, the safety switch and the brake after a drop.
 - **Strategy versions**: every strategy shows its version (v1, v2…) with what changed, on the New bot screen, the bot page and its Change sheet. v2 of Trend follower, Dip buyer (RSI-2), Breakout and Buy and hold (3.3.0) each pick which shared safety layers they use, so a dip buyer isn't blocked by bad-mood news and buy and hold isn't stopped out; idle money waits in SGOV. v2 of Dual momentum, Low volatility, News jump drift, Turn of the month and Snap-back followed in 3.4.0.
+- **Taxes**: estimates with your bracket and state (New York built in), the long-term countdown, loss harvesting with wash-sale checks, the $3,000 limit and carryover, qualified vs ordinary dividends, a printable Form 8949 and Schedule D, and tax-aware bots.
 - **Account types**: real cash-account rules (good faith violations and the 90-day restriction), IRA and Roth IRA wallets with the yearly limit, withdrawal penalties and required withdrawals, and age rules from your date of birth.
 - **Market rules**: market-wide circuit breakers (7%, 13%, 20%), single-stock price bands with 5-minute pauses, fractional-share order rules, price improvement on market orders, "are you sure?" order checks, and a market calendar with holidays and early closes. Each rule can be switched off in Settings.
 - **Leaderboard**: fair time-weighted returns (deposits never count), a 1–99 score against the S&P 500 that new bots grow into, podium, periods, sorting, rank arrows, streaks, badges, sparklines, a full stats breakdown per bot, and a by-strategy view.
