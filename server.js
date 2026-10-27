@@ -7813,6 +7813,264 @@ async function boardData() {
   return { bots: out.sort((a, c) => (a.rank || 99) - (c.rank || 99)), strategies, spyNow, asOf: Date.now() };
 }
 GET('/api/bots/board', auth, () => boardData());
+// =====================================================================
+// Research: insiders (Form 4), famous investors (13F), Congress, ETF holdings and overlap,
+// earnings history, the economic calendar, short volume, dividend safety
+// =====================================================================
+// Free public sources first: SEC EDGAR (filings), FINRA (daily short volume), Finnhub's free plan.
+// Finnhub's paid data (Congress, ETF holdings, short interest) is used when the key has it.
+const SEC_UA = () => ENV.SEC_CONTACT ? `MangoPaperTrading/1.0 ${String(ENV.SEC_CONTACT).slice(0, 120)}` : 'MangoPaperTrading/1.0 (self-hosted research)';
+async function getText(url, { timeout = 15000, headers = {} } = {}) {
+  const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Mango Paper Trading)', ...headers }, signal: AbortSignal.timeout(timeout) });
+  if (r.status === 403 || r.status === 401) throw new HttpError(403, 'refused');
+  if (r.status === 404) throw new HttpError(404, 'not found');
+  if (!r.ok) throw new HttpError(502, `Data source error ${r.status}`);
+  return r.text();
+}
+// SEC asks every app to say who it is (name and email); without it, it may refuse
+const secGet = url => getText(url, { headers: { 'User-Agent': SEC_UA(), Accept: '*/*' } }).catch(e => { if (e.status === 403) throw new HttpError(503, ENV.SEC_CONTACT ? 'The SEC refused the request. Try again later.' : 'The SEC asks apps to identify themselves. Add a SEC_CONTACT variable in Railway with your name and email (for example "Alex Smith alex@example.com").'); throw e; });
+const secJson = async url => JSON.parse(await secGet(url));
+const fhPaid = e => /free plan|access|premium/i.test(e?.message || '');
+async function fhMaybe(pathq) { // a Finnhub call that may be paid-only: null when the plan doesn't include it
+  try { const d = await fhApi(pathq, 2); if (d && typeof d === 'object' && !Array.isArray(d) && d.error) return { paid: true }; return { d }; }
+  catch (e) { if (fhPaid(e)) return { paid: true }; throw e; }
+}
+const xmlTag = (s, t) => { const m = new RegExp(`<(?:\\w+:)?${t}[^>]*>([\\s\\S]*?)</(?:\\w+:)?${t}>`, 'i').exec(s); return m ? m[1].trim() : null; };
+const xmlAll = (s, t) => { const out = [], re = new RegExp(`<(?:\\w+:)?${t}[^>]*>([\\s\\S]*?)</(?:\\w+:)?${t}>`, 'gi'); let m; while ((m = re.exec(s))) out.push(m[1]); return out; };
+const unXml = s => s == null ? null : s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'");
+// company names in filings ("APPLE INC") matched to tickers ("Apple Inc.")
+const normName = s => String(s || '').toUpperCase().replace(/&/g, ' AND ').replace(/[^A-Z0-9 ]/g, ' ')
+  .replace(/\b(INC|INCORPORATED|CORP|CORPORATION|CO|COMPANY|LTD|LIMITED|PLC|HLDGS|HLDG|HOLDINGS?|GROUP|GRP|CL [A-C]|CLASS [A-C]|CL|COM|COMMON|STOCK|NEW|DEL|THE|SA|NV|AG|LP|LLC|SHS|ORD|SPONSORED|ADR|ADS|REIT|TR|TRUST)\b/g, ' ').replace(/\s+/g, ' ').trim();
+async function secTickers() {
+  return cached('sec:tickers', 7 * 864e5, async () => {
+    const j = await secJson('https://www.sec.gov/files/company_tickers.json'), byName = new Map(), byTicker = new Map();
+    for (const v of Object.values(j)) { byTicker.set(v.ticker, { cik: v.cik_str, title: v.title }); const k = normName(v.title); if (k && !byName.has(k)) byName.set(k, v.ticker); }
+    return { byName, byTicker };
+  });
+}
+const tickerFor = (t, name) => t.byName.get(normName(name)) || null;
+
+// ---------- famous investors: their latest 13F (quarterly holdings, 45 days after the quarter) ----------
+const FUND13F = [
+  { k: 'berkshire', cik: 1067983, name: 'Berkshire Hathaway', who: 'Warren Buffett' },
+  { k: 'scion', cik: 1649339, name: 'Scion Asset Management', who: 'Michael Burry' },
+  { k: 'pershing', cik: 1336528, name: 'Pershing Square', who: 'Bill Ackman' },
+  { k: 'ark', cik: 1697748, name: 'ARK Investment Management', who: 'Cathie Wood' },
+  { k: 'duquesne', cik: 1536411, name: 'Duquesne Family Office', who: 'Stanley Druckenmiller' },
+  { k: 'appaloosa', cik: 1656456, name: 'Appaloosa', who: 'David Tepper' },
+  { k: 'baupost', cik: 1061768, name: 'Baupost Group', who: 'Seth Klarman' },
+  { k: 'thirdpoint', cik: 1040273, name: 'Third Point', who: 'Dan Loeb' },
+  { k: 'bridgewater', cik: 1350694, name: 'Bridgewater Associates', who: 'Ray Dalio\'s firm' },
+];
+const cik10 = c => String(c).padStart(10, '0');
+async function info13f(cik, acc, filed) {
+  const base = `https://www.sec.gov/Archives/edgar/data/${cik}/${acc.replace(/-/g, '')}`;
+  const idx = await secJson(base + '/index.json'), files = (idx.directory?.item || []).map(x => x.name);
+  const xml = files.find(f => /\.xml$/i.test(f) && !/primary_doc/i.test(f)) || files.find(f => /infotable|informationtable/i.test(f));
+  if (!xml) throw new HttpError(502, 'No holdings table in that filing');
+  const body = await secGet(`${base}/${xml}`), thousands = filed < '2023-01-03'; // values were in thousands of dollars before 2023
+  const map = new Map();
+  for (const it of xmlAll(body, 'infoTable')) {
+    if (xmlTag(it, 'putCall')) continue; // options on a stock aren't owning it
+    const cusip = xmlTag(it, 'cusip'), name = unXml(xmlTag(it, 'nameOfIssuer')), val = +xmlTag(it, 'value') * (thousands ? 1000 : 1), sh = +xmlTag(it, 'sshPrnamt') || 0, type = xmlTag(it, 'sshPrnamtType');
+    if (type && type !== 'SH') continue;
+    const e = map.get(cusip) || { cusip, name, value: 0, shares: 0 }; e.value += val || 0; e.shares += sh; map.set(cusip, e);
+  }
+  return [...map.values()];
+}
+async function fund13f(f) {
+  return cached('13f:' + f.k, 24 * 3600e3, async () => {
+    const sub = await secJson(`https://data.sec.gov/submissions/CIK${cik10(f.cik)}.json`), r = sub.filings?.recent || {};
+    const list = (r.form || []).map((form, i) => ({ form, acc: r.accessionNumber[i], filed: r.filingDate[i], period: r.reportDate[i] })).filter(x => x.form === '13F-HR');
+    if (!list.length) throw new HttpError(404, 'No 13F filings found');
+    const [cur, prev] = list;
+    const [now, before] = await Promise.all([info13f(f.cik, cur.acc, cur.filed), prev ? info13f(f.cik, prev.acc, prev.filed).catch(() => null) : null]);
+    const t = await secTickers().catch(() => null), total = now.reduce((s, x) => s + x.value, 0) || 1, pm = new Map((before || []).map(x => [x.cusip, x]));
+    const holdings = now.map(x => { const p = pm.get(x.cusip); return { ...x, sym: t ? tickerFor(t, x.name) : null, pct: x.value / total, prevShares: p ? p.shares : 0, change: !before ? null : !p ? 'new' : x.shares > p.shares * 1.02 ? 'added' : x.shares < p.shares * 0.98 ? 'trimmed' : 'same' }; }).sort((a, b) => b.value - a.value);
+    const sold = before ? before.filter(x => !now.some(y => y.cusip === x.cusip)).map(x => ({ ...x, sym: t ? tickerFor(t, x.name) : null })).sort((a, b) => b.value - a.value) : [];
+    return { k: f.k, name: f.name, who: f.who, secName: sub.name, period: cur.period, filed: cur.filed, prevPeriod: prev?.period || null, total, count: holdings.length, holdings, sold, url: `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${f.cik}&type=13F-HR` };
+  });
+}
+let warming = null;
+function warmFunds() { if (!warming) warming = (async () => { for (const f of FUND13F) { await fund13f(f).catch(e => warn('13F', f.k, e.message)); await sleep(400); } })().finally(() => { warming = null; }); return warming; }
+const fundCached = f => cache.get('13f:' + f.k)?.v || null;
+GET('/api/research/funds', auth, async () => {
+  const have = FUND13F.map(fundCached); if (have.some(x => !x)) warmFunds();
+  return { funds: FUND13F.map((f, i) => { const d = have[i]; return { k: f.k, name: f.name, who: f.who, ready: !!d, period: d?.period, filed: d?.filed, total: d?.total, count: d?.count, top: d ? d.holdings.slice(0, 3).map(x => x.sym || x.name) : [] }; }), loading: have.some(x => !x), contact: !!ENV.SEC_CONTACT };
+});
+GET('/api/research/fund/:k', auth, async req => {
+  const f = FUND13F.find(x => x.k === req.params.k); if (!f) fail('Unknown fund', 404);
+  const d = await fund13f(f);
+  return { ...d, holdings: d.holdings.slice(0, 60), sold: d.sold.slice(0, 20) };
+});
+function fundsHolding(sym) {
+  const out = []; let pending = false;
+  for (const f of FUND13F) { const d = fundCached(f); if (!d) { pending = true; continue; } const h = d.holdings.find(x => x.sym === sym); if (h) out.push({ k: f.k, name: f.name, who: f.who, shares: h.shares, value: h.value, pct: h.pct, change: h.change, prevShares: h.prevShares, period: d.period }); else { const s = d.sold.find(x => x.sym === sym); if (s) out.push({ k: f.k, name: f.name, who: f.who, shares: 0, value: 0, pct: 0, change: 'sold', prevShares: s.shares, period: d.period }); } }
+  if (pending) warmFunds();
+  return { funds: out.sort((a, b) => b.value - a.value), pending };
+}
+
+// ---------- insiders: Form 4 buys and sells, via Finnhub's free plan ----------
+const INSIDER_CODE = { P: 'Bought on the market', S: 'Sold on the market', A: 'Granted (pay)', M: 'Exercised options', F: 'Shares withheld for tax', G: 'Gift', D: 'Returned to the company', C: 'Converted', X: 'Exercised options', J: 'Other' };
+async function insiders(sym) {
+  return cached('ins4:' + sym, 6 * 3600e3, async () => {
+    const d = await fhApi(`stock/insider-transactions?symbol=${encodeURIComponent(sym)}&from=${etDate(Date.now() - 200 * 864e5)}`, 2);
+    const list = (d?.data || []).filter(x => x.transactionDate >= etDate(Date.now() - 183 * 864e5)).map(x => ({ name: x.name, date: x.transactionDate, filed: x.filingDate, code: x.transactionCode, what: INSIDER_CODE[x.transactionCode] || x.transactionCode, change: +x.change || 0, price: +x.transactionPrice || 0, after: +x.share || 0, value: Math.abs(+x.change || 0) * (+x.transactionPrice || 0) }))
+      .sort((a, b) => b.date.localeCompare(a.date));
+    const buys = list.filter(x => x.code === 'P'), sells = list.filter(x => x.code === 'S');
+    const people = new Set(buys.map(x => x.name));
+    return { list: list.slice(0, 40), buys: buys.length, sells: sells.length, buyValue: buys.reduce((t, x) => t + x.value, 0), sellValue: sells.reduce((t, x) => t + x.value, 0), buyers: people.size,
+      cluster: people.size >= 3, note: 'Open-market buys (code P) are the signal people watch: insiders sell for many reasons, but they usually buy for one. Grants, option exercises and tax withholding are routine.' };
+  });
+}
+// ---------- Congress: trades members disclose under the STOCK Act (Finnhub paid data) ----------
+async function congress(sym) {
+  return cached('cong:' + sym, 12 * 3600e3, async () => {
+    const r = await fhMaybe(`stock/congressional-trading?symbol=${encodeURIComponent(sym)}&from=${etDate(Date.now() - 365 * 864e5)}&to=${etDate()}`);
+    if (r.paid) return { available: false, why: 'Congress trades are on Finnhub\'s paid plans. With a key that has them, they show up here.' };
+    const list = (r.d?.data || []).map(x => ({ name: x.name, position: x.position, owner: x.ownerType, type: x.transactionType, date: x.transactionDate, filed: x.filingDate, from: +x.amountFrom || 0, to: +x.amountTo || 0 })).sort((a, b) => b.date.localeCompare(a.date));
+    return { available: true, list: list.slice(0, 30), buys: list.filter(x => /purchase|buy/i.test(x.type)).length, sells: list.filter(x => /sale|sell/i.test(x.type)).length,
+      note: 'Members of Congress have up to 45 days to report a trade, and only a dollar range is disclosed.' };
+  });
+}
+
+// ---------- ETF holdings: Finnhub (paid) or the fund's latest SEC portfolio report (N-PORT) ----------
+const ETF_PROXY = { SPY: 'IVV', VOO: 'IVV', SPLG: 'IVV', QQQ: 'QQQM', DIA: null }; // unit trusts don't file N-PORT; these track the same index
+async function nportFor(sym) {
+  const mf = await cached('sec:mf', 7 * 864e5, () => secJson('https://www.sec.gov/files/company_tickers_mf.json'));
+  const fi = mf.fields || ['cik', 'seriesId', 'classId', 'symbol'], row0 = (mf.data || []).find(r => r[fi.indexOf('symbol')] === sym);
+  if (!row0) return null;
+  const cik = row0[fi.indexOf('cik')], series = row0[fi.indexOf('seriesId')];
+  const atom = await secGet(`https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${series}&type=NPORT-P&dateb=&owner=include&count=5&output=atom`);
+  const acc = xmlTag(atom, 'accession-number') || (/(\d{10}-\d{2}-\d{6})/.exec(atom) || [])[1]; if (!acc) return null;
+  const xml = await secGet(`https://www.sec.gov/Archives/edgar/data/${cik}/${acc.replace(/-/g, '')}/primary_doc.xml`);
+  const asOf = xmlTag(xml, 'repPdDate') || xmlTag(xml, 'repPdEnd'), t = await secTickers().catch(() => null);
+  const rows = xmlAll(xml, 'invstOrSec').map(it => ({ name: unXml(xmlTag(it, 'name') || xmlTag(it, 'title')), cusip: xmlTag(it, 'cusip'), pct: (+xmlTag(it, 'pctVal') || 0) / 100, value: +xmlTag(it, 'valUSD') || 0 }))
+    .filter(x => x.pct > 0).map(x => ({ ...x, sym: t ? tickerFor(t, x.name) : null })).sort((a, b) => b.pct - a.pct);
+  return { asOf, holdings: rows, source: 'SEC N-PORT' };
+}
+async function etfHoldings(sym) {
+  return cached('etfh:' + sym, 3 * 864e5, async () => {
+    if (FINNHUB_KEY) { const r = await fhMaybe('etf/holdings?symbol=' + encodeURIComponent(sym)).catch(() => ({ paid: true })); if (!r.paid && r.d?.holdings?.length) return { sym, asOf: r.d.atDate, source: 'Finnhub', holdings: r.d.holdings.map(x => ({ sym: x.symbol, name: x.name, pct: (+x.percent || 0) / 100, value: +x.value || 0 })).sort((a, b) => b.pct - a.pct) }; }
+    let d = await nportFor(sym).catch(e => { if (e.status === 503) throw e; return null; }), via = null;
+    if (!d && ETF_PROXY[sym]) { d = await nportFor(ETF_PROXY[sym]).catch(e => { if (e.status === 503) throw e; return null; }); via = ETF_PROXY[sym]; }
+    if (!d) fail(`No holdings report found for ${sym}. Funds file their holdings with the SEC every quarter; some (like unit trusts) don't.`, 404);
+    return { sym, asOf: d.asOf, source: d.source, via, holdings: d.holdings };
+  });
+}
+const holdKey = x => x.sym || normName(x.name);
+function overlapOf(a, b) {
+  const mb = new Map(b.holdings.map(x => [holdKey(x), x])); let ov = 0; const both = [];
+  for (const x of a.holdings) { const y = mb.get(holdKey(x)); if (!y) continue; const m = Math.min(x.pct, y.pct); ov += m; both.push({ sym: x.sym, name: x.name, a: x.pct, b: y.pct, min: m }); }
+  return { overlap: ov, count: both.length, countA: a.holdings.length, countB: b.holdings.length, both: both.sort((p, q) => q.min - p.min).slice(0, 25) };
+}
+GET('/api/research/etf/:sym', auth, async req => { const d = await etfHoldings(cleanSym(req.params.sym)); return { ...d, count: d.holdings.length, holdings: d.holdings.slice(0, 50), top10: d.holdings.slice(0, 10).reduce((t, x) => t + x.pct, 0) }; });
+GET('/api/research/overlap', auth, async req => {
+  const a = cleanSym(req.query.a), b = cleanSym(req.query.b); if (!a || !b || a === b) fail('Pick two different funds');
+  const [A, B] = await Promise.all([etfHoldings(a), etfHoldings(b)]);
+  return { a, b, asOfA: A.asOf, asOfB: B.asOf, viaA: A.via || null, viaB: B.via || null, ...overlapOf(A, B) };
+});
+
+// ---------- earnings history: beat or miss, and how the stock moved ----------
+async function earningsHistory(sym) {
+  return cached('eh:' + sym, 12 * 3600e3, async () => {
+    const [eps, cal, bars] = await Promise.all([
+      fhApi('stock/earnings?symbol=' + encodeURIComponent(sym), 2).catch(() => []),
+      fhApi(`calendar/earnings?from=${etDate(Date.now() - 400 * 864e5)}&to=${etDate()}&symbol=${encodeURIComponent(sym)}`, 2).catch(() => null),
+      dailyBars(sym).catch(() => null),
+    ]);
+    const dates = (cal?.earningsCalendar || []).filter(x => x.date <= etDate()).sort((a, b) => b.date.localeCompare(a.date));
+    const rows = (Array.isArray(eps) ? eps : []).slice(0, 8).map(x => {
+      // the report that covers this quarter is the first one within ~100 days after its end
+      const rep = dates.find(d => d.date > x.period && d.date <= addIso(x.period, 100));
+      let move = null;
+      if (rep && bars?.d?.length) {
+        const i = lastIndexOnOrBefore(bars.d, rep.date), amc = rep.hour === 'amc';
+        const before = amc ? i : i - 1, after = amc ? i + 1 : i;
+        if (before >= 0 && after < bars.c.length && bars.d[i] === rep.date) move = bars.c[after] / bars.c[before] - 1;
+      }
+      return { period: x.period, q: x.quarter, y: x.year, actual: x.actual, estimate: x.estimate, surprise: x.surprisePercent, beat: x.actual != null && x.estimate != null ? x.actual >= x.estimate : null, date: rep?.date || null, hour: rep?.hour || null, move };
+    });
+    const known = rows.filter(r => r.beat != null), moves = rows.filter(r => r.move != null).map(r => Math.abs(r.move));
+    return { rows, beats: known.filter(r => r.beat).length, of: known.length, avgMove: moves.length ? moves.reduce((t, x) => t + x, 0) / moves.length : null, next: (await assetInsights(sym).catch(() => ({}))).next || null };
+  });
+}
+// ---------- short selling: FINRA's daily short volume (free), and short interest when Finnhub has it ----------
+async function finraDay(day) {
+  return cached('finra:' + day, 24 * 3600e3, async () => {
+    const t = await getText(`https://cdn.finra.org/equity/regsho/daily/CNMSshvol${day.replace(/-/g, '')}.txt`, { timeout: 20000 });
+    const m = new Map();
+    for (const line of t.split('\n')) { const p = line.split('|'); if (p.length < 5 || p[0] === 'Date') continue; m.set(p[1], { short: +p[2] || 0, exempt: +p[3] || 0, total: +p[4] || 0 }); }
+    if (!m.size) throw new HttpError(404, 'empty');
+    return m;
+  });
+}
+async function shortData(sym) {
+  return cached('short:' + sym, 6 * 3600e3, async () => {
+    const days = []; let p = etParts(), d = [p.y, p.m, p.d];
+    for (let k = 0; k < 12 && days.length < 5; k++) { const iso = ymd(d); if (isTradingDay(...d) && (iso < etDate() || p.h >= 19)) { const m = await finraDay(iso).catch(() => null); if (m) { const x = m.get(sym); if (x) days.push({ date: iso, ...x, ratio: x.total ? x.short / x.total : null }); } } d = addDays(...d, -1); }
+    let si = null;
+    if (FINNHUB_KEY) { const r = await fhMaybe(`stock/short-interest?symbol=${encodeURIComponent(sym)}&from=${etDate(Date.now() - 120 * 864e5)}&to=${etDate()}`).catch(() => ({ paid: true })); if (!r.paid) { const l = (r.d?.data || []).sort((a, b) => b.settleDate?.localeCompare(a.settleDate)); if (l[0]) si = { date: l[0].settleDate, shares: +l[0].shortInterest || 0 }; } }
+    const avg = days.length ? days.reduce((t, x) => t + (x.ratio || 0), 0) / days.length : null;
+    return { days, ratio: days[0]?.ratio ?? null, avg5: avg, interest: si,
+      note: 'Short volume is the share of each day\'s trades marked "short" on US off-exchange venues. Market makers short all the time to fill buy orders, so 40 to 50% is normal; it is not the same as short interest (shares sold short and still open).' };
+  });
+}
+// ---------- dividend safety: payout, growth, debt and its own payment history ----------
+async function dividendSafety(sym) {
+  return cached('dsafe:' + sym, 12 * 3600e3, async () => {
+    const [met, ins] = await Promise.all([cached('met:' + sym, 6 * 3600e3, () => fhApi('stock/metric?symbol=' + encodeURIComponent(sym) + '&metric=all', 2)).catch(() => null), assetInsights(sym).catch(() => ({}))]);
+    const m = met?.metric || {}, divs = (ins.dividends || []).slice().sort((a, b) => a.date - b.date);
+    if (!divs.length && !(m.dividendYieldIndicatedAnnual > 0)) return { pays: false };
+    const pick = (...k) => { for (const x of k) if (m[x] != null && Number.isFinite(+m[x])) return +m[x]; return null; };
+    const payout = pick('payoutRatioTTM', 'payoutRatioAnnual'), growth5 = pick('dividendGrowthRate5Y'), eps = pick('epsGrowthTTMYoy', 'epsGrowth3Y'), de = pick('totalDebt/totalEquityQuarterly', 'totalDebt/totalEquityAnnual'), yld = pick('dividendYieldIndicatedAnnual', 'currentDividendYieldTTM');
+    let cuts = 0; for (let i = 1; i < divs.length; i++) if (divs[i].amount < divs[i - 1].amount * 0.9) cuts++;
+    const checks = [];
+    const add = (label, ok, have, why, w) => checks.push({ label, ok, have, why, w });
+    if (payout != null) add('Pays out a safe share of profits', payout <= 60 ? 1 : payout <= 80 ? 0.6 : payout <= 100 ? 0.25 : 0, `${Math.round(payout)}% of earnings`, 'Under 60% leaves room to keep paying in a bad year. Over 100% means it pays more than it earns.', 30);
+    if (growth5 != null) add('Has been raising it', growth5 > 2 ? 1 : growth5 >= 0 ? 0.6 : 0, `${growth5 >= 0 ? '+' : ''}${growth5.toFixed(1)}% a year over 5 years`, 'Companies that keep raising their dividend rarely cut it.', 20);
+    add('No cuts in recent years', cuts === 0 ? 1 : cuts === 1 ? 0.3 : 0, cuts ? `${cuts} cut${cuts > 1 ? 's' : ''} in ${divs.length} payments` : `${divs.length} payments, none cut`, 'A past cut is the clearest warning sign.', 25);
+    if (eps != null) add('Earnings growing', eps > 0 ? 1 : eps > -10 ? 0.5 : 0, `${eps >= 0 ? '+' : ''}${eps.toFixed(1)}% over the last year`, 'Shrinking profits squeeze the dividend.', 15);
+    if (de != null) add('Manageable debt', de < 1 ? 1 : de < 2 ? 0.6 : 0.2, `${de.toFixed(2)} debt for each $1 of equity`, 'Heavy debt competes with dividends for cash.', 10);
+    if (yld != null && yld > 8) add('Yield not suspiciously high', 0, `${yld.toFixed(1)}%`, 'A very high yield often means the market expects a cut.', 15);
+    const wt = checks.reduce((t, c) => t + c.w, 0) || 1, score = Math.round(checks.reduce((t, c) => t + c.ok * c.w, 0) / wt * 100);
+    const thin = checks.length < 3; // one or two numbers aren't enough to call it
+    return { pays: true, score: thin ? null : score, grade: thin ? 'Not enough data' : score >= 75 ? 'Safe' : score >= 50 ? 'Okay' : 'At risk', yield: yld, checks, note: 'A rough guide from public numbers, not a promise. Funds pass through what they hold, so this is most useful for single companies.' };
+  });
+}
+
+// ---------- the economic calendar ----------
+// Official 2026–27 schedules from the Federal Reserve, BLS and BEA (all at 8:30 am Eastern unless noted). They change rarely; Finnhub's calendar is used too when the key has it.
+const ECON = [
+  ...[['2026-10-28', 0], ['2026-12-09', 1], ['2027-01-27', 0], ['2027-03-17', 1], ['2027-04-28', 0], ['2027-06-09', 1], ['2027-07-28', 0], ['2027-09-15', 1], ['2027-10-27', 0], ['2027-12-08', 1]].map(([d, sep]) => ({ date: d, time: '2:00 pm', k: 'fomc', name: 'Fed interest rate decision', why: `The Federal Reserve sets its interest rate${sep ? ', with new forecasts and the "dot plot"' : ''}. The chair speaks at 2:30 pm. Stocks often swing in the hour after.` })),
+  ...['2026-11-10', '2026-12-10', '2027-01-13', '2027-02-11', '2027-03-10', '2027-04-13', '2027-05-12', '2027-06-10', '2027-07-14', '2027-08-11', '2027-09-14', '2027-10-14', '2027-11-10', '2027-12-10'].map(d => ({ date: d, time: '8:30 am', k: 'cpi', name: 'Inflation (CPI)', why: 'Consumer prices for last month. Hotter than expected inflation usually means higher rates for longer, which tends to hit growth stocks and bonds.' })),
+  ...['2026-11-06', '2026-12-04', '2027-01-08', '2027-02-05', '2027-03-05', '2027-04-02', '2027-05-07', '2027-06-04', '2027-07-02', '2027-08-06', '2027-09-03', '2027-10-08', '2027-11-05', '2027-12-03'].map(d => ({ date: d, time: '8:30 am', k: 'jobs', name: 'Jobs report', why: 'Jobs added and the unemployment rate. A big surprise either way moves stocks, bonds and the dollar.' })),
+  { date: '2026-10-29', time: '8:30 am', k: 'gdp', name: 'GDP, Q3 first estimate', why: 'How fast the economy grew last quarter.' },
+  { date: '2026-11-25', time: '8:30 am', k: 'gdp', name: 'GDP, Q3 second estimate', why: 'A revised look at last quarter\'s growth.' },
+  { date: '2026-12-23', time: '8:30 am', k: 'gdp', name: 'GDP, Q3 third estimate', why: 'The final revision for last quarter.' },
+  ...['2026-10-29', '2026-11-25', '2026-12-23'].map(d => ({ date: d, time: '8:30 am', k: 'pce', name: 'Spending and PCE inflation', why: 'Consumer spending, and the inflation measure the Fed watches most.' })),
+  { date: '2026-12-15', time: '8:30 am', k: 'ppi', name: 'Producer prices (PPI)', why: 'What businesses pay. Often hints at where consumer inflation is going.' },
+  { date: '2026-12-01', time: '10:00 am', k: 'jolts', name: 'Job openings (JOLTS)', why: 'How many jobs employers are trying to fill.' },
+];
+GET('/api/research/calendar', auth, async () => {
+  const today = etDate(), until = etDate(Date.now() + 75 * 864e5);
+  let events = ECON.filter(e => e.date >= today && e.date <= until).map(e => ({ ...e, src: 'official' }));
+  // earnings for what you own and watch, in the same list
+  const syms = [...new Set([...(await rows('select distinct sym from pos')).map(r => r.sym), ...(await rows('select sym from watch')).map(r => r.sym)])].filter(s => !isCrypto(s));
+  const cal = await earningsCal().catch(() => ({}));
+  for (const s of syms) { const e = cal[s]; if (e && e.date >= today && e.date <= until) events.push({ date: e.date, time: e.hour === 'bmo' ? 'Before the open' : e.hour === 'amc' ? 'After the close' : '', k: 'earn', sym: s, name: `${s} earnings`, why: e.eps != null ? `Analysts expect ${money(e.eps)} a share.` : 'Quarterly results.' }); }
+  events.sort((a, b) => a.date.localeCompare(b.date) || (a.k === 'earn') - (b.k === 'earn'));
+  return { events, last: ECON.reduce((t, e) => e.date > t ? e.date : t, ''), sources: ['Federal Reserve', 'Bureau of Labor Statistics', 'Bureau of Economic Analysis'] };
+});
+
+// ---------- one stock's research, one section at a time (the screen loads them in parallel) ----------
+const R_PARTS = { insiders, congress, earnings: earningsHistory, short: shortData, dividend: dividendSafety, funds: async s => fundsHolding(s), etf: s => etfHoldings(s).then(d => ({ ...d, count: d.holdings.length, holdings: d.holdings.slice(0, 15), top10: d.holdings.slice(0, 10).reduce((t, x) => t + x.pct, 0) })) };
+GET('/api/research/s/:sym/:part', auth, async req => {
+  const sym = cleanSym(req.params.sym), fn = R_PARTS[req.params.part]; if (!sym || !fn) fail('Unknown research', 404);
+  if (isCrypto(sym)) fail('Research is for stocks and funds');
+  try { return { ok: true, ...(await fn(sym)) }; }
+  catch (e) { return { ok: false, error: e.status === 503 && /FINNHUB/.test(e.message) ? 'Add FINNHUB_KEY in Railway to turn this on.' : e.message }; }
+});
 
 // =====================================================================
 // Background jobs
@@ -7926,6 +8184,7 @@ function startJobs() {
   // practice tools: chart-signal alerts, options expiry, the monthly review
   every(fast ? 5e3 : 5 * 60e3, () => indAlertJob(), 'chart alerts');
   every(fast ? 10e3 : 60e3, () => optJob(), 'options');
+  every(6 * 3600e3, () => { if (!standbyPaused()) return warmFunds(); }, 'research'); setTimeout(() => { if (!standbyPaused()) warmFunds(); }, fast ? 15e3 : 5 * 60e3); // famous investors' 13F filings
   every(fast ? 10e3 : 30 * 60e3, () => reviewJob(), 'monthly review');
   // safety: offsite backup (nightly), uptime watch between main and standby
   every(fast ? 10e3 : 10 * 60e3, () => offsiteJob(), 'offsite backup');
@@ -8020,7 +8279,7 @@ const ICONS = {};
 const icon = (name, fn) => ICONS[name] || (ICONS[name] = fn());
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD646"/><stop offset=".5" stop-color="#FFA028"/><stop offset="1" stop-color="#FA5256"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="#1E1430"/><ellipse cx="31" cy="36" rx="18" ry="22" transform="rotate(30 31 36)" fill="url(#g)"/><path d="M20 41l6.5-6 5 3.5 9.5-10" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37 28.5h4.5V33" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="45" cy="11.5" rx="9" ry="4.6" transform="rotate(-24 45 11.5)" fill="#3BD68A"/></svg>`;
 let BUILD = 'dev', INDEX = null, INDEX_GZ = null;
-const APP_VERSION = '4.0.0'; // stamped by build.sh from package.json
+const APP_VERSION = '4.1.0'; // stamped by build.sh from package.json
 function loadIndex() {
   const file = path.join(__dirname, 'index.html');
   let html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<!doctype html><title>Mango</title><p>index.html is missing next to server.js.</p>';

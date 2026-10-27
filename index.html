@@ -1172,6 +1172,13 @@ html[data-standby] #halt-bar { bottom: calc(var(--nav-h, 64px) + env(safe-area-i
 .quiz-a.on { background: color-mix(in srgb, var(--ac) 20%, transparent); box-shadow: inset 0 0 0 1.5px var(--ac); }
 .quiz-q.wrong .quiz-a.on { box-shadow: inset 0 0 0 1.5px var(--dn); background: color-mix(in srgb, var(--dn) 12%, transparent); }
 
+/* research */
+.ov-pick { display: flex; align-items: center; gap: 10px; } .ov-pick .chip svg { width: 14px; height: 14px; }
+.ov-card { text-align: left; } .ov-big { font-size: 44px; font-weight: 800; letter-spacing: -.03em; }
+.ov-bar { height: 8px; border-radius: 4px; background: color-mix(in srgb, var(--tx) 10%, transparent); margin: 12px 0 8px; overflow: hidden; } .ov-bar i { display: block; height: 100%; background: var(--ac); border-radius: 4px; }
+.ov-hd, .ov-row { display: grid !important; grid-template-columns: 1.4fr 1fr 1fr; gap: 8px; } .ov-hd span:not(:first-child), .ov-row span:not(:first-child) { text-align: right; }
+.lead.up { color: var(--up); } .lead.dn { color: var(--dn); }
+
 /* ---------- Paper / Alpaca sides ---------- */
 .space-sw { display: inline-flex; gap: 4px; padding: 4px; border-radius: 14px; background: var(--card); box-shadow: var(--hi); margin: 2px 0 10px; }
 .space-sw button { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: 10px; font-size: 14px; font-weight: 650; color: var(--mu); transition: background .2s, color .2s; }
@@ -1510,7 +1517,7 @@ html[data-standby] #halt-bar { bottom: calc(var(--nav-h, 64px) + env(safe-area-i
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '4.0.0';
+const BUILD = '__BUILD__', APP_VERSION = '4.1.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -2470,6 +2477,7 @@ VIEWS.portfolio = {
       ${menuCell('dollar', 'Account and transfers', accountSub(S), 'account')}
       ${menuCell('chart', 'Performance', 'Returns, win rate, best and worst trades', 'performance')}
       ${menuCell('note', 'Monthly review', 'Your trades and journal, with coach\'s notes', 'review')}
+      ${menuCell('radar', 'Research', 'Economic calendar, famous investors, fund overlap', 'research')}
       ${menuCell('clock', 'What if?', 'What a past buy would be worth today', 'whatif')}
       ${menuCell('target', 'Options', S.options ? `${S.options.n} open · ${money(S.options.value)}` : 'Calls, puts and spreads in this wallet', 'options')}
       ${feature('taxes') ? menuCell('note', 'Taxes', 'Gains, losses, wash sales and a 1099-style summary', 'taxes') : ''}
@@ -8392,7 +8400,39 @@ PAGES.costs = {
 // Newest first. Each release: version, date, a one-line headline and grouped notes.
 // ===================================================================
 const CHANGELOG = [
-  { v: '4.0.0', d: '2026-10-27', title: 'Options in your wallets', groups: [
+  { v: '4.1.0', d: '2026-10-27', title: 'Research', short: [
+    'Research on every stock page: earnings history, insider trades, famous investors, Congress, short selling, dividend safety',
+    'Fund holdings and a fund overlap tool',
+    'Economic calendar: Fed decisions, inflation, jobs, GDP, plus your stocks\' earnings',
+    'Famous investors\' portfolios from their SEC filings',
+  ], groups: [
+    ['On every stock page', [
+      'A new Research section, each line a one-tap summary that opens the details.',
+      'Earnings history: earnings per share against what analysts expected for the last quarters, and how the stock moved the next trading day. Plus the next report date.',
+      'Insider trades: six months of Form 4 filings. Market buys and sales are counted separately from grants, option exercises and tax withholding, which are routine. Several insiders buying at once gets flagged.',
+      'Famous investors: which of 9 tracked investors (Buffett, Burry, Ackman, Cathie Wood, Druckenmiller, Tepper, Klarman, Loeb, Bridgewater) held it at the end of last quarter, how much, and whether they added, trimmed, bought new or sold out.',
+      'Congress trades: what members disclosed under the STOCK Act, with dollar ranges. This needs Finnhub\'s paid data; without it the line says so.',
+      'Short selling: the share of each day\'s volume that was sold short, from FINRA, with a 5-day average and what normal looks like. Short interest shows too when your Finnhub plan has it.',
+      'Dividend safety: a 0 to 100 score from the payout ratio, 5-year dividend growth, past cuts, earnings growth and debt, with each check explained. It says "not enough data" instead of guessing.',
+    ]],
+    ['Funds', [
+      'Fund pages show what the fund holds, from its latest SEC portfolio report (N-PORT). SPY, VOO and QQQ use IVV and QQQM, which track the same index, since unit trusts report differently.',
+      'Fund overlap: pick two funds and see how much of their money is in the same stocks, with the biggest shared holdings. Over 60% gets a heads-up that you\'re mostly doubling up.',
+    ]],
+    ['The Research screen (Portfolio → More → Research)', [
+      'Coming up: Fed rate decisions (with the "dot plot" ones marked), CPI inflation, the jobs report, GDP, PCE, PPI and job openings, from the official Federal Reserve, BLS and BEA schedules, plus earnings for everything you own and watch. Each one says why it moves markets.',
+      'Famous investors: each one\'s latest portfolio, its biggest holdings, what changed since the quarter before, and what they sold out of.',
+    ]],
+    ['Setup', ['The SEC asks apps to identify themselves. Add a SEC_CONTACT variable in Railway with your name and email so famous investors and fund holdings load reliably. It never shows in the app.']],
+  ] },
+  { v: '4.0.0', d: '2026-10-27', title: 'Options in your wallets', short: [
+    'Calls, puts, spreads and SPX right in your wallets',
+    'Broker-style approval levels 1 to 4, each with a quiz',
+    'Shares and cash held as collateral, real margin rules for naked options',
+    'Real expiration: auto-exercise, assignment, early assignment, cash-settled SPX',
+    'New Covered calls bot',
+    'Your old options sandbox is now an "Options practice" wallet',
+  ], groups: [
     ['Real options, in real wallets', [
       'Options now live in your wallets instead of a separate sandbox. They count toward the wallet\'s value (ones you sold count against it), show up in its taxes, and use its cash and shares the way a broker does.',
       'Calls and puts on any stock or ETF, plus SPX, the S&P 500 index (priced from SPY × 10). Each strike shows a bid and an ask that widen away from the money, and the delta.',
@@ -9131,6 +9171,120 @@ ACT.optQuiz = async el => {
     });
   };
   draw();
+};
+
+// ===================================================================
+// Research: insiders, famous investors, Congress, earnings history, short volume, dividend safety,
+// ETF holdings and overlap, and the economic calendar
+// ===================================================================
+const bigMoney = v => { const a = Math.abs(v || 0); return a >= 1e9 ? `$${(v / 1e9).toFixed(a >= 1e10 ? 0 : 1)}B` : a >= 1e6 ? `$${(v / 1e6).toFixed(a >= 1e7 ? 0 : 1)}M` : a >= 1e3 ? `$${Math.round(v / 1e3)}K` : money(v); };
+const bigNum = v => { const a = Math.abs(v || 0); return a >= 1e9 ? (v / 1e9).toFixed(1) + 'B' : a >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : a >= 1e3 ? Math.round(v / 1e3) + 'K' : String(Math.round(v)); };
+const tcase = s => String(s || '').toLowerCase().replace(/\b([a-z])/g, c => c.toUpperCase()).replace(/\b(Inc|Corp|Co|Ltd|Plc)\b\.?/g, m => m).replace(/\bEtf\b/g, 'ETF');
+// Form 4 names come as "COOK TIMOTHY D": last name first
+const personName = s => { const w = String(s || '').trim().split(/\s+/); return w.length > 1 && s === s.toUpperCase() ? tcase([...w.slice(1), w[0]].join(' ')) : s; };
+const pctR = (v, dp = 1) => v == null ? '–' : (v * 100).toFixed(dp) + '%';
+const dayFmt = d => d ? fmtDate(d + 'T12:00') : '';
+const isFundSym = sym => { const a = App.S?.assets?.[sym]; return a?.kind === 'etf' || ['SPY', 'QQQ', 'DIA', 'IWM', 'VOO', 'IVV', 'VTI', 'XLK', 'XLF', 'XLE', 'XLV', 'XLY', 'XLP', 'XLI', 'XLU', 'XLB', 'XLC', 'XLRE', 'SGOV', 'TLT', 'GLD', 'SCHD', 'VYM'].includes(sym); };
+const R_CACHE = new Map();
+const rGet = (sym, part) => { const k = sym + '/' + part, c = R_CACHE.get(k); if (c && Date.now() - c.t < 10 * 60e3) return c.p; const pr = api(`research/s/${encodeURIComponent(sym)}/${part}`).catch(e => ({ ok: false, error: e.message })); R_CACHE.set(k, { t: Date.now(), p: pr }); return pr; };
+// one line per kind of research on the stock page; tap for the details
+const R_ROWS = [
+  ['earnings', 'chart', 'Earnings history', d => d.of ? `Beat ${d.beats} of the last ${d.of}${d.avgMove != null ? ` · moves about ${pctR(d.avgMove)} on the day` : ''}` : 'No reports yet'],
+  ['insiders', 'key', 'Insider trades', d => (d.buys || d.sells) ? `${d.buys} buy${d.buys === 1 ? '' : 's'}, ${d.sells} sale${d.sells === 1 ? '' : 's'} in 6 months${d.cluster ? ' · several insiders buying' : ''}` : 'No market buys or sales in 6 months'],
+  ['funds', 'crown', 'Famous investors', d => d.pending && !d.funds.length ? 'Loading their latest filings…' : d.funds.filter(f => f.shares > 0).length ? d.funds.filter(f => f.shares > 0).slice(0, 2).map(f => f.who.split(' ').pop().replace(/'s$/, '')).join(', ') + (d.funds.filter(f => f.shares > 0).length > 2 ? ` and ${d.funds.filter(f => f.shares > 0).length - 2} more` : '') + ' own it' : 'None of the tracked investors own it'],
+  ['congress', 'flag', 'Congress trades', d => !d.available ? 'Needs Finnhub\'s paid data' : d.list.length ? `${d.buys} buy${d.buys === 1 ? '' : 's'}, ${d.sells} sale${d.sells === 1 ? '' : 's'} in a year` : 'None reported in a year'],
+  ['short', 'bars', 'Short selling', d => d.ratio != null ? `${pctR(d.ratio, 0)} of yesterday's volume was short${d.avg5 != null ? ` (5-day ${pctR(d.avg5, 0)})` : ''}` : 'No data yet'],
+  ['dividend', 'gift', 'Dividend safety', d => d.pays ? `${d.grade}${d.score != null ? ` · ${d.score}/100` : ''}${d.yield ? ` · ${d.yield.toFixed(2)}% yield` : ''}` : 'Doesn\'t pay a dividend'],
+];
+async function assetResearch(p) {
+  const el = $('#a-research', p.body), sym = p.sym; if (!el || isCrypto(sym)) return;
+  const fund = isFundSym(sym), rowsK = fund ? [['etf', 'pie', 'What it holds', d => `${d.count} holdings · top 10 are ${pctR(d.top10, 0)}${d.via ? ` (from ${d.via}, same index)` : ''}`], ...R_ROWS.filter(r => ['short', 'dividend'].includes(r[0]))] : R_ROWS;
+  el.innerHTML = `<div class="section-h"><h2>Research</h2><button class="more" data-act="go" data-to="research">More ${icon('right')}</button></div><div class="group">${rowsK.map(([k, ic, t]) => `<button class="cell" data-act="rDetail" data-sym="${h(sym)}" data-k="${k}"><div class="lead">${icon(ic)}</div><div class="main"><div class="title">${t}</div><div class="sub ellip" id="r-${k}"><span class="sk sk-line" style="width:60%"></span></div></div>${icon('right', 'chev')}</button>`).join('')}</div>`;
+  for (const [k, , , line] of rowsK) rGet(sym, k).then(d => { const s = $('#r-' + k, el); if (s) s.textContent = d.ok ? line(d) : d.error; });
+}
+{ const m0 = PAGES.asset.mount; PAGES.asset.mount = function (p, args) { const r = m0.call(this, p, args); const a = $('#a-insights', p.body) || $('#a-ai', p.body); if (a && !$('#a-research', p.body)) a.insertAdjacentHTML('afterend', '<div id="a-research"></div>'); assetResearch(p); return r; }; }
+const kvRow = (k, v) => `<div class="kv"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+const CHG = { new: ['New', 'up'], added: ['Added', 'up'], trimmed: ['Trimmed', 'dn'], sold: ['Sold out', 'dn'], same: ['Held', 'flat'] };
+const R_DETAIL = {
+  earnings: (d, sym) => `<p class="t-sub">Earnings per share against what analysts expected, and how ${h(sym)} moved the next trading day.</p>
+    ${d.next ? `<div class="callout mt12">${icon('calendar')}<div>Next report ${dayFmt(d.next.date)}${d.next.hour === 'bmo' ? ', before the open' : d.next.hour === 'amc' ? ', after the close' : ''}${d.next.eps != null ? `. Expected ${money(d.next.eps)} a share.` : '.'}</div></div>` : ''}
+    <div class="group mt12">${d.rows.map(r => `<div class="cell"><div class="lead ${r.beat ? 'up' : r.beat === false ? 'dn' : ''}">${icon(r.beat ? 'check' : 'x')}</div><div class="main"><div class="title">Q${r.q} ${r.y}: ${r.actual != null ? money(r.actual) : '–'} vs ${r.estimate != null ? money(r.estimate) : '–'}</div><div class="sub">${r.beat == null ? 'No estimate' : r.beat ? 'Beat' : 'Missed'}${r.surprise != null ? ` by ${Math.abs(r.surprise).toFixed(1)}%` : ''}${r.date ? ` · reported ${dayFmt(r.date)}` : ''}</div></div>${r.move != null ? `<b class="n ${cls(r.move)}">${pct(r.move * 100, 1)}</b>` : ''}</div>`).join('') || '<div class="cell"><div class="main t-foot">No history yet.</div></div>'}</div>
+    <p class="note">A beat doesn't promise a rise: the stock moves on how results compare with what the market already priced in, and on the outlook.</p>`,
+  insiders: d => `<div class="tiles"><div class="tile"><div class="k">Market buys</div><div class="v up">${d.buys}</div><div class="s">${bigMoney(d.buyValue)}${d.buyers > 1 ? ` · ${d.buyers} people` : ''}</div></div><div class="tile"><div class="k">Market sales</div><div class="v dn">${d.sells}</div><div class="s">${bigMoney(d.sellValue)}</div></div></div>
+    ${d.cluster ? `<div class="callout mt12">${icon('key')}<div>Several different insiders bought on the market recently. That "cluster" is one of the stronger insider signals.</div></div>` : ''}
+    <div class="group mt12">${d.list.map(x => `<div class="cell"><div class="lead ${x.code === 'P' ? 'up' : x.code === 'S' ? 'dn' : ''}">${x.code === 'P' ? '+' : x.code === 'S' ? '−' : '·'}</div><div class="main"><div class="title">${h(personName(x.name))}</div><div class="sub">${h(x.what)} · ${dayFmt(x.date)}${x.price ? ` at ${price(x.price)}` : ''}</div></div><div class="trail col" style="align-items:flex-end"><b class="n">${x.change > 0 ? '+' : ''}${bigNum(x.change)}</b>${x.value ? `<span class="t-cap">${bigMoney(x.value)}</span>` : ''}</div></div>`).join('') || '<div class="cell"><div class="main t-foot">Nothing filed in 6 months.</div></div>'}</div>
+    <p class="note">From Form 4 filings, which insiders must file within 2 business days. ${h(d.note)}</p>`,
+  funds: (d, sym) => `<p class="t-sub">From each investor's latest 13F: the stocks they held at the end of the quarter, filed up to 45 days later. Their trades since then aren't known yet.</p>
+    <div class="group mt12">${d.funds.map(f => `<button class="cell" data-act="go" data-to="fund/${f.k}"><div class="lead">${icon('crown')}</div><div class="main"><div class="title">${h(f.who)}</div><div class="sub">${h(f.name)} · ${f.shares ? `${bigNum(f.shares)} shares, ${pctR(f.pct)} of the portfolio` : `sold its ${bigNum(f.prevShares)} shares`}</div></div><span class="t-cap ${CHG[f.change]?.[1] || ''}">${CHG[f.change]?.[0] || ''}</span></button>`).join('') || `<div class="cell"><div class="main t-foot">${d.pending ? 'Still loading their filings. Check back in a minute.' : `None of the tracked investors held ${h(sym)} at the end of the quarter.`}</div></div>`}</div>`,
+  congress: d => !d.available ? `<div class="callout">${icon('lock')}<div>${h(d.why)}</div></div><p class="note">Members of Congress have to disclose stock trades within 45 days under the STOCK Act. The free public copies are scanned forms, so apps get them from paid data providers.</p>`
+    : `<div class="group">${d.list.map(x => `<div class="cell"><div class="lead ${/purchase|buy/i.test(x.type) ? 'up' : 'dn'}">${/purchase|buy/i.test(x.type) ? '+' : '−'}</div><div class="main"><div class="title">${h(x.name)}</div><div class="sub">${h(x.position || '')} · ${h(x.type)} · ${dayFmt(x.date)} (filed ${dayFmt(x.filed)})</div></div><span class="t-cap">${bigMoney(x.from)}–${bigMoney(x.to)}</span></div>`).join('') || '<div class="cell"><div class="main t-foot">None reported in a year.</div></div>'}</div><p class="note">${h(d.note)}</p>`,
+  short: d => `<div class="tiles"><div class="tile"><div class="k">Short volume, last day</div><div class="v">${pctR(d.ratio, 0)}</div><div class="s">${d.days[0] ? dayFmt(d.days[0].date) : ''}</div></div><div class="tile"><div class="k">5-day average</div><div class="v">${pctR(d.avg5, 0)}</div><div class="s">${d.days.length} days</div></div></div>
+    ${d.interest ? `<div class="card mt12">${kvRow('Short interest', `${bigNum(d.interest.shares)} shares`)}${kvRow('As of', dayFmt(d.interest.date))}</div>` : ''}
+    <div class="group mt12">${d.days.map(x => `<div class="cell"><div class="main"><div class="title">${dayFmt(x.date)}</div><div class="sub">${bigNum(x.short)} of ${bigNum(x.total)} shares</div></div><b class="n">${pctR(x.ratio, 0)}</b></div>`).join('')}</div>
+    <p class="note">${h(d.note)} Source: FINRA daily short sale volume.</p>`,
+  dividend: d => !d.pays ? '<p class="t-sub">It doesn\'t pay a dividend.</p>' : `<div class="card"><div class="opt-rb"><div><div class="t-foot">Dividend safety</div><div class="opt-lvl-n ${d.score == null ? '' : d.score >= 75 ? 'up' : d.score >= 50 ? '' : 'dn'}">${h(d.grade)}</div></div>${d.score != null ? `<b class="n" style="font-size:28px">${d.score}<small class="t-cap">/100</small></b>` : ''}</div></div>
+    <div class="group mt12">${d.checks.map(c => `<div class="cell"><div class="lead ${c.ok >= 0.9 ? 'up' : c.ok >= 0.5 ? '' : 'dn'}">${icon(c.ok >= 0.5 ? 'check' : 'x')}</div><div class="main"><div class="title">${h(c.label)}</div><div class="sub">${h(c.have)}. ${h(c.why)}</div></div></div>`).join('')}</div><p class="note">${h(d.note)}</p>`,
+  etf: d => `<p class="t-sub">${d.count} holdings as of ${dayFmt(d.asOf)}${d.via ? `, from ${h(d.via)}, which tracks the same index (unit trusts like this one don't report holdings to the SEC the same way)` : ''}. The top 10 are ${pctR(d.top10, 0)} of the fund.</p>
+    <div class="group mt12">${d.holdings.map(x => `<${x.sym ? `button data-act="asset" data-sym="${h(x.sym)}"` : 'div'} class="cell"><div class="main"><div class="title">${h(x.sym || '')} <span class="t-cap">${h(tcase(x.name))}</span></div></div><b class="n">${pctR(x.pct)}</b></${x.sym ? 'button' : 'div'}>`).join('')}</div>
+    <button class="btn btn-quiet btn-block mt12" data-act="go" data-to="overlap/${h(d.sym)}">${icon('swap')}Compare with another fund</button><p class="note">Source: ${h(d.source)}${d.source === 'SEC N-PORT' ? ', the quarterly portfolio report funds file with the SEC (public about 60 days later)' : ''}.</p>`,
+};
+const R_TITLE = { earnings: 'Earnings history', insiders: 'Insider trades', funds: 'Famous investors', congress: 'Congress trades', short: 'Short selling', dividend: 'Dividend safety', etf: 'What it holds' };
+ACT.rDetail = async el => {
+  const sym = el.dataset.sym, k = el.dataset.k, s = sheet({ title: `${sym} · ${R_TITLE[k]}`, tall: true, html: '<div class="sk sk-block" style="height:300px"></div>' });
+  const d = await rGet(sym, k); if (s.closed) return;
+  s.html(d.ok ? R_DETAIL[k](d, sym) : `<div class="callout warn">${icon('info')}<div>${h(d.error)}</div></div>`);
+};
+// ---------- the Research screen ----------
+const ECON_IC = { fomc: 'bolt', cpi: 'flame', jobs: 'chart', gdp: 'layers', pce: 'flame', ppi: 'flame', jolts: 'list', earn: 'star' };
+PAGES.research = {
+  mount(p) {
+    p.title('Research', true);
+    p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Research</h1><p class="t-sub" style="margin:0 2px">What moves the market this month, what famous investors own, and what's inside the funds you hold. Every stock page has its own research too.</p>
+      <div class="section-h"><h2>Coming up</h2></div><div id="rs-cal"><div class="sk sk-block" style="height:200px"></div></div>
+      <div class="section-h"><h2>Famous investors</h2></div><div id="rs-funds"><div class="sk sk-block" style="height:200px"></div></div>
+      <div class="section-h"><h2>Fund overlap</h2></div><div class="group"><button class="cell" data-act="go" data-to="overlap"><div class="lead">${icon('swap')}</div><div class="main"><div class="title">Compare two funds</div><div class="sub">How much of the same stocks they hold, so you know if you're really diversified</div></div>${icon('right', 'chev')}</button></div>`;
+    api('research/calendar').then(r => {
+      const byDay = {}; for (const e of r.events) (byDay[e.date] ||= []).push(e);
+      $('#rs-cal', p.body).innerHTML = Object.keys(byDay).length ? Object.entries(byDay).slice(0, 14).map(([d, es]) => `<div class="t-foot" style="margin:12px 4px 6px">${new Date(d + 'T12:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</div><div class="group">${es.map(e => `<${e.sym ? `button data-act="asset" data-sym="${h(e.sym)}"` : 'div'} class="cell"><div class="lead">${icon(ECON_IC[e.k] || 'calendar')}</div><div class="main"><div class="title">${h(e.name)}${e.time ? ` <span class="t-cap">${h(e.time)}</span>` : ''}</div><div class="sub">${h(e.why)}</div></div></${e.sym ? 'button' : 'div'}>`).join('')}</div>`).join('') + `<p class="note">Fed, jobs, inflation and GDP dates from the ${r.sources.join(', ')}, plus earnings for what you own and watch. Times are Eastern.</p>`
+        : '<div class="group"><div class="cell"><div class="main t-foot">Nothing scheduled in the next few weeks.</div></div></div>';
+    }).catch(e => { $('#rs-cal', p.body).innerHTML = `<div class="callout">${icon('info')}<div>${h(e.message)}</div></div>`; });
+    const loadFunds = () => api('research/funds').then(r => {
+      $('#rs-funds', p.body).innerHTML = `<div class="group">${r.funds.map(f => `<button class="cell" data-act="go" data-to="fund/${f.k}" ${f.ready ? '' : 'disabled'}><div class="lead">${icon('crown')}</div><div class="main"><div class="title">${h(f.who)}</div><div class="sub ellip">${f.ready ? `${h(f.name)} · ${bigMoney(f.total)} in ${f.count} stocks · top: ${f.top.map(h).join(', ')}` : 'Loading the latest filing…'}</div></div>${icon('right', 'chev')}</button>`).join('')}</div><p class="note">From their latest 13F filings with the SEC: what each held at the end of the last quarter.${r.contact ? '' : ' If these don\'t load, add a SEC_CONTACT variable in Railway with your name and email (the SEC asks apps to identify themselves).'}</p>`;
+      if (r.loading && document.body.contains(p.body)) setTimeout(loadFunds, 6000);
+    }).catch(e => { $('#rs-funds', p.body).innerHTML = `<div class="callout">${icon('info')}<div>${h(e.message)}</div></div>`; });
+    loadFunds();
+  },
+};
+PAGES.fund = {
+  mount(p, [k]) {
+    p.title('Investor', true); p.body.innerHTML = '<div class="sk sk-block mt16" style="height:400px"></div>';
+    api('research/fund/' + k).then(d => {
+      p.title(d.who);
+      p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">${h(d.who)}</h1><p class="t-sub" style="margin:0 2px">${h(d.name)} · holdings on ${dayFmt(d.period)}, filed ${dayFmt(d.filed)}</p>
+        <div class="tiles mt16"><div class="tile"><div class="k">Reported value</div><div class="v">${bigMoney(d.total)}</div><div class="s">${d.count} stocks</div></div><div class="tile"><div class="k">Top 5</div><div class="v">${pctR(d.holdings.slice(0, 5).reduce((t, x) => t + x.pct, 0), 0)}</div><div class="s">of the portfolio</div></div></div>
+        <div class="section-h"><h2>Holdings</h2></div><div class="group">${d.holdings.map(x => `<${x.sym ? `button data-act="asset" data-sym="${h(x.sym)}"` : 'div'} class="cell"><div class="main"><div class="title">${h(x.sym || tcase(x.name))}${x.sym ? ` <span class="t-cap">${h(tcase(x.name))}</span>` : ''}</div><div class="sub">${bigNum(x.shares)} shares · ${bigMoney(x.value)}${x.change && x.change !== 'same' ? ` · <span class="${CHG[x.change][1]}">${CHG[x.change][0]}${x.change !== 'new' && x.prevShares ? ` ${pct((x.shares / x.prevShares - 1) * 100, 0)}` : ''}</span>` : ''}</div></div><b class="n">${pctR(x.pct)}</b></${x.sym ? 'button' : 'div'}>`).join('')}</div>
+        ${d.sold.length ? `<div class="section-h"><h2>Sold out since ${dayFmt(d.prevPeriod)}</h2></div><div class="group">${d.sold.map(x => `<div class="cell"><div class="main"><div class="title">${h(x.sym || tcase(x.name))}</div><div class="sub">had ${bigNum(x.shares)} shares</div></div></div>`).join('')}</div>` : ''}
+        <p class="note">13F filings list US stocks and funds held at quarter end, not short positions or most bonds, and they arrive up to 45 days late, so the investor may have traded since. <a href="${h(d.url)}" target="_blank" rel="noopener">See the filings at the SEC</a>.</p>`;
+    }).catch(e => { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; });
+  },
+};
+PAGES.overlap = {
+  mount(p, [a0]) {
+    p.title('Fund overlap', true); p.a = a0 || store.get('ovA') || 'SPY'; p.b = store.get('ovB') || (p.a === 'QQQ' ? 'SPY' : 'QQQ');
+    const draw = async () => {
+      p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Fund overlap</h1><p class="t-sub" style="margin:0 2px">Two funds can have different names and hold mostly the same stocks.</p>
+        <div class="ov-pick mt16"><button class="chip on" data-ov="a">${h(p.a)} ${icon('down')}</button><span>vs</span><button class="chip on" data-ov="b">${h(p.b)} ${icon('down')}</button></div><div id="ov-r"><div class="sk sk-block mt16" style="height:300px"></div></div>`;
+      p.body.querySelectorAll('[data-ov]').forEach(b => b.addEventListener('click', async () => { const s = await pickSymbol('Pick a fund'); if (!s) return; p[b.dataset.ov] = s; store.set('ov' + b.dataset.ov.toUpperCase(), s); draw(); }));
+      try {
+        const r = await api(`research/overlap?a=${encodeURIComponent(p.a)}&b=${encodeURIComponent(p.b)}`);
+        $('#ov-r', p.body).innerHTML = `<div class="card mt16 ov-card"><div class="ov-big">${pctR(r.overlap, 0)}</div><div class="t-sub">of their money is in the same stocks, at the smaller of the two weights</div><div class="ov-bar"><i style="width:${Math.min(100, r.overlap * 100)}%"></i></div><div class="t-foot">${r.count} stocks in both · ${h(r.a)} holds ${r.countA}, ${h(r.b)} holds ${r.countB}</div></div>
+          ${r.overlap > 0.6 ? `<div class="callout mt12">${icon('info')}<div>Over 60% overlap: owning both is close to owning one of them twice.</div></div>` : ''}
+          <div class="section-h"><h2>Biggest shared holdings</h2></div><div class="group"><div class="cell opt-hd ov-hd"><span>Stock</span><span>${h(r.a)}</span><span>${h(r.b)}</span></div>${r.both.map(x => `<div class="cell ov-row"><span>${h(x.sym || tcase(x.name))}</span><span class="n">${pctR(x.a)}</span><span class="n">${pctR(x.b)}</span></div>`).join('') || '<div class="cell"><div class="main t-foot">No stocks in common.</div></div>'}</div>
+          <p class="note">From each fund's latest holdings report (${dayFmt(r.asOfA)}${r.asOfB !== r.asOfA ? ` and ${dayFmt(r.asOfB)}` : ''})${r.viaA || r.viaB ? `. ${[r.viaA && `${h(r.a)} uses ${h(r.viaA)}`, r.viaB && `${h(r.b)} uses ${h(r.viaB)}`].filter(Boolean).join(', ')}, which tracks the same index` : ''}.</p>`;
+      } catch (e) { $('#ov-r', p.body).innerHTML = `<div class="callout mt16">${icon('info')}<div>${h(e.message)}</div></div>`; }
+    };
+    draw();
+  },
 };
 
 // ===================================================================

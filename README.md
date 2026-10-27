@@ -2,7 +2,7 @@
 
 A paper trading app for iPhone with real market prices. It runs from the Home Screen and is built on Node and Postgres.
 
-**⬇️ [Download the latest version](https://github.com/MangoMods-code/Mango-PT-App/releases/latest)** · Current: [V4.0.0, Options in your wallets](https://github.com/MangoMods-code/Mango-PT-App/releases/tag/V4.0.0) · [All releases](https://github.com/MangoMods-code/Mango-PT-App/releases)
+**⬇️ [Download the latest version](https://github.com/MangoMods-code/Mango-PT-App/releases/latest)** · Current: [V4.1.0, Research](https://github.com/MangoMods-code/Mango-PT-App/releases/tag/V4.1.0) · [All releases](https://github.com/MangoMods-code/Mango-PT-App/releases)
 
 Trade stocks, ETFs and crypto with practice money. You can also put strategies to work as bots, let Autopilot run a mix of them, and watch it all happen in **Mango HQ**: a small isometric world where your bots walk around and a Council of up to ten members votes on every trade. If you connect an Alpaca account, the same app can trade it, on paper or with real money, on a separate side with its own safeguards.
 
@@ -72,6 +72,7 @@ Trade stocks, ETFs and crypto with practice money. You can also put strategies t
 - **Monthly review** of your trades and journal: return against the S&P 500, win rate, average hold, best and worst trades, results by tag and weekday, and coach's notes (AI, or a plain summary). A notification on the 1st of each month.
 - **What if?**: what a past buy would be worth today (adjusted for splits and dividends) against the S&P 500, with the worst drop along the way, plus what your own sells would be worth if you'd held.
 - **Options**: calls, puts, vertical spreads and SPX in any wallet on Robinhood or Alpaca rules, behind broker-style approval levels (1 covered calls and cash-secured puts, 2 buying, 3 spreads, 4 naked with $25,000+) with a short quiz for each. Shares and cash are held as collateral, positions count toward the wallet, and expiration follows OCC rules: automatic exercise a cent in the money, assignment, early assignment before dividends, cash settlement for SPX, pin-risk warnings. Prices are Black-Scholes estimates from recent volatility with a modeled bid and ask (clearly labeled, not real quotes). A **Covered calls** bot sells monthly calls on 100-share lots.
+- **Research**: on every stock page, earnings history (beats and how the stock moved), insider buys and sales from Form 4 filings, which famous investors own it (their latest 13F, from the SEC), Congress trades (with Finnhub's paid data), FINRA daily short volume, and a dividend safety score. Fund pages show their holdings (SEC N-PORT reports). The Research screen has the economic calendar (Fed decisions, CPI, jobs, GDP, PCE, plus your stocks' earnings), each famous investor's portfolio and changes, and a fund overlap tool.
 - **Dividend calendar**: upcoming ex-dividend dates for what you hold and watch, estimated from each company's pattern, with the expected payment.
 - **Home Screen widget** via the Shortcuts app: a secret read-only link (text or JSON) with your balance, today's change and top movers. You can make a new link at any time.
 - New weekly challenges for these tools in Games.
@@ -117,6 +118,7 @@ It needs **Node 20+** and a **Postgres** database. The database tables are creat
 | `ALPACA_MAX_ORDER` | optional | Largest real-money order allowed, in dollars |
 | `ALPACA_FEED` | optional | `iex` (default) or `sip` |
 | `ANTHROPIC_API_KEY` | optional | Turns on the **AI Council members** (Analyst, News Hawk, Risk Officer, Chartist), powered by Claude Haiku. It costs well under $1 a month, with a shared daily cap you set in Settings. |
+| `SEC_CONTACT` | optional | Your name and email, sent with requests for SEC filings (famous investors' 13F holdings, fund holdings). The SEC asks apps to identify themselves; without it those may not load. |
 | `VAPID_EMAIL` | optional | Contact address for push notifications (`mailto:...`) |
 | `MANGO_STANDBY` | optional | Set to `1` on a backup copy only (see below) |
 | `PUBLIC_URL` | optional | The standby copy's own address, if the host doesn't provide one (Render does) |
