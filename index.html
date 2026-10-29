@@ -429,12 +429,12 @@ button.tile:active { transform: scale(.98); }
 .splash-line2 { stroke-dasharray: 22; stroke-dashoffset: 22; animation-delay: 1s; animation-duration: .35s; }
 .splash-word { font-family: var(--font-display); font-weight: 800; font-size: 38px; letter-spacing: -.04em; font-variation-settings: "opsz" 72; background: linear-gradient(120deg, #FFD646, #FFA028 50%, #FA5256); -webkit-background-clip: text; background-clip: text; color: transparent; animation: rise .7s .2s var(--ease-out) both; }
 .splash-status { position: absolute; bottom: calc(var(--safe-b) + 48px); color: var(--mu); font-size: 14px; animation: fade .4s .9s both; }
-#login, #signup { position: fixed; inset: 0; z-index: 150; display: grid; place-items: center; padding: calc(var(--safe-t) + 20px) 20px calc(var(--safe-b) + 20px); background: radial-gradient(120% 70% at 50% -10%, color-mix(in srgb, var(--ac) 22%, transparent), transparent 60%), var(--bg); overflow-y: auto; }
+#login, #signup, #forgot { position: fixed; inset: 0; z-index: 150; display: grid; place-items: center; padding: calc(var(--safe-t) + 20px) 20px calc(var(--safe-b) + 20px); background: radial-gradient(120% 70% at 50% -10%, color-mix(in srgb, var(--ac) 22%, transparent), transparent 60%), var(--bg); overflow-y: auto; }
 .login-card { width: 100%; max-width: 380px; animation: rise .6s var(--ease-out) both; }
 .login-logo { width: 76px; height: 76px; margin: 0 auto 16px; }
 .login-title { text-align: center; font-family: var(--font-display); font-weight: 750; font-size: 32px; letter-spacing: -.03em; margin: 0; font-variation-settings: "opsz" 60; }
 .login-sub { text-align: center; color: var(--mu); margin: 8px auto 12px; max-width: 290px; font-size: 15px; }
-#login .btn, #signup .btn { width: 100%; margin-top: 22px; }
+#login .btn, #signup .btn, #forgot .btn { width: 100%; margin-top: 22px; }
 .login-err { min-height: 22px; text-align: center; color: var(--dn); font-weight: 600; font-size: 14.5px; margin: 12px 0 0; }
 
 #netbar { position: fixed; left: 50%; top: calc(var(--safe-t) + 8px); transform: translateX(-50%); z-index: 90; height: 32px; padding: 0 14px; border-radius: 16px; background: var(--card3); color: var(--tx); font-size: 13.5px; font-weight: 650; display: flex; align-items: center; gap: 8px; box-shadow: var(--shadow-sm); }
@@ -1472,6 +1472,17 @@ html[data-standby] #halt-bar { bottom: calc(var(--nav-h, 64px) + env(safe-area-i
 .lg-card-ic svg { width: 22px; height: 22px; }
 .lg-card .grow { flex: 1; }
 .lg-card .chev { width: 18px; height: 18px; flex: none; color: var(--mu); }
+#forgot { overflow-y: auto; align-items: start; }
+#forgot .login-card { margin: auto 0; padding: 12px 0 24px; }
+#forgot .login-logo { width: 60px; height: 60px; margin-bottom: 12px; }
+#forgot .field { margin-top: 12px; }
+.login-forgot { text-align: center; margin: 10px 0 0; font-size: 14.5px; }
+.login-code-to { font-size: 15px; color: var(--mu); text-align: center; margin: 8px 0 0; }
+.login-code-to b { color: var(--tx, inherit); word-break: break-all; }
+.code-in { font-family: var(--font-num); font-size: 26px !important; letter-spacing: .35em; text-align: center; }
+.human { display: flex; justify-content: center; margin-top: 16px; min-height: 65px; }
+.human.hidden { display: none; }
+.em-ok { color: var(--up); font-weight: 650; }
 
 /* ---------- motion ---------- */
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -1555,6 +1566,7 @@ html[data-standby] #halt-bar { bottom: calc(var(--nav-h, 64px) + env(safe-area-i
     <label class="field"><span>Password</span><div class="field-row"><input id="login-p" name="password" type="password" autocomplete="current-password" required><button type="button" class="field-eye" id="login-eye" aria-label="Show password"></button></div></label>
     <button class="btn btn-primary btn-lg" id="login-go" type="submit">Log in</button>
     <p class="login-err" id="login-err" role="alert"></p>
+    <p class="login-forgot hidden" id="login-forgot"><button type="button" class="link" id="go-forgot">Forgot your password?</button></p>
     <p class="login-alt hidden" id="login-alt">New here? <button type="button" class="link" id="go-signup">Make an account</button></p>
   </div>
 </form>
@@ -1565,14 +1577,40 @@ html[data-standby] #halt-bar { bottom: calc(var(--nav-h, 64px) + env(safe-area-i
     <h1 class="login-title">Make an account</h1>
     <p class="login-sub">You start with $10,000 of practice money. Trade on your own, or join the monthly league with friends.</p>
     <p class="login-inv hidden" id="su-inv">You have an invite. It's used as soon as your account is made.</p>
+    <div id="su-step1">
     <label class="field"><span>Your name</span><input id="su-n" name="name" autocomplete="given-name" maxlength="24" placeholder="What friends see in the league"></label>
     <label class="field"><span>Username</span><input id="su-u" name="username" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="20" placeholder="3 to 20 letters, numbers or _"></label>
     <label class="field"><span>Password</span><div class="field-row"><input id="su-p" name="password" type="password" autocomplete="new-password" placeholder="At least 8 characters"><button type="button" class="field-eye" id="su-eye" aria-label="Show password"></button></div></label>
+    <label class="field hidden" id="su-e-row"><span>Email</span><input id="su-e" name="email" type="email" autocomplete="email" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="We'll send you a code"></label>
     <label class="field"><span>Date of birth</span><input id="su-d" name="bday" type="date" autocomplete="bday"></label>
-    <p class="login-fine">You need to be 13 or older. Your date of birth isn't shown to other players.</p>
+    <p class="login-fine" id="su-fine">You need to be 13 or older. Your date of birth isn't shown to other players.</p>
+    </div>
+    <div id="su-step2" class="hidden">
+      <p class="login-code-to">We sent a 6-digit code to <b id="su-code-to"></b>. Check your spam folder if you don't see it.</p>
+      <label class="field"><span>Code</span><input id="su-code" class="code-in" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456"></label>
+    </div>
+    <div class="human hidden" id="su-human"></div>
     <button class="btn btn-primary btn-lg" id="su-go" type="submit">Make account</button>
+    <p class="login-alt hidden" id="su-step2-links"><button type="button" class="link" id="su-resend">Send a new code</button> · <button type="button" class="link" id="su-back">Change details</button></p>
     <p class="login-err" id="su-err" role="alert"></p>
     <p class="login-alt">Have an account? <button type="button" class="link" id="go-login">Log in</button></p>
+  </div>
+</form>
+
+<form id="forgot" class="hidden" autocomplete="on" novalidate>
+  <div class="login-card">
+    <svg viewBox="0 0 120 120" class="login-logo" aria-hidden="true"><use href="#mango-mark"/></svg>
+    <h1 class="login-title">Reset password</h1>
+    <p class="login-sub" id="fg-sub">Enter your username or email. If the account has a confirmed email, we'll send it a code.</p>
+    <div id="fg-step1"><label class="field"><span>Username or email</span><input id="fg-who" name="username" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false"></label></div>
+    <div id="fg-step2" class="hidden">
+      <label class="field"><span>Code</span><input id="fg-code" class="code-in" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456"></label>
+      <label class="field"><span>New password</span><input id="fg-p" type="password" autocomplete="new-password" placeholder="At least 8 characters"></label>
+    </div>
+    <div class="human hidden" id="fg-human"></div>
+    <button class="btn btn-primary btn-lg" id="fg-go" type="submit">Send code</button>
+    <p class="login-err" id="fg-err" role="alert"></p>
+    <p class="login-alt"><button type="button" class="link" id="fg-back">Back to log in</button></p>
   </div>
 </form>
 
@@ -1609,7 +1647,7 @@ html[data-standby] #halt-bar { bottom: calc(var(--nav-h, 64px) + env(safe-area-i
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '5.0.0';
+const BUILD = '__BUILD__', APP_VERSION = '5.1.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -8504,6 +8542,34 @@ PAGES.costs = {
 // Newest first. Each release: version, date, a one-line headline and grouped notes.
 // ===================================================================
 const CHANGELOG = [
+  { v: '5.1.0', d: '2026-10-29', title: 'Email codes and a human check', short: [
+    'New accounts confirm their email with a 6-digit code',
+    'Forgot password? Reset it yourself with a code by email',
+    'A "verify you are human" check on sign-up and password resets',
+  ], groups: [
+    ['Email codes', [
+      'Making an account now takes an email. Mango sends a 6-digit code, and the account is made once the code is entered.',
+      'Codes work for 10 minutes and once only. After 5 wrong tries a code stops working. A new code can be sent after a minute.',
+      'Codes are stored scrambled, like passwords. One email can have one account.',
+      'Accounts made before this are asked once a day to add an email. It\'s in Settings → Your account → Email too.',
+      'Only you and the owner can see your email. Other players never do.',
+    ]],
+    ['Forgot your password?', [
+      'Tap "Forgot your password?" on the login screen. Enter your username or email, get a code, set a new password. Your other devices are logged out.',
+      'It works for accounts with a confirmed email. Without one, the owner can still reset it.',
+      'The answer looks the same whether or not an account exists, so nobody can use it to find out who plays.',
+    ]],
+    ['Human check', [
+      'Sign-up and password resets show a small "verify you are human" box (Cloudflare Turnstile). Most people never see a puzzle.',
+      'The server checks it too, so a bot that skips the screen is still refused.',
+    ]],
+    ['For the owner', [
+      'Turns on with RESEND_API_KEY (email) and TURNSTILE_SITE_KEY plus TURNSTILE_SECRET_KEY (human check) in your host\'s variables. Without them, sign-up works like before.',
+      'Emails come from noreply@ your app\'s own domain. EMAIL_FROM changes it.',
+      'Mango stops sending after 90 emails a day (Resend\'s free plan allows 100) and lets you know. EMAIL_DAILY_CAP changes it.',
+      'Settings → Accounts and invites shows whether both are on, how many emails went out today, and each person\'s email.',
+    ]],
+  ] },
   { v: '5.0.0', d: '2026-10-27', title: 'Friends and the monthly league', short: [
     'Friends can make their own free account on your server: their own wallets, bots and history',
     'Monthly league: everyone starts with $10,000 on the same day, bots allowed, final standings',
@@ -9940,39 +10006,150 @@ const PRIVACY = {
 
 // ---------- the login screen: make an account, invites ----------
 const inviteFromHash = () => { const m = location.hash.match(/^#\/?invite\/([A-Za-z0-9]{6,20})$/); return m ? m[1].toUpperCase() : null; };
+// the "verify you are human" check (Cloudflare Turnstile), only when the owner has set it up
+const Human = {
+  key: null, ids: {}, tokens: {},
+  load() {
+    if (window.turnstile) return Promise.resolve();
+    return this.p || (this.p = new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'; sc.async = true; sc.onload = res; sc.onerror = () => { this.p = null; rej(new Error('The human check could not load. Check your connection.')); }; document.head.appendChild(sc); }));
+  },
+  async mount(el) {
+    if (!this.key || !el) return; el.classList.remove('hidden');
+    try { await this.load(); } catch (e) { el.textContent = e.message; return; }
+    if (this.ids[el.id] != null) return;
+    this.ids[el.id] = turnstile.render(el, { sitekey: this.key, theme: document.documentElement.dataset.theme === 'light' ? 'light' : 'dark', size: 'flexible',
+      callback: t => { this.tokens[el.id] = t; }, 'expired-callback': () => { this.tokens[el.id] = null; }, 'error-callback': () => { this.tokens[el.id] = null; } });
+  },
+  token(el) { if (!this.key) return undefined; const t = this.tokens[el.id]; if (!t) throw new Error('Wait a second for the "verify you are human" check to finish.'); return t; },
+  reset(el) { if (this.ids[el.id] != null && window.turnstile) { this.tokens[el.id] = null; try { turnstile.reset(this.ids[el.id]); } catch (e) {} } },
+};
+let HUBINFO = { signups: false };
+const shake = form => { const card = $('.login-card', form); card.classList.remove('shake'); void card.offsetWidth; card.classList.add('shake'); buzz(30); };
 (function signupSetup() {
   const inv = inviteFromHash(); if (inv) store.set('invite', inv);
-  const alt = $('#login-alt'), form = $('#signup'); if (!alt || !form) return;
-  const toSignup = () => { $('#login').classList.add('hidden'); form.classList.remove('hidden'); const pend = store.get('invite'); $('#su-inv').classList.toggle('hidden', !pend); setTimeout(() => $('#su-n').focus(), 200); };
-  const toLogin = () => { form.classList.add('hidden'); $('#login').classList.remove('hidden'); setTimeout(() => $('#login-u').focus(), 200); };
+  const alt = $('#login-alt'), form = $('#signup'), fg = $('#forgot'); if (!alt || !form) return;
+  const only = id => { for (const x of ['login', 'signup', 'forgot']) $('#' + x).classList.toggle('hidden', x !== id); };
+  const toSignup = () => { only('signup'); const pend = store.get('invite'); $('#su-inv').classList.toggle('hidden', !pend); Human.mount($('#su-human')); setTimeout(() => $('#su-n').focus(), 200); };
+  const toLogin = () => { only('login'); setTimeout(() => $('#login-u').focus(), 200); };
+  const toForgot = () => { only('forgot'); fgStep(1); $('#fg-who').value = $('#login-u').value.trim(); Human.mount($('#fg-human')); setTimeout(() => $('#fg-who').focus(), 200); };
   $('#go-signup').addEventListener('click', toSignup);
   $('#go-login').addEventListener('click', toLogin);
+  $('#go-forgot').addEventListener('click', toForgot);
+  $('#fg-back').addEventListener('click', toLogin);
   $('#su-eye').innerHTML = icon('eye');
   $('#su-eye').addEventListener('click', () => { const p = $('#su-p'), on = p.type === 'password'; p.type = on ? 'text' : 'password'; $('#su-eye').innerHTML = icon(on ? 'eyeoff' : 'eye'); });
   $('#su-u').addEventListener('input', e => { const v = e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''); if (v !== e.target.value) e.target.value = v; });
+  for (const id of ['#su-code', '#fg-code']) $(id).addEventListener('input', e => { const v = e.target.value.replace(/\D/g, '').slice(0, 6); if (v !== e.target.value) e.target.value = v; });
   let open = false; const maybe = () => { if (open && store.get('invite') && !App.T && !$('#login').classList.contains('hidden')) toSignup(); };
-  api('hub/info').then(i => { if (i.signups && !i.full) { open = true; alt.classList.remove('hidden'); maybe(); } }).catch(() => {});
-  const show0 = show; show = id => { show0(id); if (id === 'login') { form.classList.add('hidden'); maybe(); } };
+  api('hub/info').then(i => {
+    HUBINFO = i; Human.key = i.human || null;
+    $('#su-e-row').classList.toggle('hidden', !i.email);
+    if (i.email) $('#su-fine').textContent = "You need to be 13 or older. Your email and date of birth aren't shown to other players.";
+    $('#login-forgot').classList.toggle('hidden', !i.email);
+    if (i.signups && !i.full) { open = true; alt.classList.remove('hidden'); maybe(); }
+  }).catch(() => {});
+  const show0 = show; show = id => { show0(id); if (id === 'login') { form.classList.add('hidden'); fg.classList.add('hidden'); maybe(); } };
+
+  // ----- making an account: one step, or two when email codes are on -----
+  let step = 1, pending = null;
+  const suStep = n => {
+    step = n; $('#su-step1').classList.toggle('hidden', n !== 1); $('#su-step2').classList.toggle('hidden', n !== 2); $('#su-step2-links').classList.toggle('hidden', n !== 2);
+    $('#su-go').textContent = n === 1 ? (HUBINFO.email ? 'Send my code' : 'Make account') : 'Make account';
+    $('.login-title', form).textContent = n === 1 ? 'Make an account' : 'Check your email';
+    $('.login-sub', form).classList.toggle('hidden', n !== 1);
+    if (n === 2) { $('#su-code').value = ''; setTimeout(() => $('#su-code').focus(), 200); }
+  };
+  const details = () => {
+    const name = $('#su-n').value.trim(), username = $('#su-u').value.trim(), password = $('#su-p').value, dob = $('#su-d').value, email = $('#su-e').value.trim();
+    if (!username || !password || !dob || (HUBINFO.email && !email)) throw new Error(HUBINFO.email ? 'Fill in a username, a password, your email and your date of birth' : 'Fill in a username, a password and your date of birth');
+    if (password.length < 8) throw new Error('Use at least 8 characters for your password');
+    return { name: name || username, username, password, dob, ...(HUBINFO.email ? { email } : {}) };
+  };
+  const sendCode = async () => { const r = await api('signup/start', { method: 'POST', body: { ...pending, human: Human.token($('#su-human')) } }); Human.reset($('#su-human')); $('#su-code-to').textContent = r.email; return r; };
+  const done = async (r, name) => {
+    setToken(r.token); await loadState();
+    form.classList.add('hidden'); $('#su-p').value = ''; pending = null; suStep(1);
+    startApp(); toast(`Welcome, ${name}`, { sub: 'You have $10,000 of practice money. The league is in Games.' });
+  };
   form.addEventListener('submit', async e => {
     e.preventDefault();
     const btn = $('#su-go'), err = $('#su-err'); err.textContent = '';
-    const name = $('#su-n').value.trim(), username = $('#su-u').value.trim(), password = $('#su-p').value, dob = $('#su-d').value;
-    if (!username || !password || !dob) { err.textContent = 'Fill in a username, a password and your date of birth'; return; }
-    if (password.length < 8) { err.textContent = 'Use at least 8 characters for your password'; return; }
-    busy(btn, true);
     try {
-      const r = await api('signup', { method: 'POST', body: { name: name || username, username, password, dob } });
-      setToken(r.token); await loadState();
-    } catch (x) {
-      busy(btn, false); err.textContent = x.message;
-      const card = $('.login-card', form); card.classList.remove('shake'); void card.offsetWidth; card.classList.add('shake'); buzz(30);
-      return;
-    }
-    busy(btn, false); form.classList.add('hidden'); $('#su-p').value = '';
-    startApp();
-    toast(`Welcome, ${name || username}`, { sub: 'You have $10,000 of practice money. The league is in Games.' });
+      busy(btn, true);
+      if (step === 1) {
+        pending = details();
+        if (HUBINFO.email) { await sendCode(); busy(btn, false); suStep(2); return; }
+        const r = await api('signup', { method: 'POST', body: { ...pending, human: Human.token($('#su-human')) } });
+        busy(btn, false); await done(r, pending.name);
+      } else {
+        const code = $('#su-code').value.trim(); if (code.length !== 6) throw new Error('Enter the 6-digit code from the email');
+        const r = await api('signup/verify', { method: 'POST', body: { email: pending.email, code } });
+        busy(btn, false); await done(r, pending.name);
+      }
+    } catch (x) { busy(btn, false); err.textContent = x.message; shake(form); if (step === 1) Human.reset($('#su-human')); }
+  });
+  $('#su-resend').addEventListener('click', async e => { const err = $('#su-err'); err.textContent = ''; try { await sendCode(); toast('New code sent'); } catch (x) { err.textContent = x.message; } });
+  $('#su-back').addEventListener('click', () => { $('#su-err').textContent = ''; suStep(1); });
+
+  // ----- forgot password -----
+  let fstep = 1;
+  const fgStep = n => { fstep = n; $('#fg-step1').classList.toggle('hidden', n !== 1); $('#fg-step2').classList.toggle('hidden', n !== 2); $('#fg-go').textContent = n === 1 ? 'Send code' : 'Set new password'; $('#fg-err').textContent = '';
+    if (n === 1) $('#fg-sub').textContent = "Enter your username or email. If the account has a confirmed email, we'll send it a code."; };
+  fg.addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn = $('#fg-go'), err = $('#fg-err'); err.textContent = '';
+    const who = $('#fg-who').value.trim();
+    try {
+      busy(btn, true);
+      if (fstep === 1) {
+        if (!who) throw new Error('Enter your username or email');
+        const r = await api('forgot', { method: 'POST', body: { who, human: Human.token($('#fg-human')) } }); Human.reset($('#fg-human'));
+        busy(btn, false); fgStep(2);
+        $('#fg-sub').textContent = r.hint ? `If that's your account, a code is on its way to ${r.hint}. Check your spam folder too.` : 'If that account has a confirmed email, a code is on its way. Check your spam folder too. No email on the account? Ask the owner to reset your password.';
+        setTimeout(() => $('#fg-code').focus(), 200);
+      } else {
+        const code = $('#fg-code').value.trim(), password = $('#fg-p').value;
+        if (code.length !== 6) throw new Error('Enter the 6-digit code from the email');
+        if (password.length < 8) throw new Error('Use at least 8 characters for the new password');
+        const r = await api('forgot/reset', { method: 'POST', body: { who, code, password } });
+        setToken(r.token); await loadState(); busy(btn, false);
+        fg.classList.add('hidden'); $('#fg-p').value = ''; fgStep(1);
+        startApp(); toast('Password changed', { sub: "You're logged in. Your other devices were logged out." });
+      }
+    } catch (x) { busy(btn, false); err.textContent = x.message; shake(fg); if (fstep === 1) Human.reset($('#fg-human')); }
   });
 })();
+// ---------- the email on your account ----------
+function emailSheet({ intro } = {}) {
+  let email = App.me?.email && !App.me.emailOk ? App.me.email : '';
+  const s = sheet({ title: App.me?.emailOk ? 'Change your email' : 'Add your email', html: '' });
+  const one = () => {
+    s.html(`${intro ? `<p class="t-sub" style="margin:0 2px 12px">${h(intro)}</p>` : ''}<label class="field"><span>Email</span><input class="input" id="em-e" type="email" autocomplete="email" autocapitalize="off" value="${h(email)}"></label>
+      <p class="t-foot" style="margin:8px 2px 0">Only you and the owner of this server can see it. It's used for codes and resetting your password.</p><p class="login-err" id="em-err"></p>`);
+    s.foot(`<div class="btns">${intro ? '<button class="btn btn-quiet" id="em-later">Later</button>' : ''}<button class="btn btn-primary" id="em-go">Send code</button></div>`);
+    $('#em-later', s.footEl)?.addEventListener('click', () => { store.set('emailNag', etDay()); s.close(); });
+    $('#em-go', s.footEl).addEventListener('click', async e => { busy(e.currentTarget, true); try { email = $('#em-e', s.body).value.trim(); await post('me/email', { email }); two(); } catch (x) { busy(e.currentTarget, false); $('#em-err', s.body).textContent = x.message; } });
+  };
+  const two = () => {
+    s.html(`<p class="t-sub" style="margin:0 2px 12px">We sent a 6-digit code to <b>${h(email)}</b>. Check your spam folder if you don't see it.</p>
+      <label class="field"><span>Code</span><input class="input code-in" id="em-c" inputmode="numeric" autocomplete="one-time-code" maxlength="6"></label><p class="login-err" id="em-err"></p>
+      <p class="center"><button class="link" id="em-again">Use a different email</button></p>`);
+    s.foot(`<button class="btn btn-primary btn-lg" id="em-ok" style="width:100%">Confirm email</button>`);
+    setTimeout(() => $('#em-c', s.body)?.focus(), 200);
+    $('#em-again', s.body).addEventListener('click', one);
+    $('#em-ok', s.footEl).addEventListener('click', async e => { busy(e.currentTarget, true); try { App.me = await post('me/email/verify', { email, code: $('#em-c', s.body).value.trim() }); store.set('me', App.me); emit('me'); s.close(); toast('Email confirmed'); const p = Router.top()?.page; if (p?.name === 'account') p.draw(); } catch (x) { busy(e.currentTarget, false); $('#em-err', s.body).textContent = x.message; } });
+  };
+  one(); return s;
+}
+const etDay = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+ACT.acEmail = () => emailSheet();
+// friends without a confirmed email get asked once a day, after logging in
+on('me', () => {
+  const m = App.me;
+  if (!isFriend() || !m || m.role !== 'friend' || !m.emailOn || m.emailOk || store.get('emailNag') === etDay() || emailSheet.asked) return;
+  emailSheet.asked = true; store.set('emailNag', etDay());
+  setTimeout(() => emailSheet({ intro: 'Add an email to your account so you can reset your password yourself if you ever forget it.' }), 1200);
+});
 // after logging in: load who I am, use a waiting invite
 on('state', () => {
   if (!App.S) return;
@@ -10015,6 +10192,7 @@ PAGES.account = {
         <div class="card"><label class="field"><span>Name in the league</span><input class="input" id="ac-n" maxlength="24" value="${h(me.name)}"></label>
           <label class="field"><span>Emoji</span><input class="input" id="ac-e" maxlength="8" value="${h(me.emoji)}" style="width:90px;text-align:center;font-size:22px"></label>
           <button class="btn btn-quiet mt12" id="ac-save">Save</button></div>
+        ${isFriend() && me.emailOn ? `<div class="section-h"><h2>Email</h2></div><div class="group"><button class="cell" data-act="acEmail"><div class="lead">${icon('send')}</div><div class="main"><div class="title">${me.email ? h(me.email) : 'Add your email'}</div><div class="sub">${me.emailOk ? '<span class="em-ok">Confirmed</span> · used for codes and password resets' : 'Lets you reset your password yourself'}</div></div>${icon('right', 'chev')}</button></div>` : ''}
         <div class="section-h"><h2>What friends see</h2></div>
         <div class="card">${seg('ac-priv', Object.entries(PRIVACY).map(([k, v]) => [k, v[0].replace('Returns and holdings', 'Holdings')]), me.privacy)}
           <p class="t-sub" id="ac-priv-d" style="margin:12px 2px 0">${h(PRIVACY[me.privacy]?.[1] || '')}</p>
@@ -10144,6 +10322,8 @@ PAGES.admin = {
       ${d.invites.length ? `<div class="group">${d.invites.map(i => `<div class="cell"><div class="lead">${icon('gift')}</div><div class="main"><div class="title t-num">${h(i.code)}</div><div class="sub">${i.usedBy ? `used by @${h(i.usedBy)}` : `not used yet${i.note ? ' · ' + h(i.note) : ''}`} · ${fmtDate(i.created)}</div></div>${i.usedBy ? '' : `<button class="btn btn-quiet btn-sm" data-act="adInvCopy" data-code="${h(i.code)}">${icon('copy')}</button><button class="btn btn-quiet btn-sm" data-act="adInvDel" data-code="${h(i.code)}">${icon('trash')}</button>`}</div>`).join('')}</div>` : ''}
       <div class="section-h"><h2>Server rules</h2></div>
       <div class="group"><div class="cell"><div class="main"><div class="title">New accounts</div><div class="sub">Anyone with the link can sign up</div></div>${sw(st.signups, 'data-act="adSet" data-k="signups"')}</div>
+        <div class="cell"><div class="main"><div class="title">Email codes</div><div class="sub">${st.email ? `On · ${st.emailsToday} of ${st.emailCap} sent today` : 'Off. Add RESEND_API_KEY in your host\'s variables to turn on.'}</div></div></div>
+        <div class="cell"><div class="main"><div class="title">Human check on sign-up</div><div class="sub">${st.human ? 'On (Cloudflare Turnstile)' : 'Off. Add TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY to turn on.'}</div></div></div>
         <div class="cell"><div class="main"><div class="title">AI for friends</div><div class="sub">Analysts, briefs and the plain-English alerts use your Anthropic key</div></div>${sw(st.aiOn, 'data-act="adSet" data-k="aiOn"')}</div>
         <div class="cell"><div class="main"><div class="title">AI requests per person per day</div><div class="sub">Counts every AI call. Resets at midnight New York time.</div></div><input class="input" style="width:80px;height:40px;text-align:right" inputmode="numeric" data-ad="aiCap" value="${st.aiCap}"></div>
         <div class="cell"><div class="main"><div class="title">Most accounts allowed</div><div class="sub">Keeps the server's memory in check</div></div><input class="input" style="width:80px;height:40px;text-align:right" inputmode="numeric" data-ad="maxUsers" value="${st.maxUsers}"></div></div>
@@ -10169,7 +10349,7 @@ ACT.adRestart = async () => {
 };
 ACT.adUser = el => {
   const pg = adPage(), u = pg?.d.users.find(x => x.id === +el.dataset.id); if (!u) return;
-  const s = sheet({ title: `${u.emoji} ${u.name}`, html: `<p class="t-sub" style="margin:0 2px 12px">@${h(u.username)} · joined ${fmtDate(u.created)}${u.age != null ? ` · age ${u.age}` : ''} · shares ${h(PRIVACY[u.privacy]?.[0].toLowerCase() || u.privacy)}</p>
+  const s = sheet({ title: `${u.emoji} ${u.name}`, html: `<p class="t-sub" style="margin:0 2px 12px">@${h(u.username)}${u.email ? ` · ${h(u.email)}${u.emailOk ? '' : ' (not confirmed)'}` : ' · no email'} · joined ${fmtDate(u.created)}${u.age != null ? ` · age ${u.age}` : ''} · shares ${h(PRIVACY[u.privacy]?.[0].toLowerCase() || u.privacy)}</p>
     ${u.wallets ? `<div class="group">${u.wallets.map(w => `<div class="cell"><div class="lead">${h(w.emoji)}</div><div class="main"><div class="title">${h(w.name)}${w.league ? ' <span class="pill">league</span>' : ''}</div></div><div class="r"><div class="t-num">${money(w.value)}</div><div class="t-foot ${w.ret >= 0 ? 'up' : 'dn'}">${pct(w.ret * 100, 1)}</div></div></div>`).join('')}</div>` : '<p class="note">Asleep. Their wallets show here when the account is awake.</p>'}
     <div class="group mt16"><button class="cell" data-u="trades"><div class="lead">${icon('list')}</div><div class="main"><div class="title">See their trades</div></div>${icon('right', 'chev')}</button>
       <div class="cell"><div class="main"><div class="title">Alpaca invite</div><div class="sub">Lets them use the Alpaca side once it opens to friends</div></div>${sw(u.alpaca, 'data-u="alpaca"')}</div>
@@ -10419,7 +10599,7 @@ async function pushBox(el) {
 // ===================================================================
 let started = false;
 function show(id) {
-  for (const x of ['login', 'signup', 'app']) $('#' + x).classList.toggle('hidden', x !== id);
+  for (const x of ['login', 'signup', 'forgot', 'app']) $('#' + x).classList.toggle('hidden', x !== id);
   const sp = $('#splash'); if (sp && !sp.classList.contains('out')) { sp.classList.add('out'); setTimeout(() => sp.remove(), 700); }
 }
 function logout(silent) {

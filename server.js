@@ -54,7 +54,7 @@ const GET = (p, ...h) => route('GET', p, ...h), POST = (p, ...h) => route('POST'
 const PATCH = (p, ...h) => route('PATCH', p, ...h), DEL = (p, ...h) => route('DELETE', p, ...h);
 
 const CSP = [
-  "default-src 'self'", "script-src 'self' 'unsafe-inline'", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "default-src 'self'", "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com", "frame-src https://challenges.cloudflare.com", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com data:", "img-src 'self' data: blob: https:", "connect-src 'self' ws: wss:",
   "worker-src 'self'", "manifest-src 'self'", "frame-ancestors 'none'", "base-uri 'none'", "form-action 'self'",
 ].join('; ');
@@ -7421,8 +7421,8 @@ function stepCheck(req) {
 }
 
 // ---------- backups ----------
-const BACKUP_SKIP = new Set(['backups', 'bars', 'prices', 'hub_users', 'hub_tokens', 'hub_invites', 'league_seasons', 'league_members']); // price data comes back on its own; friends' accounts and the league are never in a backup
-async function backupTables() { return (await rows("select table_name t from information_schema.tables where table_schema=current_schema() and table_type='BASE TABLE' order by 1")).map(r => r.t).filter(t => !BACKUP_SKIP.has(t)); }
+const BACKUP_SKIP = new Set(['backups', 'bars', 'prices', 'hub_users', 'hub_tokens', 'hub_invites', 'hub_codes', 'league_seasons', 'league_members']); // price data comes back on its own; friends' accounts and the league are never in a backup
+async function backupTables() { return (await rows("select table_name t from information_schema.tables where table_schema=current_schema() and table_type='BASE TABLE' order by 1")).map(r => r.t).filter(t => !BACKUP_SKIP.has(t) && !/^(hub|league)_/.test(t)); }
 async function makeBackup() {
   const out = { app: 'mango', v: 1, made: new Date().toISOString(), schema: +(await kvGet('schema', '0')), tables: {} };
   for (const t of await backupTables()) {
@@ -9122,7 +9122,7 @@ const ICONS = {};
 const icon = (name, fn) => ICONS[name] || (ICONS[name] = fn());
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD646"/><stop offset=".5" stop-color="#FFA028"/><stop offset="1" stop-color="#FA5256"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="#1E1430"/><ellipse cx="31" cy="36" rx="18" ry="22" transform="rotate(30 31 36)" fill="url(#g)"/><path d="M20 41l6.5-6 5 3.5 9.5-10" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37 28.5h4.5V33" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="45" cy="11.5" rx="9" ry="4.6" transform="rotate(-24 45 11.5)" fill="#3BD68A"/></svg>`;
 let BUILD = 'dev', INDEX = null, INDEX_GZ = null;
-const APP_VERSION = '5.0.0'; // stamped by build.sh from package.json
+const APP_VERSION = '5.1.0'; // stamped by build.sh from package.json
 function loadIndex() {
   const file = path.join(__dirname, 'index.html');
   let html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<!doctype html><title>Mango</title><p>index.html is missing next to server.js.</p>';
@@ -9308,7 +9308,11 @@ async function hubInit() {
     create table if not exists hub_invites(code text primary key, kind text not null default 'alpaca', note text, created timestamptz not null default now(), used_by int, used_at timestamptz);
     create table if not exists league_seasons(id serial primary key, name text not null, starts timestamptz not null, ends timestamptz not null, start_bal numeric not null default 10000, status text not null default 'open', join_until timestamptz not null);
     create table if not exists league_members(season int not null, uid int not null, wid int not null, joined timestamptz not null default now(), final_value numeric, final_ret numeric, rank int, primary key(season, uid));
-    alter table wallets add column if not exists league int;`);
+    alter table wallets add column if not exists league int;
+    alter table hub_users add column if not exists email text;
+    alter table hub_users add column if not exists email_ok boolean not null default false;
+    create unique index if not exists hub_users_email on hub_users(email) where email is not null;
+    create table if not exists hub_codes(email text not null, purpose text not null, hash text not null, uid int, data jsonb, tries int not null default 0, created timestamptz not null default now(), expires timestamptz not null, primary key(email, purpose));`);
   for (const u of await rows('select * from hub_users')) USERS.set(u.id, u);
 }
 const schemaOf = uid => `t_${+uid}`;
@@ -9426,7 +9430,70 @@ async function hubUpgrade(req, sock, head, u) {
 }
 // ---------- signing up, logging in, the account ----------
 const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
-POST('/api/signup', async req => {
+// ---------- email codes and the human check (both switch on when their keys are in the host's variables) ----------
+const RESEND_KEY = (ENV.RESEND_API_KEY || '').trim(), TS_SITE = (ENV.TURNSTILE_SITE_KEY || '').trim(), TS_SECRET = (ENV.TURNSTILE_SECRET_KEY || '').trim();
+const EMAIL_ON = () => !WORKER && !!RESEND_KEY && HS.hubEmail !== false;
+const EMAIL_RE = /^[^\s@<>()",;:]{1,64}@[a-z0-9-]+(\.[a-z0-9-]+)+$/i;
+const EMAIL_DAY_CAP = () => clamp(Math.round(num(ENV.EMAIL_DAILY_CAP, 90)), 1, 100000);
+const cleanEmail = e => { const x = String(e || '').trim().toLowerCase(); if (x.length > 254 || !EMAIL_RE.test(x)) fail('Enter a real email address'); return x; };
+const codeHash = (email, code) => crypto.createHmac('sha256', SECRET).update(`${email}:${code}`).digest('hex');
+async function humanCheck(req) {
+  if (!TS_SECRET) return;
+  const tok = String(req.body?.human || '');
+  if (!tok) fail('Finish the "verify you are human" check first.', 400);
+  let ok = false;
+  try {
+    const r = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', signal: AbortSignal.timeout(10e3), headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ secret: TS_SECRET, response: tok, remoteip: clientIp(req) }) });
+    ok = !!(await r.json()).success;
+  } catch (e) { warn('human check', e.message); fail('The human check could not be reached. Try again in a moment.', 503); }
+  if (!ok) fail('The human check didn\'t pass. Try it again.', 400);
+}
+// sending: never more than the daily cap (Resend's free plan allows 100 a day)
+const sendLog = new Map(); // ip -> [times]
+async function sendMail(req, to, subject, text, html) {
+  const ip = clientIp(req), now = Date.now(), list = (sendLog.get(ip) || []).filter(t => now - t < 3600e3);
+  if (list.length >= 6) fail('Too many codes from this device. Wait an hour and try again.', 429);
+  const k = 'email_sent_' + etDate(), n = +(await kvGet(k, '0')) + 1;
+  if (n > EMAIL_DAY_CAP()) { if (n === EMAIL_DAY_CAP() + 1) { await kvSet(k, String(n)); notify('info', 'Email limit reached for today', 'Mango stopped sending sign-up and password codes until midnight New York time.').catch(() => {}); } fail('Mango has sent all the emails it can today. Try again tomorrow.', 429); }
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim().replace(/:\d+$/, '');
+  const from = (ENV.EMAIL_FROM || '').trim() || (host && !/railway\.app$|localhost|^127\.|^\d+\.\d+/.test(host) ? `Mango <noreply@${host.replace(/^www\./, '')}>` : '');
+  if (!from) fail('Email isn\'t set up on this address. Open the app from its own domain.', 503);
+  const r = await fetch('https://api.resend.com/emails', { method: 'POST', signal: AbortSignal.timeout(15e3), headers: { authorization: 'Bearer ' + RESEND_KEY, 'content-type': 'application/json' },
+    body: JSON.stringify({ from, to: [to], subject, text, html }) }).catch(e => ({ ok: false, status: 0, json: async () => ({ message: e.message }) }));
+  if (!r.ok) { const j = await r.json().catch(() => ({})); warn('email', r.status, j.message || ''); fail('The email couldn\'t be sent. Check the address and try again.', 502); }
+  list.push(now); sendLog.set(ip, list); await kvSet(k, String(n));
+}
+const codeMail = (code, why) => {
+  const text = `Your Mango code is ${code}\n\n${why}\nIt works for 10 minutes. If you didn't ask for this, you can ignore this email.`;
+  const html = `<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;max-width:420px;margin:0 auto;padding:24px;color:#1d1726">
+    <p style="font-size:18px;font-weight:700;margin:0 0 16px">🥭 Mango</p><p style="margin:0 0 8px">${why}</p>
+    <p style="font-size:36px;font-weight:800;letter-spacing:8px;margin:16px 0;font-family:ui-monospace,Menlo,monospace">${code}</p>
+    <p style="color:#6d6187;font-size:14px;margin:0">It works for 10 minutes. If you didn't ask for this, you can ignore this email.</p></div>`;
+  return [text, html];
+};
+// one code per address and purpose; a new one replaces the old (after a minute's wait)
+async function newCode(req, email, purpose, uid, data) {
+  const ex = await row('select created from hub_codes where email=$1 and purpose=$2', [email, purpose]);
+  if (ex && Date.now() - tsMs(ex.created) < 60e3) fail(`Wait ${Math.ceil((tsMs(ex.created) + 60e3 - Date.now()) / 1000)} seconds before asking for another code.`, 429);
+  const code = String(crypto.randomInt(0, 1e6)).padStart(6, '0');
+  const why = purpose === 'signup' ? 'Here is the code to finish making your account.' : purpose === 'reset' ? 'Here is the code to reset your password.' : 'Here is the code to confirm your email address.';
+  await sendMail(req, email, `${code} is your Mango code`, ...codeMail(code, why));
+  await Q(`insert into hub_codes(email,purpose,hash,uid,data,expires) values($1,$2,$3,$4,$5,now() + interval '10 minutes')
+    on conflict (email,purpose) do update set hash=excluded.hash, uid=excluded.uid, data=excluded.data, expires=excluded.expires, tries=0, created=now()`, [email, purpose, codeHash(email, code), uid || null, data ? JSON.stringify(data) : null]);
+}
+async function useCode(email, purpose, code, uid) {
+  const c = await row('select * from hub_codes where email=$1 and purpose=$2', [email, purpose]);
+  if (!c || tsMs(c.expires) < Date.now() || (uid !== undefined && c.uid !== uid)) fail('That code has expired. Ask for a new one.');
+  if (c.tries >= 5) fail('Too many wrong tries. Ask for a new code.');
+  if (!safeEq(codeHash(email, String(code || '').replace(/\D/g, '')), c.hash)) { await Q('update hub_codes set tries=tries+1 where email=$1 and purpose=$2', [email, purpose]); await sleep(400); fail(c.tries >= 4 ? 'Too many wrong tries. Ask for a new code.' : 'That code is wrong. Check the email and try again.'); }
+  await Q('delete from hub_codes where email=$1 and purpose=$2', [email, purpose]);
+  return c;
+}
+const emailTaken = async (email, except = 0) => !!(await row('select 1 from hub_users where email=$1 and id<>$2', [email, except]));
+
+// ---------- signing up ----------
+async function checkSignup(req) {
   if (WORKER) fail('Not found', 404);
   rateLimit(clientIp(req));
   if (HS.hubSignups === false) fail('New accounts are closed right now. Ask the owner for an invite.');
@@ -9440,13 +9507,81 @@ POST('/api/signup', async req => {
   if (USERS.size >= MAX_USERS()) fail('This server is full right now. Ask the owner.');
   if (await row('select 1 from hub_users where username=$1', [username])) fail('That username is taken');
   const name = String(b.name || username).trim().slice(0, 24) || username, emoji = String(b.emoji || '🙂').slice(0, 8);
-  const u = await row('insert into hub_users(username,name,emoji,pass,dob) values($1,$2,$3,$4,$5) returning *', [username, name, emoji, passHash(pass), dob]);
+  return { username, name, emoji, pass, dob };
+}
+async function makeFriend({ username, name, emoji, passH, dob, email }) {
+  if (await row('select 1 from hub_users where username=$1', [username])) fail('That username was just taken. Pick another.');
+  if (email && await emailTaken(email)) fail('That email already has an account. Log in or reset your password.');
+  const u = await row('insert into hub_users(username,name,emoji,pass,dob,email,email_ok) values($1,$2,$3,$4,$5,$6,$7) returning *', [username, name, emoji, passH, dob, email || null, !!email]);
   await Q(`create schema if not exists ${schemaOf(u.id)}`);
   USERS.set(u.id, u);
   await ensureWorker(u.id); await hubFetch(u.id, 'POST', '/internal/profile', { dob });
   await notify('info', `🙂 ${name} joined Mango`, `@${username} made an account on your server.`, { url: '/#/admin' }).catch(() => {});
   return { token: await newFriendToken(u.id) };
+}
+// without email set up: one step, like before
+POST('/api/signup', async req => {
+  if (EMAIL_ON()) fail('Confirm your email to make an account. Update the app and try again.');
+  const s = await checkSignup(req); await humanCheck(req);
+  return makeFriend({ ...s, passH: passHash(s.pass) });
 });
+// with email: step 1 checks everything and emails a code, step 2 makes the account
+POST('/api/signup/start', async req => {
+  if (!EMAIL_ON()) fail('Email codes aren\'t switched on here.', 404);
+  const s = await checkSignup(req), email = cleanEmail(req.body?.email);
+  if (await emailTaken(email)) fail('That email already has an account. Log in or reset your password.');
+  await humanCheck(req);
+  await newCode(req, email, 'signup', null, { username: s.username, name: s.name, emoji: s.emoji, passH: passHash(s.pass), dob: s.dob });
+  return { ok: true, email };
+});
+POST('/api/signup/verify', async req => {
+  if (!EMAIL_ON()) fail('Email codes aren\'t switched on here.', 404);
+  rateLimit(clientIp(req));
+  const email = cleanEmail(req.body?.email), c = await useCode(email, 'signup', req.body?.code);
+  if (USERS.size >= MAX_USERS()) fail('This server is full right now. Ask the owner.');
+  return makeFriend({ ...c.data, email });
+});
+// forgot password (friend accounts with a confirmed email)
+POST('/api/forgot', async req => {
+  if (!EMAIL_ON()) fail('Password reset by email isn\'t switched on here. Ask the owner to reset it.', 404);
+  rateLimit(clientIp(req)); await humanCheck(req);
+  const who = String(req.body?.who || '').trim().toLowerCase();
+  const u = who ? await row('select * from hub_users where (username=$1 or email=$1) and email_ok and status=$2', [who, 'active']) : null;
+  if (u) await newCode(req, u.email, 'reset', u.id);
+  else await sleep(500 + Math.random() * 500);
+  // the same answer either way, so nobody can use this to find out who has an account
+  return { ok: true, hint: u ? u.email.replace(/^(.)(.*)(@.*)$/, (m, a, b, c) => a + '•'.repeat(Math.min(6, Math.max(2, b.length))) + c) : null };
+});
+POST('/api/forgot/reset', async req => {
+  if (!EMAIL_ON()) fail('Not found', 404);
+  rateLimit(clientIp(req));
+  const who = String(req.body?.who || '').trim().toLowerCase(), pass = String(req.body?.password || '');
+  if (pass.length < 8) fail('Use at least 8 characters for the new password');
+  const u = await row('select * from hub_users where (username=$1 or email=$1) and email_ok', [who]);
+  if (!u) fail('That code has expired. Ask for a new one.');
+  await useCode(u.email, 'reset', req.body?.code, u.id);
+  if (u.status !== 'active') fail('This account is switched off. Ask the owner.', 403);
+  await Q('update hub_users set pass=$1 where id=$2', [passHash(pass), u.id]); await Q('delete from hub_tokens where uid=$1', [u.id]); TOKCACHE.clear();
+  USERS.set(u.id, await row('select * from hub_users where id=$1', [u.id]));
+  return { token: await newFriendToken(u.id) };
+});
+// adding or changing the email on an account that's already logged in
+POST('/api/me/email', anyUser, async req => {
+  if (!req.friend) fail('The owner account doesn\'t use an email here.');
+  if (!EMAIL_ON()) fail('Email isn\'t switched on here.', 404);
+  const email = cleanEmail(req.body?.email);
+  if (await emailTaken(email, req.friend.id)) fail('That email is already used by another account.');
+  await newCode(req, email, 'email', req.friend.id); return { ok: true, email };
+});
+POST('/api/me/email/verify', anyUser, async req => {
+  if (!req.friend) fail('Not for the owner account');
+  const email = cleanEmail(req.body?.email); await useCode(email, 'email', req.body?.code, req.friend.id);
+  if (await emailTaken(email, req.friend.id)) fail('That email is already used by another account.');
+  await Q('update hub_users set email=$1, email_ok=true where id=$2', [email, req.friend.id]);
+  USERS.set(req.friend.id, await row('select * from hub_users where id=$1', [req.friend.id]));
+  return meJson(USERS.get(req.friend.id));
+});
+setInterval(() => { if (!WORKER) Q('delete from hub_codes where expires < now() - interval \'1 day\'').catch(() => {}); }, 3600e3).unref?.();
 async function friendLogin(req, username, p) {
   const u = await row('select * from hub_users where username=$1', [String(username || '').trim().toLowerCase()]);
   if (!u || !passOk(p, u.pass)) { await sleep(600); fail('That username or password is wrong', 401); }
@@ -9454,14 +9589,14 @@ async function friendLogin(req, username, p) {
   tries.delete(clientIp(req)); USERS.set(u.id, u);
   return { token: await newFriendToken(u.id) };
 }
-GET('/api/hub/info', () => ({ signups: !WORKER && HS.hubSignups !== false, full: USERS.size >= MAX_USERS() }));
+GET('/api/hub/info', () => ({ signups: !WORKER && HS.hubSignups !== false, full: USERS.size >= MAX_USERS(), email: EMAIL_ON(), human: !WORKER && TS_SECRET ? TS_SITE || null : null }));
 // who am I: the owner or a friend
 async function anyUser(req) {
   if (req.friend) return;
   const t = (req.headers.authorization || '').replace(/^Bearer\s+/i, ''); if (!tokenValid(t)) fail('Please log in again', 401);
   req.owner = true;
 }
-const meJson = u => u ? { role: 'friend', id: u.id, username: u.username, name: u.name, emoji: u.emoji, privacy: u.privacy, alpaca: !!u.alpaca, autoleague: u.autoleague }
+const meJson = u => u ? { role: 'friend', id: u.id, username: u.username, name: u.name, emoji: u.emoji, privacy: u.privacy, alpaca: !!u.alpaca, autoleague: u.autoleague, email: u.email || null, emailOk: !!u.email_ok, emailOn: EMAIL_ON() }
   : { role: 'owner', id: 0, username: APP_USER, name: HS.hubOwnerName || APP_USER, emoji: HS.hubOwnerEmoji || '🥭', privacy: HS.hubOwnerPrivacy || 'everything', alpaca: true, autoleague: HS.hubOwnerAuto !== false };
 GET('/api/me', anyUser, async req => meJson(req.friend));
 PATCH('/api/me', anyUser, async req => {
@@ -9512,10 +9647,10 @@ GET('/api/admin/users', auth, async () => {
   const list = [];
   for (const u of await rows('select * from hub_users order by id')) {
     const W = WORKERS.get(u.id), s = W?.ready ? await hubFetch(u.id, 'GET', '/internal/summary').catch(() => null) : null;
-    list.push({ id: u.id, username: u.username, name: u.name, emoji: u.emoji, created: tsMs(u.created), lastSeen: tsMs(u.last_seen), status: u.status, alpaca: u.alpaca, privacy: u.privacy, aiCap: u.ai_cap, running: !!W?.ready, mem: s?.mem || W?.mem || null, wallets: s?.wallets || null, bots: s?.bots ?? null, age: ageFrom(u.dob) });
+    list.push({ id: u.id, username: u.username, name: u.name, emoji: u.emoji, created: tsMs(u.created), lastSeen: tsMs(u.last_seen), status: u.status, alpaca: u.alpaca, privacy: u.privacy, aiCap: u.ai_cap, email: u.email || null, emailOk: !!u.email_ok, running: !!W?.ready, mem: s?.mem || W?.mem || null, wallets: s?.wallets || null, bots: s?.bots ?? null, age: ageFrom(u.dob) });
   }
   const invites = (await rows('select * from hub_invites order by created desc limit 50')).map(i => ({ code: i.code, note: i.note, created: tsMs(i.created), usedBy: i.used_by ? USERS.get(i.used_by)?.username || i.used_by : null }));
-  return { users: list, invites, settings: { signups: HS.hubSignups !== false, maxUsers: MAX_USERS(), aiCap: HS.hubAiCap ?? 30, aiOn: HS.hubAiOn !== false }, mem: process.memoryUsage().rss };
+  return { users: list, invites, settings: { signups: HS.hubSignups !== false, maxUsers: MAX_USERS(), aiCap: HS.hubAiCap ?? 30, aiOn: HS.hubAiOn !== false, email: EMAIL_ON(), human: !!TS_SECRET, emailsToday: +(await kvGet('email_sent_' + etDate(), '0')), emailCap: EMAIL_DAY_CAP() }, mem: process.memoryUsage().rss };
 });
 const ageFrom = dob => { const [y, m, d] = String(dob).split('-').map(Number), n = new Date(); return n.getFullYear() - y - ((n.getMonth() + 1 < m || (n.getMonth() + 1 === m && n.getDate() < d)) ? 1 : 0); };
 PATCH('/api/admin/users/:id', auth, async req => {

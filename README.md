@@ -2,7 +2,7 @@
 
 A paper trading app for iPhone with real market prices. It runs from the Home Screen and is built on Node and Postgres.
 
-**⬇️ [Download the latest version](https://github.com/MangoMods-code/Mango-PT-App/releases/latest)** · Current: [V5.0.0, Friends and the monthly league](https://github.com/MangoMods-code/Mango-PT-App/releases/tag/V5.0.0) · [All releases](https://github.com/MangoMods-code/Mango-PT-App/releases)
+**⬇️ [Download the latest version](https://github.com/MangoMods-code/Mango-PT-App/releases/latest)** · Current: [V5.1.0, Email codes and a human check](https://github.com/MangoMods-code/Mango-PT-App/releases/tag/V5.1.0) · [All releases](https://github.com/MangoMods-code/Mango-PT-App/releases)
 
 Trade stocks, ETFs and crypto with practice money. You can also put strategies to work as bots, let Autopilot run a mix of them, and watch it all happen in **Mango HQ**: a small isometric world where your bots walk around and a Council of up to ten members votes on every trade. If you connect an Alpaca account, the same app can trade it, on paper or with real money, on a separate side with its own safeguards.
 
@@ -128,6 +128,10 @@ It needs **Node 20+** and a **Postgres** database. The database tables are creat
 | `ALPACA_FEED` | optional | `iex` (default) or `sip` |
 | `ANTHROPIC_API_KEY` | optional | Turns on the **AI Council members** (Analyst, News Hawk, Risk Officer, Chartist), powered by Claude Haiku. It costs well under $1 a month, with a shared daily cap you set in Settings. |
 | `SEC_CONTACT` | optional | Your name and email, sent with requests for SEC filings (famous investors' 13F holdings, fund holdings). The SEC asks apps to identify themselves; without it those may not load. |
+| `RESEND_API_KEY` | optional | Turns on email codes for new accounts and "forgot password" ([resend.com](https://resend.com), free for up to 100 emails a day). Your app's domain must be verified in Resend. |
+| `EMAIL_FROM` | optional | Who the emails come from. Defaults to `Mango <noreply@your-domain>` |
+| `EMAIL_DAILY_CAP` | optional | Most emails sent per day (default 90) |
+| `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY` | optional | A "verify you are human" check on sign-up and password resets ([Cloudflare Turnstile](https://www.cloudflare.com/products/turnstile/), free) |
 | `VAPID_EMAIL` | optional | Contact address for push notifications (`mailto:...`) |
 | `MANGO_STANDBY` | optional | Set to `1` on a backup copy only (see below) |
 | `PUBLIC_URL` | optional | The standby copy's own address, if the host doesn't provide one (Render does) |
