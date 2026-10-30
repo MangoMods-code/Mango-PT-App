@@ -8542,12 +8542,20 @@ PAGES.costs = {
 // Newest first. Each release: version, date, a one-line headline and grouped notes.
 // ===================================================================
 const CHANGELOG = [
-  { v: '5.1.1', d: '2026-10-29', title: 'Owner email and fairer bots', short: [
+  { v: '5.1.1', d: '2026-10-29', title: 'Owner email and smarter bots', short: [
+    'Momentum rotation 3 adapts to its money, the market and what has worked lately',
+    'Bots in different wallets no longer share risk limits; skipped buys wait in T-bills',
     'The owner account can add an email and reset its password with a code',
-    'Bots in different wallets no longer share risk limits',
-    'Money a bot skips buying waits in T-bills instead of cash',
   ], groups: [
-    ['Bots', [
+    ['Momentum rotation 3: it adapts', [
+      'To its money: it holds enough picks to stay fully invested under your per-position limit (4 at 25%), as many as the money allows. A $200 bot and a $10,000 bot now hold the same picks.',
+      'To the market: strong (above its 50- and 200-day averages) rides the leaders; choppy ranks picks by return per unit of swing, so calmer leaders win; weak parks the money in T-bills.',
+      'To its own results: each month it replays the last 6 months with 3, 6 and 12-month look-backs, ranked both ways, and uses whichever did best (it only switches when the winner is ahead by 2 points).',
+      'It doesn\'t wait a whole month when things break: it rebalances early, at most once a week, when the market turns weak, when it recovers, or when a holding falls 15% from its high (that holding is sold).',
+      'The bot\'s run explains what it read and why. Existing momentum bots upgrade on their next run. Switch it off in the bot\'s settings with "Adapts on its own".',
+      'Backtests replay the early turns too, so the lab shows the adapting version.',
+    ]],
+    ['Other bot fixes', [
       'Shared risk caps now apply to bots in the same wallet. A bot in its own wallet is its own portfolio, so a big bot elsewhere can no longer use up a small bot\'s room in a stock or sector (the same strategy at $200 could end up buying less than at $10,000).',
       'When a bot skips a buy (earnings in a couple of days, bad news, a stop that fired today, the correlation guard), that money now waits in its T-bill fund instead of sitting in cash, like the mood switch already did.',
       'A wallet with several bots now counts its money once when checking the caps.',

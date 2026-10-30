@@ -3500,6 +3500,62 @@ const FUND_P = { k: 'fullFund', label: 'Index funds can go past the per-position
 const withPark = (syms, p) => p?.safe && p.safe !== 'cash' && syms.length && syms.some(x => !isCrypto(x)) && !syms.includes(p.safe) ? [...syms, p.safe] : syms;
 const SAFE_P = { k: 'safe', label: 'Idle money', def: 'SGOV', choices: [['SGOV', 'SGOV (T-bills)'], ['BIL', 'BIL (T-bills)'], ['cash', 'Cash']] };
 const FLOW_P = { k: 'flow', label: 'New money', def: 'flow', choices: [['flow', 'Top up what it holds'], ['rebal', 'Only on new trades']] };
+// ---------- Momentum 3: adapting to the market and to what has worked lately ----------
+// the market, from the benchmark: weak (below its long average: park in T-bills), choppy (below the 50-day or very jumpy: rank by
+// return per unit of swing), strong (ride the leaders)
+function momRegime(ctx, p) {
+  const b = ctx.bench && ctx.data[ctx.bench], i = ctx.idx[ctx.bench], f = p.filterLen > 0 ? p.filterLen : 200;
+  if (!b || i == null || i < Math.max(f, 50)) return null;
+  const c = b.c[i], long = IND.sma(b.c, f, i), mid = IND.sma(b.c, 50, i), v = IND.vol(b.c, 20, i), v1 = IND.vol(b.c, 252, i);
+  const jumpy = v > 0 && v1 > 0 && v > v1 * 1.4;
+  const k = c < long ? 'weak' : (c < mid || jumpy) ? 'choppy' : 'strong';
+  return { k, line: k === 'weak' ? `Market weak: ${ctx.bench} is below its ${f}-day average, so the money waits in T-bills` : k === 'choppy' ? `Market choppy: ${ctx.bench} ${c < mid ? 'is below its 50-day average' : 'is swinging more than usual'}, so picks are ranked by return per unit of swing` : `Market strong: ${ctx.bench} is above its 50- and ${f}-day averages, riding the leaders` };
+}
+// replays the last 6 monthly turns with each look-back and ranking, and keeps the best (a change has to win by 2 points)
+function momTune(ctx, p, slots, safe) {
+  const b = ctx.data[ctx.bench], bi = ctx.idx[ctx.bench]; if (!b || bi == null || bi < 6 * 21 + 30) return null;
+  const syms = ctx.syms.filter(s => s !== safe), f = p.filterLen > 0 ? p.filterLen : 200, combos = [];
+  for (const L of [63, 126, 252]) for (const rank of ['ret', 'risk']) combos.push({ L, rank, g: 1, n: 0 });
+  for (let k = 6; k >= 1; k--) {
+    const t0 = bi - 21 * k, t1 = bi - 21 * (k - 1), d0 = b.d[t0], d1 = b.d[t1];
+    const weak = t0 >= f && b.c[t0] < IND.sma(b.c, f, t0);
+    const at = {}; for (const s of syms) { const a = ctx.data[s], top = ctx.idx[s]; if (top == null) continue; const j0 = Math.min(lastIndexOnOrBefore(a.d, d0), top), j1 = Math.min(lastIndexOnOrBefore(a.d, d1), top); if (j0 > 0 && j1 > j0) at[s] = [j0, j1]; }
+    for (const cb of combos) {
+      if (weak) { cb.n++; continue; } // the market filter would have parked the money: no gain, no loss
+      const r = [];
+      for (const [s, [j0, j1]] of Object.entries(at)) { const c = ctx.data[s].c; if (j0 < cb.L + (p.skip || 0)) continue; const m = IND.ret(c, cb.L, j0, p.skip); if (!(m > 0)) continue; const v = cb.rank === 'risk' ? IND.vol(c, 63, j0) : 1; r.push({ s, sc: v > 0 ? m / v : m, fwd: c[j1] / c[j0] - 1 }); }
+      r.sort((x, y) => y.sc - x.sc); const top = r.slice(0, slots);
+      if (top.length) { cb.g *= 1 + top.reduce((t, x) => t + x.fwd, 0) / top.length; cb.n++; }
+    }
+  }
+  const ok = combos.filter(c => c.n >= 4); if (!ok.length) return null;
+  const base = ok.find(c => c.L === p.lookback && c.rank === 'ret') || ok.find(c => c.L === 126 && c.rank === 'ret') || ok[0];
+  const best = ok.reduce((a, c) => (c.g > a.g ? c : a), base), pick = best.g - base.g > 0.02 ? best : base;
+  const nm = L => ({ 63: '3-month', 126: '6-month', 252: '12-month' })[L] || `${L}-day`;
+  return { lookback: pick.L, rank: pick.rank, line: pick === base ? `Its usual ${nm(base.L)} look-back did as well as anything over the last 6 months (${pf(base.g - 1, 1)}), so it keeps it` : `Adapted: a ${nm(pick.L)} look-back${pick.rank === 'risk' ? ' ranked per unit of swing' : ''} would have made ${pf(pick.g - 1, 1)} over the last 6 months vs ${pf(base.g - 1, 1)} for the usual, so it uses that this month` };
+}
+// a holding that fell more than 15% from its high since it was bought is let go (adapting bots only)
+function momBroken(ctx, s) {
+  const a = ctx.data[s], i = ctx.idx[s], h = ctx.held[s]; if (!a || i == null || !h) return null;
+  const c = (ctx.px && ctx.px(s)) || a.c[i], j0 = h.entryDate ? Math.max(0, lastIndexOnOrBefore(a.d, h.entryDate)) : Math.max(0, i - (h.days || 0));
+  let hi = Math.max(h.high || 0, c); for (let j = j0; j < i; j++) if (a.c[j] > hi) hi = a.c[j];
+  return hi > 0 && c < hi * 0.85 ? Math.round((1 - c / hi) * 100) : null;
+}
+// mid-month: rebalance early when the market turns, or a holding breaks down (at most once a week, see the callers)
+function momCheck(ctx) {
+  const p = ctx.params, safe = p.safe && p.safe !== 'cash' ? p.safe : null, mkt = momRegime(ctx, p); if (!mkt) return null;
+  const risky = Object.keys(ctx.held).filter(s => s !== safe);
+  if (mkt.k === 'weak' && risky.length) return `the market turned weak (${ctx.bench} fell below its long average)`;
+  if (mkt.k === 'strong' && !risky.length && ctx.capital > 0) return `the market recovered (${ctx.bench} is back above its averages)`;
+  for (const s of risky) {
+    const a = ctx.data[s], i = ctx.idx[s], h = ctx.held[s]; if (!a || i == null) continue;
+    const c = (ctx.px && ctx.px(s)) || a.c[i], j0 = h.entryDate ? Math.max(0, lastIndexOnOrBefore(a.d, h.entryDate)) : Math.max(0, i - (h.days || 0));
+    let hi = Math.max(h.high || 0, c); for (let j = j0; j < i; j++) if (a.c[j] > hi) hi = a.c[j];
+    if (hi > 0 && c < hi * 0.85) return `${s} fell ${Math.round((1 - c / hi) * 100)}% from its high`;
+    const r = IND.ret(a.c, p.lookback || 126, i, p.skip); if (r != null && r < 0) return `${s} stopped rising (its ${p.lookback || 126}-day return is ${pf(r, 1)})`;
+  }
+  return null;
+}
 const STRATEGIES = {
   trend: {
     name: 'Trend follower', short: 'Trend', icon: 'trail', rebalance: 'none', markets: 'both',
@@ -3536,28 +3592,44 @@ const STRATEGIES = {
     desc: 'Once a month, ranks everything by its return over the past 6 months (skipping the latest month) and holds the top few that are still rising. When the market is below its 200-day average it parks the money in cash or T-bills. Built for small accounts too: it holds fewer positions when there is less money, keeps a winner until it really falls behind, and puts new deposits to work without selling.',
     params: [{ k: 'lookback', label: 'Look back (days)', def: 126, min: 21, max: 252 }, { k: 'skip', label: 'Skip latest (days)', def: 21, min: 0, max: 42 }, { k: 'top', label: 'Hold the top', def: 3, min: 1, max: 10 }, { k: 'filterLen', label: 'Market filter (days)', def: 200, min: 0, max: 300 }, { k: 'sizing', label: 'Sizing', def: 'equal', choices: [['equal', 'Equal'], ['invvol', 'By volatility']] },
       { k: 'minPos', label: 'Smallest position ($)', def: 25, min: 1, max: 5000 }, { k: 'buffer', label: 'Keep a holding until it drops below rank (top +)', def: 1, min: 0, max: 10 },
-      { k: 'flow', label: 'New money', def: 'flow', choices: [['flow', 'Top up, sell less'], ['rebal', 'Full monthly rebalance']] }, { k: 'safe', label: 'When the market is weak', def: 'SGOV', choices: [['cash', 'Hold cash'], ['SGOV', 'SGOV (T-bills)'], ['BIL', 'BIL (T-bills)']] }],
+      { k: 'flow', label: 'New money', def: 'flow', choices: [['flow', 'Top up, sell less'], ['rebal', 'Full monthly rebalance']] }, { k: 'safe', label: 'When the market is weak', def: 'SGOV', choices: [['cash', 'Hold cash'], ['SGOV', 'SGOV (T-bills)'], ['BIL', 'BIL (T-bills)']] }, { k: 'adapt', label: 'Adapts on its own', def: 'on', choices: [['on', 'Yes: to its money, the market and what has worked lately'], ['off', 'No: fixed settings']] }],
     grid: { lookback: [63, 126, 252], top: [2, 3, 5] },
     need: p => Math.max(p.lookback, p.filterLen || 0) + 5,
+    // between monthly turns, an adapting bot checks every run whether waiting a month would hurt
+    check(ctx) { return ctx.params?.adapt === 'on' ? momCheck(ctx) : null; },
     decide(ctx) {
       const p = ctx.params, out = { weights: {}, stops: {}, notes: {}, noTrim: p.flow === 'flow' };
       const bench = ctx.bench && ctx.data[ctx.bench], bi = ctx.idx[ctx.bench];
       const safe = p.safe && p.safe !== 'cash' && ctx.syms.includes(p.safe) ? p.safe : null; // the T-bill fund is only used if it's in the bot's list
-      let riskOn = true;
-      if (p.filterLen > 0 && bench && bi != null && bi >= p.filterLen) { const bs = IND.sma(bench.c, p.filterLen, bi); riskOn = bench.c[bi] > bs; ctx.regime = `${ctx.bench} ${riskOn ? 'above' : 'below'} its ${p.filterLen}-day average (${px2(bench.c[bi])} vs ${px2(bs)})`; }
+      const adapt = p.adapt === 'on', lines = [];
+      let riskOn = true, mkt = null;
+      if (adapt) { mkt = momRegime(ctx, p); if (mkt) { riskOn = mkt.k !== 'weak'; lines.push(mkt.line); } }
+      else if (p.filterLen > 0 && bench && bi != null && bi >= p.filterLen) { const bs = IND.sma(bench.c, p.filterLen, bi); riskOn = bench.c[bi] > bs; ctx.regime = `${ctx.bench} ${riskOn ? 'above' : 'below'} its ${p.filterLen}-day average (${px2(bench.c[bi])} vs ${px2(bs)})`; }
       // how many positions the money can carry: each one at least the smallest position size
       // older bots and Autopilot tryouts don't have the small-account settings: they behave exactly as before
-      const minPos = num(p.minPos, 1), buffer = num(p.buffer, 0);
-      const slots = Math.max(1, Math.min(p.top, ctx.capital > 0 ? Math.floor(ctx.capital / Math.max(1, minPos)) : p.top));
+      const minPos = num(p.minPos, 1), buffer = num(p.buffer, 0), byMoney = ctx.capital > 0 ? Math.floor(ctx.capital / Math.max(1, minPos)) : 99;
+      // adapting: enough picks to stay fully invested under the per-position limit (25% → 4), as many as the money allows
+      const want = adapt ? Math.min(8, Math.max(p.top, Math.ceil(0.98 / Math.max(0.05, ctx.maxW || 1)))) : p.top;
+      const slots = Math.max(1, Math.min(want, byMoney));
+      // adapting: which look-back and ranking have worked best for this list lately (the last 6 months, month by month)
+      const tune = adapt ? momTune(ctx, p, slots, safe) : null, L = tune?.lookback || p.lookback, risky = adapt && (tune ? tune.rank === 'risk' : mkt?.k === 'choppy');
+      if (tune) lines.push(tune.line);
       const ranked = [];
-      for (const s of ctx.syms) { if (s === safe) continue; const b = ctx.data[s], i = ctx.idx[s]; if (i == null || i < p.lookback) continue; const r = IND.ret(b.c, p.lookback, i, p.skip); if (r == null) continue; ranked.push({ s, r }); }
-      ranked.sort((a, b) => b.r - a.r);
+      for (const s of ctx.syms) {
+        if (s === safe) continue; const b = ctx.data[s], i = ctx.idx[s]; if (i == null || i < L) continue;
+        const r = IND.ret(b.c, L, i, p.skip); if (r == null) continue;
+        const v = risky ? IND.vol(b.c, 63, i) : null; ranked.push({ s, r, score: risky && v > 0 ? r / v : r });
+      }
+      ranked.sort((a, b) => b.score - a.score);
       const keepTo = slots + buffer;
       // holdings stay while they're still rising and inside the wider band; open slots go to the best of the rest
-      const keep = ranked.filter((x, k) => ctx.held[x.s] && x.r > 0 && k < keepTo).slice(0, slots).map(x => x.s);
-      const picks = [...keep, ...ranked.filter(x => x.r > 0 && !keep.includes(x.s)).map(x => x.s)].slice(0, slots);
-      ranked.forEach((x, k) => { const inP = picks.includes(x.s), kept = inP && k >= slots; out.notes[x.s] = `${p.lookback}-day return ${pf(x.r, 1)} (rank ${k + 1} of ${ranked.length})${!riskOn ? `. Market filter says stay ${safe ? 'in ' + safe : 'in cash'}` : x.r <= 0 ? '. Not rising, so no' : kept ? `. Kept: still inside the top ${keepTo}, so no need to sell` : inP ? `. In the top ${slots}` : ctx.held[x.s] && k >= keepTo ? `. Fell below rank ${keepTo}: sell` : ''}.`; });
-      if (slots < p.top) ctx.regime = `${ctx.regime ? ctx.regime + '. ' : ''}With ${'$' + Math.round(ctx.capital)} it holds ${slots} position${slots === 1 ? '' : 's'} instead of ${p.top}, so each is at least $${minPos}`;
+      const broken = {}; if (adapt) for (const x of ranked) { const f = ctx.held[x.s] ? momBroken(ctx, x.s) : null; if (f) broken[x.s] = f; }
+      const keep = ranked.filter((x, k) => ctx.held[x.s] && x.r > 0 && k < keepTo && !broken[x.s]).slice(0, slots).map(x => x.s);
+      const picks = [...keep, ...ranked.filter(x => x.r > 0 && !keep.includes(x.s) && !broken[x.s]).map(x => x.s)].slice(0, slots);
+      ranked.forEach((x, k) => { const inP = picks.includes(x.s), kept = inP && k >= slots; out.notes[x.s] = `${L}-day return ${pf(x.r, 1)}${risky ? ', ranked per unit of swing' : ''} (rank ${k + 1} of ${ranked.length})${!riskOn ? `. Market filter says stay ${safe ? 'in ' + safe : 'in cash'}` : broken[x.s] ? `. Fell ${broken[x.s]}% from its high since it was bought: sell` : x.r <= 0 ? '. Not rising, so no' : kept ? `. Kept: still inside the top ${keepTo}, so no need to sell` : inP ? `. In the top ${slots}` : ctx.held[x.s] && k >= keepTo ? `. Fell below rank ${keepTo}: sell` : ''}.`; });
+      if (adapt) { if (slots !== p.top) lines.push(`With $${Math.round(ctx.capital).toLocaleString('en-US')} it holds ${slots} position${slots === 1 ? '' : 's'}${slots < want ? ` (each at least $${minPos})` : ' so the money stays invested under the per-position limit'}`); }
+      else if (slots < p.top) ctx.regime = `${ctx.regime ? ctx.regime + '. ' : ''}With ${'$' + Math.round(ctx.capital)} it holds ${slots} position${slots === 1 ? '' : 's'} instead of ${p.top}, so each is at least $${minPos}`;
+      if (adapt) ctx.regime = lines.join('. ');
       if (!riskOn) { if (safe) { out.weights[safe] = 1; out.notes[safe] = `Market is weak: parking the money in ${safe} (T-bills) until it recovers.`; } return out; }
       Object.assign(out.weights, sizeWeights(picks, { ...ctx, params: { ...p, maxPositions: slots } }, ctx.maxW));
       if (safe) { const used = Object.values(out.weights).reduce((t, x) => t + x, 0); if (used < 0.98) { out.weights[safe] = Math.min(1, 1 - used); out.notes[safe] = `Money the picks don't use waits in ${safe} (T-bills) instead of cash.`; } }
@@ -3905,6 +3977,7 @@ function runBacktest({ key, params, syms, data, start, end, capital = 10000, pro
   const need = st.need(p), ptr = {}; for (const s of Object.keys(series)) ptr[s] = -1;
   let cash = capital, peak = capital, maxDD = 0, fees = 0, spreadCost = 0, vol30 = [], exposureDays = 0;
   const pos = {}, curve = [], trades = [], closed = [], daily = [], money = [];
+  let dayN = 0, lastAct = -99;
   let units = capital, invested = capital, lastWeek = null; // weekly deposits buy 'units' at the day's value, so returns stay time-weighted
   const halfSpread = (s, px) => px * modelSpreadBps(s, 'regular') / 2e4 + px * slipBps / 1e4;
   const fee = (s, side, qty, notional, d) => {
@@ -3948,7 +4021,10 @@ function runBacktest({ key, params, syms, data, start, end, capital = 10000, pro
     const idx = {}; for (const s of Object.keys(series)) idx[s] = ptr[s] >= 0 ? ptr[s] : null;
     const tradable = live.filter(s => series[s].at.get(d) != null && ptr[s] >= need);
     const held = {}; for (const [s, h] of Object.entries(pos)) { const i = ptr[s]; h.high = Math.max(h.high, series[s].c[i]); held[s] = { qty: h.qty, entry: h.cost / h.qty, entryDate: h.entryDate, high: h.high, days: h.days, weight: h.weight, stopPx: h.stop }; }
-    const month = d.slice(0, 7), rebalanceDay = st.rebalance === 'monthly' ? month !== lastMonth : st.rebalance === 'weekly' ? new Date(d + 'T12:00:00Z').getUTCDay() === 1 : false;
+    const month = d.slice(0, 7); let rebalanceDay = st.rebalance === 'monthly' ? month !== lastMonth : st.rebalance === 'weekly' ? new Date(d + 'T12:00:00Z').getUTCDay() === 1 : false;
+    // adapting strategies may turn early between their regular turns (at most once a week), like the live bot
+    if (!rebalanceDay && st.check && tradable.length && dayN - lastAct >= 5) { try { if (st.check({ syms: tradable, data: series, idx, params: p, held, bench, capital: value(), maxW: walletMaxW(maxPosPct / 100, value()) })) rebalanceDay = true; } catch (e) {} }
+    if (rebalanceDay) lastAct = dayN;
     const eq0 = value();
     const acts = st.rebalance === 'none' || rebalanceDay;
     const flow = p.flow === 'flow';
@@ -3980,6 +4056,7 @@ function runBacktest({ key, params, syms, data, start, end, capital = 10000, pro
     }
     if (st.rebalance === 'monthly') lastMonth = month;
     for (const h of Object.values(pos)) h.days++;
+    dayN++;
     const eqm = value(), eq = eqm * capital / units; peak = Math.max(peak, eq); maxDD = Math.min(maxDD, eq / peak - 1);
     if (Object.keys(pos).length) exposureDays++;
     curve.push([d, eq]); money.push([d, eqm]);
@@ -4128,7 +4205,10 @@ const withSafe = p => p.safe && p.safe !== 'cash' ? [p.safe] : [];
 const STRAT_VER = {
   momentum: [{ v: 2, title: 'Built for small accounts', note: 'Momentum rotation 2: holds fewer positions when there is less money, keeps a winner until it falls past a wider rank, puts new money in without selling, and parks money in SGOV (T-bills) when the market is weak.',
     changes: ['Fewer positions when there is less money ($25 smallest position)', 'Keeps a winner until it falls past a wider rank', 'New money tops up without selling', 'SGOV (T-bills) when the market is weak'],
-    set: { flow: [undefined, 'flow'], safe: [undefined, 'SGOV'], buffer: [undefined, 1], minPos: [undefined, 25] }, addSyms: withSafe }],
+    set: { flow: [undefined, 'flow'], safe: [undefined, 'SGOV'], buffer: [undefined, 1], minPos: [undefined, 25] }, addSyms: withSafe },
+    { v: 3, title: 'Adapts on its own', note: 'Momentum rotation 3 adapts: to its money (enough picks to stay invested under your per-position limit, as many as the money allows), to the market (strong: rides the leaders; choppy: ranks by return per unit of swing; weak: T-bills) and to what has worked lately (each month it replays the last 6 months with 3, 6 and 12-month look-backs and uses the best). Between monthly turns it rebalances early, at most once a week, when the market turns or a holding breaks down.',
+      changes: ['Enough picks to stay fully invested, sized to its money', 'Reads the market: strong, choppy or weak', 'Picks the look-back that has worked best lately', 'Rebalances early when the market turns or a holding drops 15% from its high'],
+      set: { adapt: [undefined, 'on'] }, addSyms: withSafe }],
   autopilot: [{ v: 2, title: 'Autopilot 2', note: 'Autopilot 2: 32 tryouts (11 new), favors what works in the current kind of market, splits money by score per unit of risk, re-plans weekly when things shift a lot, breeds variations of its best tryouts, parks idle money in T-bills, scales down for small accounts, and the Analyst reviews each new plan.',
     changes: ['32 tryouts, 11 new', 'Favors what works in today\'s kind of market', 'Money split by score per unit of risk', 'Weekly re-check, breeds variations of its best', 'Idle money in T-bills, sized for small accounts'] }],
   trend: [{ v: 2, title: 'Rides real trends, no cash drag', note: 'Trend follower 2: only buys trends that are also up over 6 months, ranks them by return per unit of swing, uses a looser 3.5 ATR trailing stop, keeps money between trends in SGOV (T-bills) and tops up with new money. The market-mood switch, take-profit, time stop, stop tightening and council veto no longer cut its trades short: those were selling winners early.',
@@ -4246,13 +4326,19 @@ async function runBotInner(id, { manual, dry, night }) {
     const days = ser ? ser.d.filter(d => d > entryDate).length : (s0.days || 0);
     held[p.sym] = { qty: p.qty, entry: p.avg, entryDate, high: Math.max(s0.high || 0, c), days, weight: s0.weight, stopPx: s0.stopPx };
   }
-  const month = today.slice(0, 7), rebalanceDue = st.rebalance === 'none' || !state._lastRebalance || (st.rebalance === 'monthly' ? state._lastRebalance.slice(0, 7) !== month : true) || manual;
+  let earlyWhy = null;
+  const month = today.slice(0, 7); let rebalanceDue = st.rebalance === 'none' || !state._lastRebalance || (st.rebalance === 'monthly' ? state._lastRebalance.slice(0, 7) !== month : true) || manual;
   const band = st.band || 0.01;
   // which of the shared safety layers this strategy uses: a dip buyer shouldn't be blocked by bad-mood news, buy and hold shouldn't be stopped out
   const OV = { council: 'veto', mood: true, corr: true, exits: true, tighten: true, news: 'all', review: true, stops: true, ...(st.overlays || {}), ...(bot.params?.overlays || {}) };
   const binding = OV.council === 'veto' || !!m.councilVeto, parkSym = bot.params?.safe && bot.params.safe !== 'cash' ? bot.params.safe : null;
-  const ctx = { syms: tradable, data: series, idx, params: bot.params, held, bench, maxW: walletMaxW(m.maxPosPct / 100, capital, m.minTrade), capital, minTrade: m.minTrade, beats: bot.strategy === 'earnings' ? await earningsBeats(tradable).catch(() => null) : null };
+  const ctx = { px: s => priceOf(s), syms: tradable, data: series, idx, params: bot.params, held, bench, maxW: walletMaxW(m.maxPosPct / 100, capital, m.minTrade), capital, minTrade: m.minTrade, beats: bot.strategy === 'earnings' ? await earningsBeats(tradable).catch(() => null) : null };
   if (st.prep) ctx.extra = await st.prep(bot, ctx).catch(e => { log.skips.push('Filings check: ' + e.message); return null; });
+  // strategies that adapt can ask for an early rebalance between their regular turns (at most once a week)
+  if (!rebalanceDue && st.check && !st.auto && !night) {
+    const why = (() => { try { return st.check(ctx); } catch (e) { return null; } })(), last = state._lastEarly;
+    if (why && (!last || (Date.parse(today) - Date.parse(last)) / 864e5 >= 7)) { rebalanceDue = true; earlyWhy = why; log.risk.push(`Rebalancing early: ${why}.`); }
+  }
   // the market's mood (S&P 500 for stocks, Bitcoin for crypto) scales new buys; Autopilot and Buy and hold manage their own exposure
   const moodOn = S.moodSwitch !== false && !st.auto && OV.mood, mood = moodOn ? { stock: moodOf(series.SPY, 'The S&P 500'), crypto: moodOf(series.BTC, 'Bitcoin') } : null;
   const dec = st.auto ? await autopilotDecide(bot, state, series, today, { dry, manual, dd, capital }) : rebalanceDue ? st.decide(ctx) : { weights: Object.fromEntries(Object.entries(held).map(([s, h]) => [s, h.weight || (h.qty * (priceOf(s) || h.entry)) / capital])), stops: {}, notes: Object.fromEntries(Object.keys(held).map(s => [s, 'Holding until the next monthly rebalance.'])) };
@@ -4457,6 +4543,7 @@ async function runBotInner(id, { manual, dry, night }) {
     }
     for (const s of Object.keys(state)) if (!s.startsWith('_') && !pnow.some(p => p.sym === s)) delete state[s];
     if (rebalanceDue && st.rebalance !== 'none' && !night) state._lastRebalance = today;
+    if (earlyWhy) state._lastEarly = today;
     const bought = log.orders.filter(o => o.side === 'buy').map(o => o.sym), sold = log.orders.filter(o => o.side === 'sell').map(o => o.sym);
     const optLines = log.orders.filter(o => o.side === 'opt').map(o => o.short);
     const summary = log.orders.length ? [bought.length ? 'Bought ' + bought.join(', ') : '', sold.length ? 'sold ' + sold.join(', ') : '', ...optLines].filter(Boolean).join('; ').replace(/^./, c => c.toUpperCase()) : 'No changes';
@@ -7250,6 +7337,7 @@ GET('/api/buzz', auth, async req => {
 // Test-only helpers (only with MANGO_FAST_JOBS, which Railway never sets).
 if (ENV.MANGO_FAST_JOBS) {
   POST('/api/test/weekly', auth, async () => { await kvSet('job_botweekly', ''); const p = etParts(); return weeklySummary({ ...p, y: 2026, m: 10, d: 23 }, '16:30', 'test-' + Date.now()); });
+  POST('/api/test/sched/:id', auth, async req => runBot(+req.params.id, {}));
   POST('/api/test/night/:id', auth, async req => runBot(+req.params.id, { night: true }));
   POST('/api/test/nightsched', auth, async req => { const [h, mi] = String(req.body.hm).split(':').map(Number); const p = { ...etParts(), h, mi }; await nightScheduler(p, req.body.hm, etDate()); return { ok: true }; });
   POST('/api/test/clear-cache', auth, async req => { for (const k of [...cache.keys()]) if (!req.body?.prefix || k.startsWith(req.body.prefix)) cache.delete(k); return { ok: true }; });
