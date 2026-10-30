@@ -1484,6 +1484,20 @@ html[data-standby] #halt-bar { bottom: calc(var(--nav-h, 64px) + env(safe-area-i
 .human.hidden { display: none; }
 .em-ok { color: var(--up); font-weight: 650; }
 
+/* ---------- AIs ---------- */
+.ai-list { display: flex; flex-direction: column; gap: 8px; }
+.ai-card { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 12px 14px; border-radius: var(--r-lg, 16px); background: var(--card); border: 1.5px solid transparent; }
+.ai-card.on { border-color: var(--ac); background: color-mix(in srgb, var(--ac) 8%, var(--card)); }
+.ai-card .grow { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.ai-card b { font-size: 16.5px; }
+.ai-card .tag { flex: none; }
+.ai-em { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; font-size: 24px; background: var(--card2); flex: none; line-height: 1; }
+.ai-em.lg { width: 56px; height: 56px; font-size: 30px; border-radius: 16px; }
+.ai-em.sm { width: 100%; height: 100%; background: none; font-size: 22px; }
+.bot-hero .bot-ava .ai-em { width: 100%; height: 100%; background: none; font-size: 30px; }
+.ai-dh { display: flex; align-items: center; gap: 12px; }
+.ai-trades { display: flex; flex-wrap: wrap; gap: 6px; }
+
 /* ---------- motion ---------- */
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--up) 55%, transparent); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
@@ -1647,7 +1661,7 @@ html[data-standby] #halt-bar { bottom: calc(var(--nav-h, 64px) + env(safe-area-i
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '5.1.1';
+const BUILD = '__BUILD__', APP_VERSION = '5.2.0';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -2065,7 +2079,7 @@ const Router = {
     const def = PAGES[name];
     const prev = this.layers.filter(l => l.type === 'page').pop();
     const el = document.createElement('div'); el.className = 'page';
-    const backLabel = prev ? (prev.page.short || 'Back') : (App.tab[0].toUpperCase() + App.tab.slice(1));
+    const backLabel = prev ? (prev.page.short || 'Back') : ((typeof NAV !== 'undefined' && NAV.find(n => n[0] === App.tab)?.[1]) || App.tab[0].toUpperCase() + App.tab.slice(1));
     el.innerHTML = `<div class="page-head"><button class="back" data-act="back" aria-label="Back">${icon('left')}<span>${h(backLabel)}</span></button><div class="ptitle"></div><div class="acts"></div></div><div class="page-body"><div class="inner"></div></div>`;
     $('#pages').appendChild(el);
     const page = { name, params, el, body: $('.page-body > .inner', el), scroller: $('.page-body', el), def, short: '', cleanups: [] };
@@ -8542,6 +8556,22 @@ PAGES.costs = {
 // Newest first. Each release: version, date, a one-line headline and grouped notes.
 // ===================================================================
 const CHANGELOG = [
+  { v: '5.2.0', d: '2026-10-30', title: 'Bots are now AIs', short: [
+    'Every trading method is now an AI with a name: Comet, Tide, Oak, Bargain and more',
+    'Pick an AI, give it money and a wallet. Its settings are fixed and tuned for you',
+    'The strategy lab and all the knobs are gone',
+  ], groups: [
+    ['Meet the AIs', [
+      'Comet rides whatever has been climbing hardest. Tide follows trends. Oak buys a spread of funds and holds. Bargain buys sharp dips. Compass picks stocks or bonds. Turtle owns the calmest stocks. Spark buys breakouts. Echo follows good-news jumps. Payday trades the turn of the month. Bounce buys stretched drops. Seasons follows the economic cycle. Scout follows insiders. Landlord sells covered calls. Captain backs whichever is working.',
+      'Each one shows how it trades in plain words, what it trades, and a risk level.',
+    ]],
+    ['Simpler to start', [
+      'Start an AI: pick one, choose how much practice money (it gets its own wallet) or one of your wallets. That\'s it.',
+      'Settings, symbols and limits are fixed for each AI and get better with each update. You can still rename, pause, resume, delete or sell everything.',
+      'Existing bots switch to their AI\'s settings automatically.',
+      'The strategy lab, backtests, crossbreeding, walk-forward and Monte Carlo are no longer in the app.',
+    ]],
+  ] },
   { v: '5.1.1', d: '2026-10-29', title: 'Owner email and smarter bots', short: [
     'Momentum rotation 3 adapts to its money, the market and what has worked lately',
     'Bots in different wallets no longer share risk limits; skipped buys wait in T-bills',
@@ -10404,6 +10434,127 @@ async function adTrades(u) {
     s.html(list.length ? `<div class="group">${list.slice(0, 150).map(t => `<div class="cell arow">${logo(t.sym, 'logo-sm')}<div class="main"><div class="sym">${t.side === 'buy' ? 'Bought' : 'Sold'} ${h(t.sym)}</div><div class="sub">${h(t.wallet)} · ${timeAgo(t.ts)}</div></div><div class="r"><div class="t-num">${money(t.qty * t.price)}</div>${t.pnl != null ? `<div class="t-foot ${t.pnl >= 0 ? 'up' : 'dn'}">${money(t.pnl, { sign: true })}</div>` : ''}</div></div>`).join('')}</div>` : '<div class="empty"><p>No trades yet.</p></div>');
   } catch (e) { s.html(`<div class="empty"><p>${h(e.message)}</p></div>`); }
 }
+
+// ===================================================================
+// AIs: every trading method is an AI with a name and fixed settings. You pick one, give it money and a wallet.
+// (Inside the code they're still "bots"; the settings, lab and tests are tuned by us, release by release.)
+// ===================================================================
+let AIS_C = null;
+const aisList = async () => AIS_C || (AIS_C = (await api('ais')).ais);
+const aiByKey = k => (AIS_C || []).find(a => a.key === k);
+NAV[2][1] = 'AIs';
+// no more settings to play with: the lab and the tuning cards are gone
+tuneCard = b => decayCard(b);
+labCard = () => '';
+const RISK_C = { Lower: 'up', Medium: 'ac', Higher: 'dn' };
+const aiCardHtml = (a, sel) => `<button class="ai-card ${sel ? 'on' : ''}" data-act="aiPick" data-k="${a.key}"><span class="ai-em">${a.emoji}</span><span class="grow"><b>${h(a.name)}</b><span class="t-foot">${h(a.tag)}</span></span><span class="tag ${RISK_C[a.risk] || ''}">${h(a.risk)} risk</span></button>`;
+
+// ---------- starting one ----------
+PAGES.newbot = {
+  mount(p, [key]) {
+    p.title('Start an AI', true);
+    p.body.innerHTML = '<div class="sk sk-block mt16" style="height:300px"></div>';
+    if (isRealSpace()) { p.body.innerHTML = '<div class="empty"><p>AIs trade practice money for now. Switch to Paper to start one.</p></div>'; return; }
+    aisList().then(list => { p.list = list; p.k = list.some(a => a.key === key) ? key : null; p.money = null; p.wallet = 0; this.draw(p); })
+      .catch(e => { p.body.innerHTML = `<div class="empty"><p>${h(e.message)}</p></div>`; });
+  },
+  draw(p) {
+    const a = p.list.find(x => x.key === p.k), wallets = spaceWallets().filter(w => !w.league);
+    if (a && p.money == null) p.money = Math.max(a.min, 1000);
+    p.body.innerHTML = `<h1 class="t-display" style="margin:8px 0 2px">Start an AI</h1><p class="t-sub" style="margin:0 2px">Each AI trades its own way, by itself, once a day. Pick one and give it money. Its settings are tuned for you.</p>
+      <div class="ai-list mt16">${p.list.map(x => aiCardHtml(x, x.key === p.k)).join('')}</div>
+      ${a ? `<div class="card mt16 ai-detail"><div class="ai-dh"><span class="ai-em lg">${a.emoji}</span><div><div class="t-title">${h(a.name)}</div><div class="t-foot">${h(a.tag)}</div></div></div>
+        <p class="t-sub" style="margin:12px 0 0">${h(a.about)}</p>
+        ${a.trades ? `<div class="ai-trades mt12">${a.trades.map(s => `<span class="tag">${h(s)}</span>`).join('')}</div>` : ''}</div>
+        <div class="section-h"><h2>Its money</h2></div>
+        ${seg('ai-w', [['new', 'A new wallet'], ['old', 'One of my wallets']], p.wallet ? 'old' : 'new')}
+        ${p.wallet ? `<label class="field mt12"><span>Wallet</span><select id="ai-wid">${wallets.map(w => `<option value="${w.id}" ${w.id === p.wallet ? 'selected' : ''}>${h(w.emoji)} ${h(w.name)} · ${money(w.value)}</option>`).join('')}</select></label>
+          <p class="t-foot" style="margin:6px 2px 0">It trades all of that wallet's money.</p>`
+        : `<label class="field mt12"><span>How much (practice money)</span><div class="money-in has-pre"><span class="pre">$</span><input class="input" id="ai-money" inputmode="decimal" value="${p.money}"></div></label>
+          <p class="t-foot" style="margin:6px 2px 0">At least ${money(a.min, { dp: 0 })}. It gets its own wallet with this much.</p>`}
+        <button class="btn btn-primary btn-block btn-lg mt16" id="ai-go">Start ${h(a.name)}</button>
+        <p class="note">Practice money only. ${h(a.name)} reads the news and checks its limits before every trade, and explains each decision.</p>` : '<p class="note">Tap an AI to see how it trades.</p>'}`;
+    raf(() => placeThumbs(p.body));
+    onSeg(p.body, 'ai-w', v => { this.save(p); if (v === 'old') { if (!wallets.length) { toast('No wallets to pick from', { kind: 'err' }); return; } p.wallet = wallets[0].id; } else p.wallet = 0; this.draw(p); });
+    $('#ai-wid', p.body)?.addEventListener('change', e => { p.wallet = +e.target.value; });
+    $('#ai-go', p.body)?.addEventListener('click', e => this.start(p, e.currentTarget));
+  },
+  save(p) { const m = $('#ai-money', p.body); if (m) p.money = num(m.value, p.money); },
+  async start(p, btn) {
+    this.save(p); const a = p.list.find(x => x.key === p.k); if (!a || btn.classList.contains('is-busy')) return;
+    if (!p.wallet && !(p.money >= a.min)) { toast(`${a.name} needs at least ${money(a.min, { dp: 0 })}`, { kind: 'err' }); return; }
+    busy(btn, true);
+    try {
+      const r = await post('ais/start', { ai: a.key, start: p.wallet ? undefined : p.money, wallet: p.wallet || undefined });
+      await loadState({ quiet: true });
+      toast(`${r.bot.name} is running`, { sub: r.deciding ? 'It\'s reading the news and making its first decision now.' : 'It makes its first decision at the next run.' });
+      history.back(); setTimeout(() => { Router.go('bot/' + r.bot.id); VIEWS.bots.load(); }, 120);
+    } catch (e) { busy(btn, false); toastErr(e); }
+  },
+};
+ACT.aiPick = el => { const p = Router.top()?.page; if (p?.name !== 'newbot') return; PAGES.newbot.save(p); const k = el.dataset.k; if (p.k !== k) { p.k = k; p.money = null; } PAGES.newbot.draw(p); raf(() => $('.ai-detail', p.body)?.scrollIntoView({ behavior: 'smooth', block: 'start' })); };
+
+// ---------- the tab ----------
+(function aiTab() {
+  const m0 = VIEWS.bots.mount;
+  VIEWS.bots.mount = function (el) {
+    m0.call(this, el);
+    $('.topbar .mini', el).textContent = 'AIs'; $('.large-title', el).textContent = 'AIs';
+    el.querySelectorAll('.topbar [data-to="lab"]').forEach(x => x.remove());
+    aisList().then(() => { if (this.d) this.render(STRATS); }).catch(() => {});
+  };
+  const r0 = VIEWS.bots.render;
+  VIEWS.bots.render = function (s) {
+    r0.call(this, s);
+    const body = $('#bt-body', this.el); if (!body) return;
+    body.querySelectorAll('[data-to="lab"], [data-to^="vs"], [data-to^="breed"], .auto-hero').forEach(x => x.remove()); // Captain is in the list
+    for (const hd of body.querySelectorAll('.section-h h2')) { if (/^Your bots/.test(hd.textContent)) hd.firstChild.textContent = 'Your AIs'; }
+    const real = isRealSpace(), mine = (this.d?.bots || []).filter(b => real ? b.wallet?.broker : !b.wallet?.broker);
+    if (!real && AIS_C) {
+      const intro = $('.bot-intro', body);
+      if (intro) { // nothing running yet: the AIs to choose from
+        let n = intro.nextElementSibling; while (n && !(n.classList.contains('section-h') && /Tools/.test(n.textContent))) { const nx = n.nextElementSibling; if (n.classList.contains('section-h') || n.classList.contains('group')) n.remove(); n = nx; }
+        intro.outerHTML = `<div class="bot-intro"><div class="bot-intro-art">${icon('bot')}</div><h3>Put an AI to work</h3><p>Each AI trades its own way with practice money, once a day, and explains every decision. Before it buys anything it reads the news and checks its limits. Pick one and give it money.</p>
+          <div class="btns"><button class="btn btn-primary" data-act="go" data-to="newbot">${icon('plus')}Start an AI</button></div></div>
+          <div class="section-h"><h2>The AIs</h2></div><div class="ai-list">${AIS_C.map(a => aiCardHtml(a).replace('data-act="aiPick" data-k="' + a.key + '"', `data-act="go" data-to="newbot/${a.key}"`)).join('')}</div>`;
+      } else if (mine.length) {
+        const sec = [...body.querySelectorAll('.section-h')].find(x => /Your AIs/.test(x.textContent));
+        if (sec && !sec.querySelector('[data-to="newbot"]')) sec.insertAdjacentHTML('beforeend', `<button class="more" data-act="go" data-to="newbot">${icon('plus')}Start an AI</button>`);
+      }
+    }
+    body.querySelectorAll('button').forEach(b => { if (/New bot/.test(b.textContent)) b.lastChild.textContent = 'Start an AI'; });
+  };
+  // a bot card shows its AI, not the method
+  const c0 = botCard;
+  botCard = (b, st) => {
+    const a = aiByKey(b.strategy); let out = c0(b, st);
+    if (a) out = out.replace(/(<div class="bot-ava[^>]*>)[\s\S]*?(<\/div>)/, `$1<span class="ai-em sm">${a.emoji}</span>$2`).replace(/<div class="sub">[\s\S]*?<\/div>/, `<div class="sub">${h(a.tag)}</div>`);
+    return out;
+  };
+})();
+
+// ---------- one AI ----------
+(function aiPage() {
+  const d0 = PAGES.bot.draw;
+  PAGES.bot.draw = function (p) {
+    d0.call(this, p);
+    const b = p.d, a = aiByKey(b.strategy), body = p.body;
+    if (!AIS_C) { aisList().then(() => { if (p.d) PAGES.bot.draw(p); }).catch(() => {}); }
+    body.querySelectorAll('[data-act="botEdit"], [data-act="promote"]').forEach(x => x.remove());
+    // the rules section becomes a short "about"
+    const rules = [...body.querySelectorAll('.section-h')].find(x => /^Rules/.test(x.textContent.trim()));
+    if (rules) {
+      let n = rules.nextElementSibling;
+      while (n && !n.classList.contains('section-h') && !n.classList.contains('btns') && !n.classList.contains('note')) { const nx = n.nextElementSibling; n.remove(); n = nx; }
+      rules.outerHTML = a ? `<div class="section-h"><h2>About ${h(a.name)}</h2></div><div class="card"><div class="ai-dh"><span class="ai-em lg">${a.emoji}</span><div><div class="t-title">${h(a.name)}</div><div class="t-foot">${h(a.tag)} · ${h(a.risk)} risk</div></div></div><p class="t-sub" style="margin:12px 0 0">${h(a.about)}</p>${a.trades ? `<div class="ai-trades mt12">${a.trades.map(s => `<span class="tag">${h(s)}</span>`).join('')}</div>` : ''}</div>` : '';
+    }
+    const lab = [...body.querySelectorAll('.section-h')].find(x => /^Lab$/.test(x.textContent.trim())); if (lab) { lab.nextElementSibling?.remove(); lab.remove(); }
+    body.querySelectorAll('.note').forEach(x => { if (b.strategy && STRATS?.strategies?.[b.strategy]?.desc === x.textContent) x.remove(); });
+    body.querySelectorAll('[data-act="botDelete"]').forEach(x => { x.lastChild.textContent = 'Delete AI'; });
+    if (a) { const sub = $('.bot-hero .t-sub', body); if (sub) sub.textContent = a.tag; const av = $('.bot-hero .bot-ava', body); if (av) av.innerHTML = `<span class="ai-em">${a.emoji}</span>`; }
+    raf(() => placeThumbs(body));
+  };
+})();
 
 // ===================================================================
 // Settings

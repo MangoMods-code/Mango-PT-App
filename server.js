@@ -4265,6 +4265,7 @@ async function upgradeAllBots() { for (const b of await rows('select * from bots
 async function runBotInner(id, { manual, dry, night }) {
   let b = await row('select * from bots where id=$1', [id]); if (!b) fail('That bot is gone', 404);
   if (!dry) b = await upgradeBot(b);
+  const stLabel = (typeof AIS !== 'undefined' && AIS[b.strategy]?.name) || STRATEGIES[b.strategy]?.short || b.strategy;
   const bot = botJson(b), st = STRATEGIES[bot.strategy], m = bot.mandate, state = jsonOr(b.state, {});
   const w = await walletRow(bot.wid);
   if (w.archived) fail('The bot\'s wallet is archived');
@@ -4485,9 +4486,9 @@ async function runBotInner(id, { manual, dry, night }) {
     const px = priceOf(d.sym); if (!px || !held[d.sym]) continue;
     if (!(isCrypto(d.sym) || tradable.includes(d.sym))) continue;
     const targetV = d.target * capital, diff = targetV - d.have;
-    if (d.target <= 0) { d.action = 'sell'; await placeOrder(d.sym, 'sell', { pct: 100 }, `${st.short}: ${d.why.find(w => /^Selling/.test(w)) || d.why[0] || d.note}`); delete state[d.sym]; }
-    else if (d.aiTrim) { d.action = 'trim'; await placeOrder(d.sym, 'sell', { qty: held[d.sym].qty / 2 }, `${st.short}: ${d.why.find(w => /^Trimming/.test(w))}`); if (d.takeProfit) state[d.sym] = { ...(state[d.sym] || {}), tookProfit: today }; }
-    else if (((rebalanceDue && st.rebalance !== 'none' && !dec.noTrim) || (d.sym === parkSym && parkFree)) && -diff > Math.max(m.minTrade, capital * (d.sym === parkSym && !parkNeed ? 0.03 : band))) { d.action = 'trim'; await placeOrder(d.sym, 'sell', { qty: Math.min(held[d.sym].qty, -diff / px) }, `${st.short}: rebalance down to ${pct0n(d.target)} of the wallet`); }
+    if (d.target <= 0) { d.action = 'sell'; await placeOrder(d.sym, 'sell', { pct: 100 }, `${stLabel}: ${d.why.find(w => /^Selling/.test(w)) || d.why[0] || d.note}`); delete state[d.sym]; }
+    else if (d.aiTrim) { d.action = 'trim'; await placeOrder(d.sym, 'sell', { qty: held[d.sym].qty / 2 }, `${stLabel}: ${d.why.find(w => /^Trimming/.test(w))}`); if (d.takeProfit) state[d.sym] = { ...(state[d.sym] || {}), tookProfit: today }; }
+    else if (((rebalanceDue && st.rebalance !== 'none' && !dec.noTrim) || (d.sym === parkSym && parkFree)) && -diff > Math.max(m.minTrade, capital * (d.sym === parkSym && !parkNeed ? 0.03 : band))) { d.action = 'trim'; await placeOrder(d.sym, 'sell', { qty: Math.min(held[d.sym].qty, -diff / px) }, `${stLabel}: rebalance down to ${pct0n(d.target)} of the wallet`); }
   }
   const exposure = S.sharedRisk === false ? null : await botExposure(brk, bot.wid).catch(() => null);
   // topping up between rebalances: all the spare cash goes to the single most underweight holding (one small trade, not several)
@@ -4507,7 +4508,7 @@ async function runBotInner(id, { manual, dry, night }) {
     if (room < diff) d.why.push(room < m.minTrade ? `Not buying: all bots together already have the most allowed in ${room === 0 && sectorOf(d.sym) !== 'Other' ? (exposure.bySym[d.sym] ? d.sym : sectorOf(d.sym)) : d.sym}.` : `Bought less: all bots together are near the cap for ${d.sym} / ${sectorOf(d.sym)}.`);
     if (usd < m.minTrade) { d.why.push(`Not enough buying power for this (${money(bp)} left).`); continue; }
     d.action = isNew ? 'buy' : 'add';
-    await placeOrder(d.sym, 'buy', { usd }, `${st.short}: ${d.note}${d.why.length ? ' ' + d.why.join(' ') : ''}`.slice(0, 480));
+    await placeOrder(d.sym, 'buy', { usd }, `${stLabel}: ${d.note}${d.why.length ? ' ' + d.why.join(' ') : ''}`.slice(0, 480));
   }
   for (const d of sessions) d.council.chair = chairLine(d, d.council);
   if (!dry) for (const d of sessions) await saveCouncil(id, d, d.council, priceOf(d.sym));
@@ -7219,10 +7220,10 @@ GET('/api/bots/:id/log', auth, async req => {
   const before = +req.query.before || 2e9, kind = req.query.kind || null;
   return (await rows(`select * from bot_log where bot_id=$1 and id < $2 ${kind ? 'and kind=$3' : ''} order by id desc limit 80`, kind ? [+req.params.id, before, kind] : [+req.params.id, before])).map(logJson);
 });
-POST('/api/bots', auth, async req => {
+async function createBot(req) {
   botsOn();
   const b = req.body || {}, st = STRATEGIES[b.strategy]; if (!st) fail('Pick a strategy');
-  if (+(await row('select count(*) n from bots')).n >= 20) fail('You can have up to 20 bots');
+  if (+(await row('select count(*) n from bots')).n >= 20) fail('You can have up to 20 AIs at once');
   const name = String(b.name || st.name).trim().slice(0, 30) || st.name;
   if (FINNHUB_KEY && S.f_buzz !== false) earningsCal().catch(() => {});
   const params = cleanParams(b.strategy, b.params), mandate = cleanMandate({ ...(st.auto ? { maxTradesDay: 30, maxPosPct: 20 } : {}), ...(st.optLevel ? { maxPosPct: 100 } : {}), ...(b.mandate || {}) });
@@ -7259,7 +7260,7 @@ POST('/api/bots', auth, async req => {
   const acct = await accountInfo(wid);
   const r = await row('insert into bots(name,wid,strategy,params,syms,mandate,status,peak,day_start,day_date,state) values($1,$2,$3,$4,$5,$6,$7,$8,$8,$9,$10) returning *',
     [name, wid, b.strategy, JSON.stringify(params), JSON.stringify(syms), JSON.stringify(mandate), b.paused ? 'paused' : 'running', acct.equity, etDate(), JSON.stringify({ _spy0: priceOf('SPY') || null, _start0: acct.equity, _sv: (STRAT_VER[b.strategy] || []).slice(-1)[0]?.v || 1 })]);
-  await botLog(r.id, 'info', 'Bot created', `${st.name} on ${syms.join(', ')}. Decides daily at ${mandate.runAt} ET${syms.some(isCrypto) ? ' (crypto every day)' : ' on trading days'}.`, { params, mandate });
+  await botLog(r.id, 'info', AIS[b.strategy] ? `${AIS[b.strategy].emoji} ${AIS[b.strategy].name} started` : 'Bot created', `${AIS[b.strategy] ? 'Trades' : st.name + ' on'} ${syms.filter(x => x !== 'SGOV').join(', ')}. Decides daily at ${mandate.runAt} ET${syms.some(isCrypto) ? ' (crypto every day)' : ' on trading days'}.`, { params, mandate });
   await refreshUserSyms();
   // The first decision reads news for every symbol, which can take a while; it runs in the background
   // unless the caller asks to wait for it.
@@ -7267,7 +7268,8 @@ POST('/api/bots', auth, async req => {
   if (b.runNow && b.wait) first = await runBot(r.id, { manual: true }).catch(e => ({ error: e.message }));
   else if (b.runNow) runBot(r.id, { manual: true }).catch(async e => { await botLog(r.id, 'error', 'The first decision failed', e.message); broadcast({ t: 'evt', e: 'bot', id: r.id }); });
   return { bot: await botCard(await row('select * from bots where id=$1', [r.id])), first, deciding: !!(b.runNow && !b.wait) };
-});
+}
+POST('/api/bots', auth, createBot);
 PATCH('/api/bots/:id', auth, async req => {
   const b = await row('select * from bots where id=$1', [+req.params.id]); if (!b) fail('That bot is gone', 404);
   const bot = botJson(b), x = req.body || {}, sets = [], vals = [];
@@ -7277,6 +7279,7 @@ PATCH('/api/bots/:id', auth, async req => {
     // A bot's own wallet is named after it; keep the two in step.
     if (x.renameWallet !== false) await Q('update wallets set name=$1 where id=$2 and name=$3', [nm, bot.wid, bot.name]).then(r => r.rowCount && loadWalletMeta()).catch(() => {});
   }
+  if ((x.params || x.syms || x.mandate) && AIS[bot.strategy]) { const keys = Object.keys(x.mandate || {}); if (x.params || x.syms || keys.some(k => k !== 'notify')) fail(`${AIS[bot.strategy].name}'s settings are fixed. Pause it, delete it, or start another with different money.`); }
   if (x.params) { const np = cleanParams(bot.strategy, { ...bot.params, ...x.params }); set('params', JSON.stringify(np)); if (STRATEGIES[bot.strategy]?.auto) set('syms', JSON.stringify(apSyms(np.markets))); else if (!x.syms) { const ws = withPark(bot.syms, np); if (ws.length !== bot.syms.length) set('syms', JSON.stringify(ws)); } }
   if (x.mandate) {
     const nm = cleanMandate(x.mandate, bot.mandate), w = await row('select broker from wallets where id=$1', [bot.wid]);
@@ -7335,6 +7338,7 @@ GET('/api/buzz', auth, async req => {
 });
 
 // Test-only helpers (only with MANGO_FAST_JOBS, which Railway never sets).
+  POST('/api/test/aisync', auth, async () => { await aiSync(); return { ok: true }; });
 if (ENV.MANGO_FAST_JOBS) {
   POST('/api/test/weekly', auth, async () => { await kvSet('job_botweekly', ''); const p = etParts(); return weeklySummary({ ...p, y: 2026, m: 10, d: 23 }, '16:30', 'test-' + Date.now()); });
   POST('/api/test/sched/:id', auth, async req => runBot(+req.params.id, {}));
@@ -9006,6 +9010,80 @@ GET('/api/exports/:kind', auth, async (req, res) => {
   const csv = await x.csv(wid, y), name = x.year ? `mango-form-8949-${y}.csv` : x.all ? `mango-${k}-${day}.csv` : `mango-${slug(w.name)}-${k}-${day}.csv`;
   return send(req, res, 200, csv, 'text/csv; charset=utf-8', { 'Content-Disposition': `attachment; filename="${name}"` });
 });
+// =====================================================================
+// AIs: each trading method is an AI with a name and fixed settings. People pick one, give it money and a wallet;
+// everything else is set here, and tuned release by release. (Inside the code they're still "bots".)
+// =====================================================================
+const AIS = {
+  momentum: { name: 'Comet', emoji: '☄️', tag: 'Rides whatever has been climbing hardest',
+    about: 'Every month Comet looks at what has risen most over the last few months and holds the leaders. It adapts on its own: to how much money it has, to whether the market is strong, choppy or weak, and to what has worked lately. When the market turns weak it waits in T-bills.',
+    syms: ['SPY', 'QQQ', 'IWM', 'EFA', 'EEM', 'TLT', 'IEF', 'GLD', 'DBC', 'VNQ', 'SGOV'], min: 100, risk: 'Medium' },
+  trend: { name: 'Tide', emoji: '🌊', tag: 'Gets on board when a trend starts, steps off when it bends',
+    about: 'Tide buys big US stocks that are in a clear uptrend and follows each one with a trailing stop, so it lets winners run and cuts the ones that turn. Money between trends waits in T-bills.',
+    syms: UNIVERSES.megacap.syms, min: 100, risk: 'Medium' },
+  rsi2: { name: 'Bargain', emoji: '🛒', tag: 'Buys sharp dips in strong markets, sells the bounce',
+    about: 'Bargain waits for an index or sector fund in a long-term uptrend to have a sudden 2-day drop, buys it, and sells on the first bounce. Lots of small wins. Between dips the money waits in T-bills.',
+    syms: ['SPY', 'QQQ', 'IWM', 'DIA', 'XLK', 'XLF', 'XLV', 'XLE', 'XLY', 'XLI', 'SGOV'], min: 100, risk: 'Medium' },
+  breakout: { name: 'Spark', emoji: '⚡', tag: 'Jumps in when a price breaks out to new highs',
+    about: 'Spark buys big US stocks the day they break above their recent highs on strong volume, while the long-term trend is up. Each trade risks a small, fixed slice of the money, with a trailing stop.',
+    syms: UNIVERSES.megacap.syms, min: 200, risk: 'Higher' },
+  hold: { name: 'Oak', emoji: '🌳', tag: 'Buys a spread of funds and simply holds',
+    about: 'Oak splits the money across stock, bond, gold and real-estate funds and holds them. New money goes to whatever is furthest below its share. It only rebalances when something drifts well off target. Calm and patient.',
+    syms: UNIVERSES.allweather.syms, min: 100, risk: 'Lower' },
+  dual: { name: 'Compass', emoji: '🧭', tag: 'Stocks when they beat bonds, T-bills when nothing does',
+    about: 'Once a month Compass compares US stocks, world stocks and bonds, and holds whichever has done best, as long as it beats T-bills. When nothing does, it waits in T-bills.',
+    syms: ['SPY', 'QQQ', 'EFA', 'EEM', 'IEF', 'TLT', 'SGOV'], min: 100, risk: 'Medium' },
+  lowvol: { name: 'Turtle', emoji: '🐢', tag: 'Owns the calmest, steadiest stocks',
+    about: 'Turtle holds the steady, everyday companies that move the least, and swaps them monthly. Slower in a booming market, but it usually falls less in a bad one.',
+    syms: ['KO', 'PG', 'JNJ', 'PEP', 'WMT', 'MCD', 'COST', 'MSFT', 'SGOV'], min: 100, risk: 'Lower' },
+  drift: { name: 'Echo', emoji: '📣', tag: 'Buys stocks that jumped on good news and keep drifting up',
+    about: 'After big news like an earnings beat, prices often keep drifting the same way for weeks. Echo buys big US stocks that gapped up on news and held the gain, and holds them for a while.',
+    syms: ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'META', 'AVGO', 'TSLA', 'JPM', 'V', 'LLY', 'COST', 'NFLX', 'WMT', 'XOM', 'AMD', 'ORCL', 'CRM', 'ADBE', 'UNH', 'HD', 'MA', 'BAC', 'PG', 'SGOV'], min: 200, risk: 'Higher' },
+  tom: { name: 'Payday', emoji: '📅', tag: 'Trades the few days around the turn of each month',
+    about: 'Stocks have tended to do well in the last days of a month and the first days of the next, when paychecks and retirement money flow in. Payday holds index funds then, and T-bills the rest of the month.',
+    syms: ['SPY', 'QQQ', 'IWM', 'SGOV'], min: 100, risk: 'Lower' },
+  snapback: { name: 'Bounce', emoji: '🪀', tag: 'Buys stretched drops and sells the snap back',
+    about: 'When an index or sector fund falls unusually far below its normal range, Bounce buys and waits for it to snap back toward the middle, then sells.',
+    syms: ['SPY', 'QQQ', 'IWM', 'DIA', 'XLK', 'XLF', 'XLV', 'XLE', 'XLY', 'XLI', 'SGOV'], min: 100, risk: 'Medium' },
+  cycle: { name: 'Seasons', emoji: '🍂', tag: 'Moves between sectors as the economy cycles',
+    about: 'Seasons works out where the economy is in its cycle (recovery, expansion, late, slowdown) and holds the sector funds that have usually done best in that phase.',
+    syms: typeof CYCLE_SYMS !== 'undefined' ? CYCLE_SYMS : ['SPY', 'XLK', 'XLF', 'XLE', 'XLV', 'XLY', 'XLP', 'XLI', 'XLU', 'XLB', 'XLC', 'XLRE', 'TLT'], min: 100, risk: 'Medium' },
+  filings: { name: 'Scout', emoji: '🔭', tag: 'Follows what insiders and famous investors buy',
+    about: 'Scout reads company filings. When several insiders buy their own company\'s shares, or a famous investor opens a new position, it buys and holds for about 3 months with a stop loss. It never trades on headlines.',
+    syms: UNIVERSES.megacap.syms, min: 200, risk: 'Medium' },
+  covcall: { name: 'Landlord', emoji: '🏠', tag: 'Owns steady stocks and rents them out for income',
+    about: 'Landlord buys steady stocks 100 shares at a time and sells a covered call on each lot every month, collecting income. It needs enough money for 100 shares and options turned on for its wallet.',
+    syms: ['KO', 'PFE', 'VZ', 'T', 'CSCO', 'BAC', 'F', 'INTC'], min: 3000, risk: 'Lower' },
+  autopilot: { name: 'Captain', emoji: '🧑‍✈️', tag: 'Runs tryouts of the others and backs what\'s working',
+    about: 'Captain keeps testing many ways of trading on recent prices and puts the money behind the ones doing best right now, re-planning as the market changes.',
+    syms: null, min: 200, risk: 'Medium' },
+};
+const AI_ORDER = ['momentum', 'trend', 'hold', 'rsi2', 'dual', 'lowvol', 'breakout', 'drift', 'tom', 'snapback', 'cycle', 'filings', 'covcall', 'autopilot'];
+const aiOf = key => AIS[key] && STRATEGIES[key] ? { key, ...AIS[key], strategy: STRATEGIES[key].name, icon: STRATEGIES[key].icon } : null;
+GET('/api/ais', auth, () => ({ ais: AI_ORDER.map(aiOf).filter(Boolean).map(a => ({ key: a.key, name: a.name, emoji: a.emoji, tag: a.tag, about: a.about, min: a.min, risk: a.risk, trades: a.syms ? a.syms.filter(s => s !== 'SGOV') : null, method: a.strategy })) }));
+// starting one: only money and a wallet are chosen; the settings are the AI's own
+POST('/api/ais/start', auth, async (req, res) => {
+  const b = req.body || {}, a = aiOf(String(b.ai || '')); if (!a) fail('Pick an AI');
+  const start = num(b.start, 0), wallet = +b.wallet || 0;
+  if (!wallet && start < a.min) fail(`${a.name} needs at least ${money(a.min)} to work with.`);
+  const w = wallet ? await walletRow(wallet) : null;
+  if (w?.broker) fail('AIs trade practice money for now.');
+  const n = +(await row('select count(*) n from bots where strategy=$1', [a.key])).n;
+  const name = `${a.name}${n ? ' ' + (n + 1) : ''}`;
+  req.body = { name, strategy: a.key, syms: a.syms || [], params: {}, mandate: {}, wallet: wallet || undefined, start: start || undefined, runNow: b.runNow !== false };
+  return createBot(req);
+});
+// the settings stay the AI's own: what's set here wins over anything older bots had
+async function aiSync() {
+  for (const b of await rows('select * from bots')) {
+    const a = AIS[b.strategy]; if (!a || !STRATEGIES[b.strategy]) continue;
+    const params = cleanParams(b.strategy, {}), syms = STRATEGIES[b.strategy].auto ? apSyms(params.markets) : withPark(a.syms.slice(), params);
+    const cur = jsonOr(b.mandate, {}), keep = {}; for (const k of ['budget', 'liveCap', 'allowLive', 'addWeekly', 'notify']) if (cur[k] !== undefined) keep[k] = cur[k];
+    const mandate = cleanMandate({ ...(STRATEGIES[b.strategy].auto ? { maxTradesDay: 30, maxPosPct: 20 } : {}), ...(STRATEGIES[b.strategy].optLevel ? { maxPosPct: 100 } : {}), ...keep });
+    if (JSON.stringify(jsonOr(b.params, {})) === JSON.stringify(params) && b.syms === JSON.stringify(syms) && JSON.stringify(cur) === JSON.stringify(mandate)) continue;
+    await Q('update bots set params=$1, syms=$2, mandate=$3 where id=$4', [JSON.stringify(params), JSON.stringify(syms), JSON.stringify(mandate), b.id]);
+  }
+}
 
 // =====================================================================
 // Background jobs
@@ -9127,7 +9205,7 @@ function startJobs() {
   // safety: offsite backup (nightly), uptime watch between main and standby
   if (!WORKER) {every(fast ? 10e3 : 10 * 60e3, () => offsiteJob(), 'offsite backup');}
   if (!WORKER) {every(fast ? 5e3 : 3 * 60e3, () => uptimeJob(), 'uptime');}
-  setTimeout(() => upgradeAllBots().catch(e => warn('upgrade', e.message)), 8e3); // bring every bot up to the latest version of its strategy
+  setTimeout(() => upgradeAllBots().then(() => aiSync()).catch(e => warn('upgrade', e.message)), 8e3); // bring every bot up to the latest version of its strategy
   every(3600e3, () => Q("delete from bot_log where ts < now() - interval '2 years'"), 'bot log cleanup');
   every(3600e3, () => Q("delete from settle where settles < now() - interval '7 days'"), 'settlement cleanup');
   if (BROKER && STANDBY) warn('Standby copy has Alpaca keys: orders are blocked while standby is off, but keep real-money keys on one server only.');
@@ -9217,7 +9295,7 @@ const ICONS = {};
 const icon = (name, fn) => ICONS[name] || (ICONS[name] = fn());
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD646"/><stop offset=".5" stop-color="#FFA028"/><stop offset="1" stop-color="#FA5256"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="#1E1430"/><ellipse cx="31" cy="36" rx="18" ry="22" transform="rotate(30 31 36)" fill="url(#g)"/><path d="M20 41l6.5-6 5 3.5 9.5-10" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37 28.5h4.5V33" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="45" cy="11.5" rx="9" ry="4.6" transform="rotate(-24 45 11.5)" fill="#3BD68A"/></svg>`;
 let BUILD = 'dev', INDEX = null, INDEX_GZ = null;
-const APP_VERSION = '5.1.1'; // stamped by build.sh from package.json
+const APP_VERSION = '5.2.0'; // stamped by build.sh from package.json
 function loadIndex() {
   const file = path.join(__dirname, 'index.html');
   let html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<!doctype html><title>Mango</title><p>index.html is missing next to server.js.</p>';

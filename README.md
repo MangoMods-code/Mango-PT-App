@@ -2,7 +2,7 @@
 
 A paper trading app for iPhone with real market prices. It runs from the Home Screen and is built on Node and Postgres.
 
-**⬇️ [Download the latest version](https://github.com/MangoMods-code/Mango-PT-App/releases/latest)** · Current: [V5.1.2, Owner email and smarter bots](https://github.com/MangoMods-code/Mango-PT-App/releases/tag/V5.1.1) · [All releases](https://github.com/MangoMods-code/Mango-PT-App/releases)
+**⬇️ [Download the latest version](https://github.com/MangoMods-code/Mango-PT-App/releases/latest)** · Current: [V5.2.0, Bots are now AIs](https://github.com/MangoMods-code/Mango-PT-App/releases/tag/V5.2.0) · [All releases](https://github.com/MangoMods-code/Mango-PT-App/releases)
 
 Trade stocks, ETFs and crypto with practice money. You can also put strategies to work as bots, let Autopilot run a mix of them, and watch it all happen in **Mango HQ**: a small isometric world where your bots walk around and a Council of up to ten members votes on every trade. If you connect an Alpaca account, the same app can trade it, on paper or with real money, on a separate side with its own safeguards.
 
@@ -16,8 +16,9 @@ Trade stocks, ETFs and crypto with practice money. You can also put strategies t
 - Several wallets, each with its own rules: Robinhood-style, Alpaca-style or a simple practice wallet. Fees, settlement and margin are modeled.
 - Price alerts, push notifications, stats, achievements and prediction games.
 
-**Bots**
-- Strategies include trend, momentum, RSI-2 dips, breakout, dual momentum, low volatility, news drift, turn of the month, snapback and hold.
+**AIs** (bots with names and fixed settings)
+- Pick an AI, give it money (its own wallet, or one of yours) and it trades by itself once a day: Comet (momentum), Tide (trend), Oak (buy and hold), Bargain (dips), Compass (dual momentum), Turtle (low volatility), Spark (breakouts), Echo (news drift), Payday (turn of the month), Bounce (snap-back), Seasons (economic cycle), Scout (insider filings), Landlord (covered calls) and Captain (Autopilot).
+- Each AI's settings, symbols and limits are set in `src/server/10m-ais.js` and the strategies in `src/server/09c-strategies.js`; nobody tunes them in the app.
 - Each bot owns a wallet and decides once a day. Before buying it checks the news, StockTwits and upcoming earnings, keeps a stop loss on every position, and writes down why it did what it did.
 - Limits are per bot: position size, trades per day, daily loss, a drawdown stop and a budget.
 - **Autopilot 2** tests 32 strategy tryouts on pretend money and backs the ones that are working. It favors what has worked in the current kind of market, splits money by score per unit of risk, re-plans monthly (and weekly when things shift a lot), breeds variations of its best tryouts that are judged only on what happens after they're born, parks idle money in T-bills, scales down for small accounts, and has the Analyst review each plan. It also keeps volatility targeting, the safety switch and the brake after a drop.
