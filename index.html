@@ -1647,7 +1647,7 @@ html[data-standby] #halt-bar { bottom: calc(var(--nav-h, 64px) + env(safe-area-i
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '5.1.0';
+const BUILD = '__BUILD__', APP_VERSION = '5.1.1';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -8178,7 +8178,7 @@ function guardsCard() {
   return `<div class="group mt16"><div class="cell"><div class="lead">${icon('shield')}</div><div class="main"><div class="title">Portfolio guards</div><div class="sub">Rules every bot follows together, on top of each bot's own limits.</div></div></div>
     ${rowToggle('moodSwitch', 'Market mood switch', 'In a choppy market new buys are 70% size, in a falling one 40%. Judged from the S&P 500 (and Bitcoin for crypto) against their 50- and 200-day averages')}
     ${rowToggle('corrGuard', 'Correlation guard', 'A bot won\'t open a position that has moved almost exactly like one it already holds over 60 days')}
-    ${rowToggle('sharedRisk', 'Shared risk caps', 'Limits across all bots together, so two bots can\'t pile into the same stock or sector')}
+    ${rowToggle('sharedRisk', 'Shared risk caps', 'Limits for bots that share a wallet, so two bots can\'t pile into the same stock or sector. Bots in different wallets each have their own room.')}
     ${on ? `${rowNum('maxSymPct', 'Most in one symbol', 'Of all bots\' money together', '%', { w: 90 })}${rowNum('maxSectorPct', 'Most in one sector', 'Tech, health, energy…', '%', { w: 90 })}${rowNum('maxCryptoPct', 'Most in crypto', 'All coins together', '%', { w: 90 })}` : ''}
     ${rowToggle('decayAlerts', 'Strategy decay alerts', 'Weekly: pause a bot whose strategy stopped working lately, or that falls far behind its own backtest, and say why')}
     ${rowToggle('autoBench', 'Auto-bench', 'Pause a bot that trails the S&P 500 by more than 3% over 60 days. Off: you get a notification instead')}
@@ -8542,6 +8542,22 @@ PAGES.costs = {
 // Newest first. Each release: version, date, a one-line headline and grouped notes.
 // ===================================================================
 const CHANGELOG = [
+  { v: '5.1.1', d: '2026-10-29', title: 'Owner email and fairer bots', short: [
+    'The owner account can add an email and reset its password with a code',
+    'Bots in different wallets no longer share risk limits',
+    'Money a bot skips buying waits in T-bills instead of cash',
+  ], groups: [
+    ['Bots', [
+      'Shared risk caps now apply to bots in the same wallet. A bot in its own wallet is its own portfolio, so a big bot elsewhere can no longer use up a small bot\'s room in a stock or sector (the same strategy at $200 could end up buying less than at $10,000).',
+      'When a bot skips a buy (earnings in a couple of days, bad news, a stop that fired today, the correlation guard), that money now waits in its T-bill fund instead of sitting in cash, like the mood switch already did.',
+      'A wallet with several bots now counts its money once when checking the caps.',
+    ]],
+    ['Owner email', [
+      'Settings → Your league profile → Email: add and confirm an email for the owner account.',
+      '"Forgot your password?" on the login screen then works for the owner too. Resetting logs out every other device and sends you a notification.',
+      'No friend account can use the owner\'s email.',
+    ]],
+  ] },
   { v: '5.1.0', d: '2026-10-29', title: 'Email codes and a human check', short: [
     'New accounts confirm their email with a 6-digit code',
     'Forgot password? Reset it yourself with a code by email',
@@ -10125,7 +10141,7 @@ function emailSheet({ intro } = {}) {
   const s = sheet({ title: App.me?.emailOk ? 'Change your email' : 'Add your email', html: '' });
   const one = () => {
     s.html(`${intro ? `<p class="t-sub" style="margin:0 2px 12px">${h(intro)}</p>` : ''}<label class="field"><span>Email</span><input class="input" id="em-e" type="email" autocomplete="email" autocapitalize="off" value="${h(email)}"></label>
-      <p class="t-foot" style="margin:8px 2px 0">Only you and the owner of this server can see it. It's used for codes and resetting your password.</p><p class="login-err" id="em-err"></p>`);
+      <p class="t-foot" style="margin:8px 2px 0">${isFriend() ? 'Only you and the owner of this server can see it. It\'s used for codes and resetting your password.' : 'Only you can see it. It lets you reset the owner password from the login screen if you forget it.'}</p><p class="login-err" id="em-err"></p>`);
     s.foot(`<div class="btns">${intro ? '<button class="btn btn-quiet" id="em-later">Later</button>' : ''}<button class="btn btn-primary" id="em-go">Send code</button></div>`);
     $('#em-later', s.footEl)?.addEventListener('click', () => { store.set('emailNag', etDay()); s.close(); });
     $('#em-go', s.footEl).addEventListener('click', async e => { busy(e.currentTarget, true); try { email = $('#em-e', s.body).value.trim(); await post('me/email', { email }); two(); } catch (x) { busy(e.currentTarget, false); $('#em-err', s.body).textContent = x.message; } });
@@ -10192,7 +10208,7 @@ PAGES.account = {
         <div class="card"><label class="field"><span>Name in the league</span><input class="input" id="ac-n" maxlength="24" value="${h(me.name)}"></label>
           <label class="field"><span>Emoji</span><input class="input" id="ac-e" maxlength="8" value="${h(me.emoji)}" style="width:90px;text-align:center;font-size:22px"></label>
           <button class="btn btn-quiet mt12" id="ac-save">Save</button></div>
-        ${isFriend() && me.emailOn ? `<div class="section-h"><h2>Email</h2></div><div class="group"><button class="cell" data-act="acEmail"><div class="lead">${icon('send')}</div><div class="main"><div class="title">${me.email ? h(me.email) : 'Add your email'}</div><div class="sub">${me.emailOk ? '<span class="em-ok">Confirmed</span> · used for codes and password resets' : 'Lets you reset your password yourself'}</div></div>${icon('right', 'chev')}</button></div>` : ''}
+        ${me.emailOn ? `<div class="section-h"><h2>Email</h2></div><div class="group"><button class="cell" data-act="acEmail"><div class="lead">${icon('send')}</div><div class="main"><div class="title">${me.email ? h(me.email) : 'Add your email'}</div><div class="sub">${me.emailOk ? '<span class="em-ok">Confirmed</span> · used for codes and password resets' : 'Lets you reset your password yourself'}</div></div>${icon('right', 'chev')}</button></div>` : ''}
         <div class="section-h"><h2>What friends see</h2></div>
         <div class="card">${seg('ac-priv', Object.entries(PRIVACY).map(([k, v]) => [k, v[0].replace('Returns and holdings', 'Holdings')]), me.privacy)}
           <p class="t-sub" id="ac-priv-d" style="margin:12px 2px 0">${h(PRIVACY[me.privacy]?.[1] || '')}</p>

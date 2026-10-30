@@ -4269,7 +4269,7 @@ async function runBotInner(id, { manual, dry, night }) {
     const list = [...new Set([...wantBuy.map(([s]) => s), ...Object.keys(held), ...tradable])].filter(s => !night || isCrypto(s)).slice(0, 24);
     for (let i = 0; i < list.length; i += 8) await Promise.all(list.slice(i, i + 8).map(s => Promise.race([buzzFor(s), sleep(12000).then(() => null)]).then(x => { if (x) buzz[s] = x; }).catch(() => {})));
   }
-  const decisions = {}; let moodCut = 0;
+  const decisions = {}; let moodCut = 0, heldBack = 0;
   for (const s of new Set([...tradable, ...Object.keys(held)])) {
     if (night && !isCrypto(s)) continue; // the night shift only handles crypto; stocks wait for the day crew
     const want = dec.weights[s] > 0 ? dec.weights[s] : 0, px = priceOf(s), have = (held[s]?.qty || 0) * (px || 0), bz = buzz[s];
@@ -4292,10 +4292,13 @@ async function runBotInner(id, { manual, dry, night }) {
     if (stoppedToday.has(s) && !held[s] && wt > 0) { wt = 0; d.why.push('Not buying back today: its stop loss sold it earlier today.'); }
     if (noBuys && wt * capital > have) { wt = have / capital; d.why.push('No new buys today: the daily loss limit was hit.'); }
     const hl = haltOf(s); if (hl) { wt = Math.min(wt, have / capital); if (!d.why.includes(hl.why)) d.why.push(`Waiting: ${hl.why}`); d.halted = true; } // halted stocks hold as they are until trading resumes
+    if (!parking && wt < want - 1e-9 && d.why.length) heldBack += want - Math.max(0, wt); // money a filter kept out of this buy
     d.target = wt; decisions[s] = d;
   }
   // what the mood switch held back waits in the T-bill fund (if the bot has one) instead of sitting in cash
-  { const ps = bot.params?.safe, pd = ps && ps !== 'cash' ? decisions[ps] : null; if (pd && moodCut > 0.01 && !noBuys) { pd.target = Math.min(1, pd.target + moodCut); pd.why.push(`The ${Math.round(moodCut * 100)}% the mood switch held back waits in ${ps} (T-bills).`); } }
+  // (and the same for money any other filter kept out: an earnings week, bad news, a stop that fired today)
+  { const ps = bot.params?.safe, pd = ps && ps !== 'cash' ? decisions[ps] : null, cut = Math.max(moodCut, heldBack);
+    if (pd && cut > 0.01 && !noBuys) { pd.target = Math.min(1, pd.target + cut); pd.why.push(heldBack > moodCut + 0.01 ? `The ${Math.round(cut * 100)}% that wasn't bought today (see the reasons above) waits in ${ps} (T-bills) instead of cash.` : `The ${Math.round(cut * 100)}% the mood switch held back waits in ${ps} (T-bills).`); } }
   // ---- smarter exits: take some profit, and let go of trades that went nowhere ----
   for (const d of OV.exits ? Object.values(decisions) : []) {
     const h = held[d.sym], px = priceOf(d.sym); if (!h || !px || !(d.target > 0)) continue;
@@ -4400,7 +4403,7 @@ async function runBotInner(id, { manual, dry, night }) {
     else if (d.aiTrim) { d.action = 'trim'; await placeOrder(d.sym, 'sell', { qty: held[d.sym].qty / 2 }, `${st.short}: ${d.why.find(w => /^Trimming/.test(w))}`); if (d.takeProfit) state[d.sym] = { ...(state[d.sym] || {}), tookProfit: today }; }
     else if (((rebalanceDue && st.rebalance !== 'none' && !dec.noTrim) || (d.sym === parkSym && parkFree)) && -diff > Math.max(m.minTrade, capital * (d.sym === parkSym && !parkNeed ? 0.03 : band))) { d.action = 'trim'; await placeOrder(d.sym, 'sell', { qty: Math.min(held[d.sym].qty, -diff / px) }, `${st.short}: rebalance down to ${pct0n(d.target)} of the wallet`); }
   }
-  const exposure = S.sharedRisk === false ? null : await botExposure(brk).catch(() => null);
+  const exposure = S.sharedRisk === false ? null : await botExposure(brk, bot.wid).catch(() => null);
   // topping up between rebalances: all the spare cash goes to the single most underweight holding (one small trade, not several)
   const topUp = bot.params?.flow === 'flow' && !rebalanceDue ? Object.values(decisions).filter(d => held[d.sym] && d.sym !== parkSym && d.target > 0 && tradable.includes(d.sym)).sort((a, b) => (b.target * capital - b.have) - (a.target * capital - a.have))[0]?.sym : null;
   for (const d of Object.values(decisions).sort((a, b) => (a.sym === parkSym) - (b.sym === parkSym) || b.target - a.target)) {
@@ -4885,12 +4888,16 @@ function corr60(a, b) {
 }
 
 // ---------- shared risk across bots (each side, paper and Alpaca, counted separately) ----------
-async function botExposure(broker) {
-  const out = { bySym: {}, bySector: {}, total: 0, n: 0 };
+// Bots in the same wallet share its money, so they share the caps. A bot in its own wallet is its own portfolio:
+// another wallet's bots never use up its room (that made a small bot side by side with a big one buy less).
+async function botExposure(broker, wid) {
+  const out = { bySym: {}, bySector: {}, total: 0, n: 0 }, seen = new Set();
   for (const b of await rows("select b.wid, w.broker from bots b join wallets w on w.id=b.wid where b.status <> 'killed'")) {
     if (!!b.broker !== !!broker) continue;
+    if (wid != null && b.wid !== wid) continue;
+    out.n++; if (seen.has(b.wid)) continue; seen.add(b.wid); // a wallet's money counts once, however many bots it has
     const w = await row('select cash from wallets where id=$1', [b.wid]); if (!w) continue;
-    const pos = await positions(b.wid); out.n++; out.total += +w.cash + marketValue(pos);
+    const pos = await positions(b.wid); out.total += +w.cash + marketValue(pos);
     for (const p of pos) { const v = p.qty * (priceOf(p.sym) || p.avg); out.bySym[p.sym] = (out.bySym[p.sym] || 0) + v; const sec = sectorOf(p.sym); out.bySector[sec] = (out.bySector[sec] || 0) + v; }
   }
   return out;
@@ -9122,7 +9129,7 @@ const ICONS = {};
 const icon = (name, fn) => ICONS[name] || (ICONS[name] = fn());
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD646"/><stop offset=".5" stop-color="#FFA028"/><stop offset="1" stop-color="#FA5256"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="#1E1430"/><ellipse cx="31" cy="36" rx="18" ry="22" transform="rotate(30 31 36)" fill="url(#g)"/><path d="M20 41l6.5-6 5 3.5 9.5-10" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37 28.5h4.5V33" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="45" cy="11.5" rx="9" ry="4.6" transform="rotate(-24 45 11.5)" fill="#3BD68A"/></svg>`;
 let BUILD = 'dev', INDEX = null, INDEX_GZ = null;
-const APP_VERSION = '5.1.0'; // stamped by build.sh from package.json
+const APP_VERSION = '5.1.1'; // stamped by build.sh from package.json
 function loadIndex() {
   const file = path.join(__dirname, 'index.html');
   let html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<!doctype html><title>Mango</title><p>index.html is missing next to server.js.</p>';
@@ -9480,7 +9487,7 @@ async function newCode(req, email, purpose, uid, data) {
   const why = purpose === 'signup' ? 'Here is the code to finish making your account.' : purpose === 'reset' ? 'Here is the code to reset your password.' : 'Here is the code to confirm your email address.';
   await sendMail(req, email, `${code} is your Mango code`, ...codeMail(code, why));
   await Q(`insert into hub_codes(email,purpose,hash,uid,data,expires) values($1,$2,$3,$4,$5,now() + interval '10 minutes')
-    on conflict (email,purpose) do update set hash=excluded.hash, uid=excluded.uid, data=excluded.data, expires=excluded.expires, tries=0, created=now()`, [email, purpose, codeHash(email, code), uid || null, data ? JSON.stringify(data) : null]);
+    on conflict (email,purpose) do update set hash=excluded.hash, uid=excluded.uid, data=excluded.data, expires=excluded.expires, tries=0, created=now()`, [email, purpose, codeHash(email, code), uid ?? null, data ? JSON.stringify(data) : null]);
 }
 async function useCode(email, purpose, code, uid) {
   const c = await row('select * from hub_codes where email=$1 and purpose=$2', [email, purpose]);
@@ -9490,7 +9497,7 @@ async function useCode(email, purpose, code, uid) {
   await Q('delete from hub_codes where email=$1 and purpose=$2', [email, purpose]);
   return c;
 }
-const emailTaken = async (email, except = 0) => !!(await row('select 1 from hub_users where email=$1 and id<>$2', [email, except]));
+const emailTaken = async (email, except = 0) => (except !== -1 && HS.ownerEmail === email) || !!(await row('select 1 from hub_users where email=$1 and id<>$2', [email, except]));
 
 // ---------- signing up ----------
 async function checkSignup(req) {
@@ -9546,6 +9553,7 @@ POST('/api/forgot', async req => {
   if (!EMAIL_ON()) fail('Password reset by email isn\'t switched on here. Ask the owner to reset it.', 404);
   rateLimit(clientIp(req)); await humanCheck(req);
   const who = String(req.body?.who || '').trim().toLowerCase();
+  if (who && HS.ownerEmail && HS.ownerEmailOk && (who === APP_USER.toLowerCase() || who === HS.ownerEmail)) { await newCode(req, HS.ownerEmail, 'reset', 0); return { ok: true, hint: HS.ownerEmail.replace(/^(.)(.*)(@.*)$/, (m, a, b, c) => a + '•'.repeat(Math.min(6, Math.max(2, b.length))) + c) }; }
   const u = who ? await row('select * from hub_users where (username=$1 or email=$1) and email_ok and status=$2', [who, 'active']) : null;
   if (u) await newCode(req, u.email, 'reset', u.id);
   else await sleep(500 + Math.random() * 500);
@@ -9557,6 +9565,15 @@ POST('/api/forgot/reset', async req => {
   rateLimit(clientIp(req));
   const who = String(req.body?.who || '').trim().toLowerCase(), pass = String(req.body?.password || '');
   if (pass.length < 8) fail('Use at least 8 characters for the new password');
+  if (HS.ownerEmail && HS.ownerEmailOk && (who === APP_USER.toLowerCase() || who === HS.ownerEmail)) {
+    await useCode(HS.ownerEmail, 'reset', req.body?.code, 0);
+    const salt = crypto.randomBytes(12).toString('hex'); await kvSet('pass_hash', salt + ':' + crypto.scryptSync(pass, salt, 32).toString('hex'));
+    tokenSalt = crypto.randomBytes(12).toString('hex'); await kvSet('token_salt', tokenSalt); // every device is logged out
+    for (const c of wss.clients) if (!c.friend) try { c.close(4001, 'logged out'); } catch (e) {}
+    tries.delete(clientIp(req));
+    notify('info', 'Your password was reset', 'The owner password was changed with a code sent to your email. Every other device was logged out.').catch(() => {});
+    return { token: newToken() };
+  }
   const u = await row('select * from hub_users where (username=$1 or email=$1) and email_ok', [who]);
   if (!u) fail('That code has expired. Ask for a new one.');
   await useCode(u.email, 'reset', req.body?.code, u.id);
@@ -9567,14 +9584,17 @@ POST('/api/forgot/reset', async req => {
 });
 // adding or changing the email on an account that's already logged in
 POST('/api/me/email', anyUser, async req => {
-  if (!req.friend) fail('The owner account doesn\'t use an email here.');
   if (!EMAIL_ON()) fail('Email isn\'t switched on here.', 404);
-  const email = cleanEmail(req.body?.email);
-  if (await emailTaken(email, req.friend.id)) fail('That email is already used by another account.');
-  await newCode(req, email, 'email', req.friend.id); return { ok: true, email };
+  const email = cleanEmail(req.body?.email), uid = req.friend ? req.friend.id : 0;
+  if (req.friend ? await emailTaken(email, uid) : !!(await row('select 1 from hub_users where email=$1', [email]))) fail('That email is already used by another account.');
+  await newCode(req, email, 'email', uid); return { ok: true, email };
 });
 POST('/api/me/email/verify', anyUser, async req => {
-  if (!req.friend) fail('Not for the owner account');
+  if (!req.friend) {
+    const email = cleanEmail(req.body?.email); await useCode(email, 'email', req.body?.code, 0);
+    if (await row('select 1 from hub_users where email=$1', [email])) fail('That email is already used by another account.');
+    await saveHub({ ownerEmail: email, ownerEmailOk: true }); return meJson(null);
+  }
   const email = cleanEmail(req.body?.email); await useCode(email, 'email', req.body?.code, req.friend.id);
   if (await emailTaken(email, req.friend.id)) fail('That email is already used by another account.');
   await Q('update hub_users set email=$1, email_ok=true where id=$2', [email, req.friend.id]);
@@ -9597,7 +9617,7 @@ async function anyUser(req) {
   req.owner = true;
 }
 const meJson = u => u ? { role: 'friend', id: u.id, username: u.username, name: u.name, emoji: u.emoji, privacy: u.privacy, alpaca: !!u.alpaca, autoleague: u.autoleague, email: u.email || null, emailOk: !!u.email_ok, emailOn: EMAIL_ON() }
-  : { role: 'owner', id: 0, username: APP_USER, name: HS.hubOwnerName || APP_USER, emoji: HS.hubOwnerEmoji || '🥭', privacy: HS.hubOwnerPrivacy || 'everything', alpaca: true, autoleague: HS.hubOwnerAuto !== false };
+  : { role: 'owner', id: 0, username: APP_USER, name: HS.hubOwnerName || APP_USER, emoji: HS.hubOwnerEmoji || '🥭', privacy: HS.hubOwnerPrivacy || 'everything', alpaca: true, autoleague: HS.hubOwnerAuto !== false, email: HS.ownerEmail || null, emailOk: !!HS.ownerEmailOk, emailOn: EMAIL_ON() };
 GET('/api/me', anyUser, async req => meJson(req.friend));
 PATCH('/api/me', anyUser, async req => {
   const b = req.body || {}, priv = ['returns', 'holdings', 'everything'].includes(b.privacy) ? b.privacy : undefined;

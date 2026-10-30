@@ -1,6 +1,6 @@
 {
   "name": "mango-paper-trading",
-  "version": "5.1.0",
+  "version": "5.1.1",
   "private": true,
   "description": "Paper trading with real market prices",
   "main": "server.js",
