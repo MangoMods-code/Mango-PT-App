@@ -4342,7 +4342,7 @@ async function runBotInner(id, { manual, dry, night }) {
   }
   // the market's mood (S&P 500 for stocks, Bitcoin for crypto) scales new buys; Autopilot and Buy and hold manage their own exposure
   const moodOn = S.moodSwitch !== false && !st.auto && OV.mood, mood = moodOn ? { stock: moodOf(series.SPY, 'The S&P 500'), crypto: moodOf(series.BTC, 'Bitcoin') } : null;
-  const dec = st.auto ? await autopilotDecide(bot, state, series, today, { dry, manual, dd, capital }) : rebalanceDue ? st.decide(ctx) : { weights: Object.fromEntries(Object.entries(held).map(([s, h]) => [s, h.weight || (h.qty * (priceOf(s) || h.entry)) / capital])), stops: {}, notes: Object.fromEntries(Object.keys(held).map(s => [s, 'Holding until the next monthly rebalance.'])) };
+  const dec = st.auto ? (night ? apNight(state, held, series, capital) : await autopilotDecide(bot, state, series, today, { dry, manual, dd, capital })) : rebalanceDue ? st.decide(ctx) : { weights: Object.fromEntries(Object.entries(held).map(([s, h]) => [s, h.weight || (h.qty * (priceOf(s) || h.entry)) / capital])), stops: {}, notes: Object.fromEntries(Object.keys(held).map(s => [s, 'Holding until the next monthly rebalance.'])) };
   if (!st.auto && dec.regime && !ctx.regime) ctx.regime = dec.regime;
   if (ctx.maxW > m.maxPosPct / 100 + 1e-9) log.risk.push(`Small wallet: a position can be up to ${Math.round(ctx.maxW * 100)}% (instead of ${m.maxPosPct}%) so each one is at least $${Math.max(25, m.minTrade * 2)}.`);
   if (st.auto) { ctx.regime = dec.regime; for (const k of Object.keys(dec.weights)) dec.weights[k] = Math.min(dec.weights[k], m.maxPosPct / 100); }
@@ -4545,6 +4545,7 @@ async function runBotInner(id, { manual, dry, night }) {
     for (const s of Object.keys(state)) if (!s.startsWith('_') && !pnow.some(p => p.sym === s)) delete state[s];
     if (rebalanceDue && st.rebalance !== 'none' && !night) state._lastRebalance = today;
     if (earlyWhy) state._lastEarly = today;
+    if (st.auto && !night) state._apCrypto = Object.fromEntries(Object.entries(dec.weights).filter(([k, w]) => isCrypto(k) && w > 0)); // the day plan's crypto, for the night shift
     const bought = log.orders.filter(o => o.side === 'buy').map(o => o.sym), sold = log.orders.filter(o => o.side === 'sell').map(o => o.sym);
     const optLines = log.orders.filter(o => o.side === 'opt').map(o => o.short);
     const summary = log.orders.length ? [bought.length ? 'Bought ' + bought.join(', ') : '', sold.length ? 'sold ' + sold.join(', ') : '', ...optLines].filter(Boolean).join('; ').replace(/^./, c => c.toUpperCase()) : 'No changes';
@@ -4617,7 +4618,23 @@ const NIGHT_SLOTS = { 1: ['01:00'], 2: ['23:00', '03:00'], 3: ['22:00', '02:00',
 const nightOn = () => S.nightOn !== false;
 const nightSlots = () => NIGHT_SLOTS[S.nightRuns] || NIGHT_SLOTS[2];
 const inNight = hm => ENV.NIGHT_OVERRIDE ? ENV.NIGHT_OVERRIDE === '1' : hm >= '21:00' || hm < '07:00'; // NIGHT_OVERRIDE is for tests only
-const nightEligible = b => { const syms = jsonOr(b.syms, []), st = STRATEGIES[b.strategy]; return syms.some(isCrypto) && st && !st.auto && st.rebalance === 'none'; };
+const nightEligible = b => { const syms = jsonOr(b.syms, []), st = STRATEGIES[b.strategy]; return syms.some(isCrypto) && st && (st.auto || st.rebalance === 'none'); };
+// Captain (Autopilot) at night: no re-planning. It looks after the crypto in its day plan: buys what the plan wanted but didn't get,
+// sells what the plan dropped, and lets go of a coin that fell 12% from its high since it was bought. Stocks wait for the day.
+function apNight(state, held, series, capital) {
+  const plan = state._apCrypto || {}, out = { weights: {}, stops: {}, notes: {}, regime: 'Night shift: looking after the crypto in today\'s plan (no re-planning until the day run)' };
+  for (const [s, h] of Object.entries(held)) {
+    const px = priceOf(s) || h.entry, w = h.qty * px / Math.max(1, capital);
+    if (!isCrypto(s)) { out.weights[s] = w; continue; }
+    const ser = series[s], j0 = ser && h.entryDate ? Math.max(0, lastIndexOnOrBefore(ser.d, h.entryDate)) : -1;
+    let hi = Math.max(h.high || 0, px); if (ser && j0 >= 0) for (let j = j0; j < ser.c.length; j++) if (ser.c[j] > hi) hi = ser.c[j];
+    if (hi > 0 && px < hi * 0.88) { out.weights[s] = 0; out.notes[s] = `Down ${Math.round((1 - px / hi) * 100)}% from its high since it was bought: the night shift sells it.`; }
+    else if (!(plan[s] > 0)) { out.weights[s] = 0; out.notes[s] = 'Today\'s plan dropped it: the night shift sells it.'; }
+    else { out.weights[s] = w; out.notes[s] = 'In today\'s plan: holding.'; }
+  }
+  for (const [s, w] of Object.entries(plan)) if (!held[s] && series[s] && priceOf(s)) { out.weights[s] = w; out.notes[s] = 'In today\'s plan but not bought yet: the night shift buys it.'; }
+  return out;
+}
 function nightJson() {
   const p = etParts(), hm = String(p.h).padStart(2, '0') + ':' + String(p.mi).padStart(2, '0');
   const slots = nightSlots(), next = slots.slice().sort((a, b) => ((a < '12:00' ? '24' + a : a) > (b < '12:00' ? '24' + b : b) ? 1 : -1)).find(s => (s < '12:00' ? '24' + s : s) > (hm < '12:00' ? '24' + hm : hm)) || slots[0];
@@ -9055,7 +9072,7 @@ const AIS = {
     about: 'Landlord buys steady stocks 100 shares at a time and sells a covered call on each lot every month, collecting income. It needs enough money for 100 shares and options turned on for its wallet.',
     syms: ['KO', 'PFE', 'VZ', 'T', 'CSCO', 'BAC', 'F', 'INTC'], min: 3000, risk: 'Lower' },
   autopilot: { name: 'Captain', emoji: '🧑‍✈️', tag: 'Runs tryouts of the others and backs what\'s working',
-    about: 'Captain keeps testing many ways of trading on recent prices and puts the money behind the ones doing best right now, re-planning as the market changes.',
+    about: 'Captain keeps testing many ways of trading on recent prices and puts the money behind the ones doing best right now, re-planning as the market changes. It trades stocks and crypto, and overnight it keeps checking its crypto every few hours: it buys coins its plan still wanted, sells ones the plan dropped, and lets go of a coin that falls 12% from its high.',
     syms: null, min: 200, risk: 'Medium' },
 };
 const AI_ORDER = ['momentum', 'trend', 'hold', 'rsi2', 'dual', 'lowvol', 'breakout', 'drift', 'tom', 'snapback', 'cycle', 'filings', 'covcall', 'autopilot'];
