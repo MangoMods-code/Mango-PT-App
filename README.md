@@ -2,7 +2,7 @@
 
 A paper trading app for iPhone with real market prices. It runs from the Home Screen and is built on Node and Postgres.
 
-**⬇️ [Download the latest version](https://github.com/MangoMods-code/Mango-PT-App/releases/latest)** · Current: [V5.2.0, Bots are now AIs](https://github.com/MangoMods-code/Mango-PT-App/releases/tag/V5.2.0) · [All releases](https://github.com/MangoMods-code/Mango-PT-App/releases)
+**⬇️ [Download the latest version](https://github.com/MangoMods-code/Mango-PT-App/releases/latest)** · Current: [V5.2.1, Fewer buzzes](https://github.com/MangoMods-code/Mango-PT-App/releases/tag/V5.2.1) · [All releases](https://github.com/MangoMods-code/Mango-PT-App/releases)
 
 Trade stocks, ETFs and crypto with practice money. You can also put strategies to work as bots, let Autopilot run a mix of them, and watch it all happen in **Mango HQ**: a small isometric world where your bots walk around and a Council of up to ten members votes on every trade. If you connect an Alpaca account, the same app can trade it, on paper or with real money, on a separate side with its own safeguards.
 

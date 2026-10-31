@@ -2199,12 +2199,37 @@ async function notify(kind, title, body, o = {}) {
     broadcast({ t: 'evt', e: 'notif', n: { id, kind, title, body, sym: o.sym || null, wid: o.wid || null, ts: tsMs(r.ts), read: false }, data: o.data || null });
   } catch (e) { warn('inbox', e.message); }
   const setting = PUSH_SETTING[kind];
-  if (o.push !== false && (!setting || S[setting]) && !quietNow()) {
+  if (o.push !== false && (!setting || S[setting])) {
     const url = o.url || (o.sym ? '/#/asset/' + encodeURIComponent(o.sym) : '/#/inbox');
-    sendPush(title, body, { url, tag: o.tag || `${kind}-${id || Date.now()}`, id }).catch(e => warn('push', e.message));
+    const item = { title, body, url, tag: o.tag || `${kind}-${id || Date.now()}`, id, kind };
+    if (quietNow()) { if (kind === 'real') sendPush(title, body, item).catch(e => warn('push', e.message)); else held.push(item); } // real money always gets through
+    else if (PUSH_NOW.has(kind)) sendPush(title, body, item).catch(e => warn('push', e.message));
+    else queuePush(item);
   }
   return id;
 }
+// Pushes that arrive close together go out as one ("12 updates from Mango") instead of a buzz each;
+// what comes in during quiet hours waits and goes out as one summary when they end.
+const PUSH_NOW = new Set(['real', 'alert']); // real money and your own price alerts are never held back
+let pending = [], pendTimer = null, pendFirst = 0;
+const held = [];
+function queuePush(item) {
+  pending.push(item); if (!pendFirst) pendFirst = Date.now();
+  clearTimeout(pendTimer);
+  // wait for a quiet 20 seconds, but never more than 2 minutes after the first one
+  pendTimer = setTimeout(flushPush, Math.max(0, Math.min(20e3, pendFirst + 120e3 - Date.now())));
+}
+function bundle(list, lead) {
+  if (list.length === 1 && !lead) { const x = list[0]; return [x.title, x.body, x]; }
+  const n = list.length, shown = list.slice(0, 6).map(x => '• ' + x.title.replace(/^[^\w$]+\s*/u, '')).join('\n');
+  return [lead ? `🥭 ${lead}: ${n} update${n === 1 ? '' : 's'}` : `🥭 ${n} updates from Mango`, shown + (n > 6 ? `\n…and ${n - 6} more in the inbox` : ''), { url: '/#/inbox', tag: 'bundle-' + Date.now() }];
+}
+function flushPush() {
+  const list = pending; pending = []; pendFirst = 0; pendTimer = null;
+  if (!list.length) return;
+  const [t, b, x] = bundle(list); sendPush(t, b, x).catch(e => warn('push', e.message));
+}
+setInterval(() => { if (held.length && !quietNow()) { const list = held.splice(0); const [t, b, x] = bundle(list, 'While notifications were quiet'); sendPush(t, b, x).catch(e => warn('push', e.message)); } }, 60e3).unref?.();
 
 // =====================================================================
 // Portfolio history and analytics
@@ -7355,6 +7380,7 @@ GET('/api/buzz', auth, async req => {
 });
 
 // Test-only helpers (only with MANGO_FAST_JOBS, which Railway never sets).
+  POST('/api/test/notify', auth, async req => { const n = clamp(+req.body.n || 1, 1, 50); for (let i = 0; i < n; i++) await notify(req.body.kind || 'bot', `Test ${i + 1}`, 'body'); return { ok: true }; });
   POST('/api/test/aisync', auth, async () => { await aiSync(); return { ok: true }; });
 if (ENV.MANGO_FAST_JOBS) {
   POST('/api/test/weekly', auth, async () => { await kvSet('job_botweekly', ''); const p = etParts(); return weeklySummary({ ...p, y: 2026, m: 10, d: 23 }, '16:30', 'test-' + Date.now()); });
@@ -9312,7 +9338,7 @@ const ICONS = {};
 const icon = (name, fn) => ICONS[name] || (ICONS[name] = fn());
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD646"/><stop offset=".5" stop-color="#FFA028"/><stop offset="1" stop-color="#FA5256"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="#1E1430"/><ellipse cx="31" cy="36" rx="18" ry="22" transform="rotate(30 31 36)" fill="url(#g)"/><path d="M20 41l6.5-6 5 3.5 9.5-10" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37 28.5h4.5V33" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="45" cy="11.5" rx="9" ry="4.6" transform="rotate(-24 45 11.5)" fill="#3BD68A"/></svg>`;
 let BUILD = 'dev', INDEX = null, INDEX_GZ = null;
-const APP_VERSION = '5.2.0'; // stamped by build.sh from package.json
+const APP_VERSION = '5.2.1'; // stamped by build.sh from package.json
 function loadIndex() {
   const file = path.join(__dirname, 'index.html');
   let html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '<!doctype html><title>Mango</title><p>index.html is missing next to server.js.</p>';

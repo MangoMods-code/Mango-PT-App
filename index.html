@@ -1661,7 +1661,7 @@ html[data-standby] #halt-bar { bottom: calc(var(--nav-h, 64px) + env(safe-area-i
 // ===================================================================
 // Mango Paper Trading — app
 // ===================================================================
-const BUILD = '__BUILD__', APP_VERSION = '5.2.0';
+const BUILD = '__BUILD__', APP_VERSION = '5.2.1';
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -8556,6 +8556,16 @@ PAGES.costs = {
 // Newest first. Each release: version, date, a one-line headline and grouped notes.
 // ===================================================================
 const CHANGELOG = [
+  { v: '5.2.1', d: '2026-10-30', title: 'Fewer buzzes', short: [
+    'Notifications that come in together arrive as one ("14 updates from Mango")',
+    'Quiet hours hold notifications and send one summary when they end',
+  ], groups: [
+    ['Notifications', [
+      'When several things happen at once (a dozen AIs trading at the open, a batch of dividends), your phone gets one notification listing them instead of one each. Every single one is still in the inbox.',
+      'A lone notification still comes on its own. Price alerts you set and anything about real money always come right away.',
+      'During quiet hours (Settings → Notifications) nothing buzzes. When quiet hours end you get one summary of what happened.',
+    ]],
+  ] },
   { v: '5.2.0', d: '2026-10-30', title: 'Bots are now AIs', short: [
     'Every trading method is now an AI with a name: Comet, Tide, Oak, Bargain and more',
     'Pick an AI, give it money and a wallet. Its settings are fixed and tuned for you',
